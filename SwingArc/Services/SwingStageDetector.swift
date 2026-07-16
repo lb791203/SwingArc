@@ -211,6 +211,7 @@ struct SwingFrameEvidence: Equatable {
     let sourceFrameIndex: Int
     let time: Double
     let pose: SwingPoseSample?
+    let rawPose: SwingPoseSample?
     let objectEvidence: SwingObjectEvidence
     let leadArm: LeadArmSide
     let leadArmAngle: Double?
@@ -224,6 +225,400 @@ struct SwingFrameEvidence: Equatable {
     let headSpeed: Double
     let hipSpeed: Double
     let poseCoverage: Double
+
+    init(
+        sourceFrameIndex: Int,
+        time: Double,
+        pose: SwingPoseSample?,
+        rawPose: SwingPoseSample? = nil,
+        objectEvidence: SwingObjectEvidence,
+        leadArm: LeadArmSide,
+        leadArmAngle: Double?,
+        leadArmExtension: Double?,
+        shoulderAngle: Double?,
+        hipAngle: Double?,
+        handCenter: CGPoint?,
+        hipCenter: CGPoint?,
+        handVelocity: CGPoint,
+        handAcceleration: CGPoint,
+        headSpeed: Double,
+        hipSpeed: Double,
+        poseCoverage: Double
+    ) {
+        self.sourceFrameIndex = sourceFrameIndex
+        self.time = time
+        self.pose = pose
+        self.rawPose = rawPose
+        self.objectEvidence = objectEvidence
+        self.leadArm = leadArm
+        self.leadArmAngle = leadArmAngle
+        self.leadArmExtension = leadArmExtension
+        self.shoulderAngle = shoulderAngle
+        self.hipAngle = hipAngle
+        self.handCenter = handCenter
+        self.hipCenter = hipCenter
+        self.handVelocity = handVelocity
+        self.handAcceleration = handAcceleration
+        self.headSpeed = headSpeed
+        self.hipSpeed = hipSpeed
+        self.poseCoverage = poseCoverage
+    }
+}
+
+enum SwingMotionDirection: Equatable {
+    case backswing
+    case downswing
+    case stable
+}
+
+enum SwingEvidenceQualityFlag: Hashable {
+    case missingHands
+    case missingLeadArm
+    case labelSwapSuspected
+}
+
+struct SwingTemporalFrame: Equatable {
+    let frame: SwingFrameEvidence
+    let direction: SwingMotionDirection
+    let sustainedBackswing: Bool
+    let sustainedDownswing: Bool
+    let sustainedFollowThrough: Bool
+    let isAddressBoundary: Bool
+    let isTopPlateauEnd: Bool
+    let isFinishPlateauStart: Bool
+    let shaftAngleContinuity: Double
+    let ballStability: Double
+    let qualityFlags: Set<SwingEvidenceQualityFlag>
+}
+
+enum SwingEvidenceTimeline {
+    static let directionWindow = 0.15
+    static let stableWindow = 0.25
+    static let directionVoteRatio = 0.75
+    static let stableVoteRatio = 0.75
+    static let handDirectionThreshold = 0.12
+    static let bodyStabilityThreshold = 0.08
+
+    private static let handStabilityThreshold = 0.18
+    private static let minimumWindowCoverage = 0.80
+    private static let stableBallDistanceThreshold = 0.025
+    private static let labelSwapAxisTolerance = 12.0
+
+    static func build(from rawEvidence: [SwingFrameEvidence]) -> [SwingTemporalFrame] {
+        let evidence = rawEvidence.sorted {
+            $0.time == $1.time
+                ? $0.sourceFrameIndex < $1.sourceFrameIndex
+                : $0.time < $1.time
+        }
+        guard !evidence.isEmpty else { return [] }
+
+        let rawDirections = evidence.map(frameDirection)
+        let pastWindows = evidence.indices.map {
+            timedIndices(endingAt: $0, duration: directionWindow, evidence: evidence)
+        }
+        let futureWindows = evidence.indices.map {
+            timedIndices(startingAt: $0, duration: directionWindow, evidence: evidence)
+        }
+        let pastDirections = pastWindows.map {
+            directionVote(indices: $0, duration: directionWindow, evidence: evidence)
+        }
+        let futureDirections = futureWindows.map { indices in
+            directionVote(
+                indices: Array(indices.dropFirst()),
+                duration: directionWindow,
+                evidence: evidence
+            )
+        }
+        let stablePast = evidence.indices.map {
+            stabilityVote(
+                indices: timedIndices(endingAt: $0, duration: stableWindow, evidence: evidence),
+                duration: stableWindow,
+                evidence: evidence
+            )
+        }
+        let stableFuture = evidence.indices.map {
+            stabilityVote(
+                indices: timedIndices(startingAt: $0, duration: stableWindow, evidence: evidence),
+                duration: stableWindow,
+                evidence: evidence
+            )
+        }
+
+        let addressIndex = evidence.indices.first { index in
+            guard index < evidence.index(before: evidence.endIndex) else { return false }
+            return stablePast[index]
+                && rawDirections[index] == .stable
+                && rawDirections[index + 1] != .stable
+                && futureDirections[index] == .backswing
+        }
+        let topIndex = evidence.indices.first { index in
+            guard index > (addressIndex ?? -1),
+                  index < evidence.index(before: evidence.endIndex) else { return false }
+            return rawDirections[index] == .stable
+                && rawDirections[index + 1] != .stable
+                && pastDirections[index] != .downswing
+                && futureDirections[index] == .downswing
+        }
+        let finishIndex = evidence.indices.first { index in
+            guard index > evidence.startIndex,
+                  index > (topIndex ?? addressIndex ?? -1) else { return false }
+            return rawDirections[index] == .stable
+                && rawDirections[index - 1] != .stable
+                && stableFuture[index]
+                && pastDirections[index] == .backswing
+        }
+
+        return evidence.indices.map { index in
+            let surrounding = uniqueSorted(pastWindows[index] + futureWindows[index])
+            return SwingTemporalFrame(
+                frame: evidence[index],
+                direction: directionVote(
+                    indices: surrounding,
+                    duration: directionWindow,
+                    evidence: evidence
+                ),
+                sustainedBackswing: futureDirections[index] == .backswing,
+                sustainedDownswing: futureDirections[index] == .downswing,
+                sustainedFollowThrough: futureDirections[index] == .backswing,
+                isAddressBoundary: index == addressIndex,
+                isTopPlateauEnd: index == topIndex,
+                isFinishPlateauStart: index == finishIndex,
+                shaftAngleContinuity: shaftContinuity(at: index, evidence: evidence),
+                ballStability: stableBallVote(at: index, evidence: evidence),
+                qualityFlags: qualityFlags(at: index, evidence: evidence)
+            )
+        }
+    }
+
+    private static func timedIndices(
+        endingAt index: Int,
+        duration: Double,
+        evidence: [SwingFrameEvidence]
+    ) -> [Int] {
+        var start = index
+        while start > evidence.startIndex,
+              evidence[index].time - evidence[start].time < duration {
+            start -= 1
+        }
+        return Array(start...index)
+    }
+
+    private static func timedIndices(
+        startingAt index: Int,
+        duration: Double,
+        evidence: [SwingFrameEvidence]
+    ) -> [Int] {
+        var end = index
+        while end < evidence.index(before: evidence.endIndex),
+              evidence[end].time - evidence[index].time < duration {
+            end += 1
+        }
+        return Array(index...end)
+    }
+
+    private static func directionVote(
+        indices: [Int],
+        duration: Double,
+        evidence: [SwingFrameEvidence]
+    ) -> SwingMotionDirection {
+        let indices = uniqueSorted(indices)
+        guard windowSpans(indices, duration: duration, evidence: evidence) else { return .stable }
+        let directions = indices.compactMap { frameDirection(evidence[$0]) }
+        guard !directions.isEmpty else { return .stable }
+        let backswingRatio = Double(directions.filter { $0 == .backswing }.count) / Double(directions.count)
+        if backswingRatio >= directionVoteRatio { return .backswing }
+        let downswingRatio = Double(directions.filter { $0 == .downswing }.count) / Double(directions.count)
+        return downswingRatio >= directionVoteRatio ? .downswing : .stable
+    }
+
+    private static func stabilityVote(
+        indices: [Int],
+        duration: Double,
+        evidence: [SwingFrameEvidence]
+    ) -> Bool {
+        let indices = uniqueSorted(indices)
+        guard windowSpans(indices, duration: duration, evidence: evidence) else { return false }
+        let validFrames = indices.compactMap { index -> SwingFrameEvidence? in
+            let frame = evidence[index]
+            guard frame.handCenter != nil,
+                  frame.hipCenter != nil,
+                  frame.pose?.head != nil,
+                  frame.headSpeed.isFinite,
+                  frame.hipSpeed.isFinite,
+                  frame.handVelocity.x.isFinite,
+                  frame.handVelocity.y.isFinite else { return nil }
+            return frame
+        }
+        guard !validFrames.isEmpty else { return false }
+        let stableCount = validFrames.filter { frame in
+            frame.headSpeed <= bodyStabilityThreshold
+                && frame.hipSpeed <= bodyStabilityThreshold
+                && hypot(Double(frame.handVelocity.x), Double(frame.handVelocity.y)) <= handStabilityThreshold
+        }.count
+        return Double(stableCount) / Double(validFrames.count) >= stableVoteRatio
+    }
+
+    private static func frameDirection(_ frame: SwingFrameEvidence) -> SwingMotionDirection? {
+        guard frame.handCenter != nil, frame.handVelocity.y.isFinite else { return nil }
+        if frame.handVelocity.y <= -handDirectionThreshold { return .backswing }
+        if frame.handVelocity.y >= handDirectionThreshold { return .downswing }
+        return .stable
+    }
+
+    private static func shaftContinuity(
+        at index: Int,
+        evidence: [SwingFrameEvidence]
+    ) -> Double {
+        let indices = surroundingIndices(at: index, duration: directionWindow, evidence: evidence)
+        let angles = indices.compactMap { evidence[$0].objectEvidence.shaft }.map { shaft in
+            normalizedAxisAngle(SwingGeometry.lineAngle(from: shaft.start, to: shaft.end))
+        }
+        guard angles.count >= 2 else { return 0 }
+        let deltas = zip(angles, angles.dropFirst()).map(angularAxisDistance)
+        guard let medianDelta = median(deltas) else { return 0 }
+        return 1 - min(1, medianDelta / 25)
+    }
+
+    private static func stableBallVote(
+        at index: Int,
+        evidence: [SwingFrameEvidence]
+    ) -> Double {
+        let centers = surroundingIndices(
+            at: index,
+            duration: directionWindow,
+            evidence: evidence
+        ).compactMap { frameIndex in
+            evidence[frameIndex].objectEvidence.stableBall
+                ?? evidence[frameIndex].objectEvidence.ball?.center
+        }
+        guard !centers.isEmpty,
+              let medianX = median(centers.map { Double($0.x) }),
+              let medianY = median(centers.map { Double($0.y) }) else { return 0 }
+        let stableCount = centers.filter { center in
+            hypot(Double(center.x) - medianX, Double(center.y) - medianY)
+                <= stableBallDistanceThreshold
+        }.count
+        return Double(stableCount) / Double(centers.count)
+    }
+
+    private static func qualityFlags(
+        at index: Int,
+        evidence: [SwingFrameEvidence]
+    ) -> Set<SwingEvidenceQualityFlag> {
+        var flags: Set<SwingEvidenceQualityFlag> = []
+        let frame = evidence[index]
+        if frame.handCenter == nil { flags.insert(.missingHands) }
+        if frame.leadArm == .unknown { flags.insert(.missingLeadArm) }
+        if index > evidence.startIndex,
+           labelEndpointsReversed(
+               previous: evidence[index - 1].rawPose ?? evidence[index - 1].pose,
+               current: frame.rawPose ?? frame.pose
+           ) {
+            flags.insert(.labelSwapSuspected)
+        }
+        return flags
+    }
+
+    private static func labelEndpointsReversed(
+        previous: SwingPoseSample?,
+        current: SwingPoseSample?
+    ) -> Bool {
+        guard let previous, let current else { return false }
+        return axisEndpointsReversed(
+            previousFirst: previous.leftShoulder,
+            previousSecond: previous.rightShoulder,
+            currentFirst: current.leftShoulder,
+            currentSecond: current.rightShoulder
+        ) || axisEndpointsReversed(
+            previousFirst: previous.leftHip,
+            previousSecond: previous.rightHip,
+            currentFirst: current.leftHip,
+            currentSecond: current.rightHip
+        )
+    }
+
+    private static func axisEndpointsReversed(
+        previousFirst: CGPoint?,
+        previousSecond: CGPoint?,
+        currentFirst: CGPoint?,
+        currentSecond: CGPoint?
+    ) -> Bool {
+        guard let previousFirst, let previousSecond, let currentFirst, let currentSecond else {
+            return false
+        }
+        let previousVector = CGVector(
+            dx: previousSecond.x - previousFirst.x,
+            dy: previousSecond.y - previousFirst.y
+        )
+        let currentVector = CGVector(
+            dx: currentSecond.x - currentFirst.x,
+            dy: currentSecond.y - currentFirst.y
+        )
+        let dotProduct = previousVector.dx * currentVector.dx + previousVector.dy * currentVector.dy
+        guard dotProduct < 0 else { return false }
+        let previousAngle = normalizedAxisAngle(
+            atan2(Double(previousVector.dy), Double(previousVector.dx)) * 180 / .pi
+        )
+        let currentAngle = normalizedAxisAngle(
+            atan2(Double(currentVector.dy), Double(currentVector.dx)) * 180 / .pi
+        )
+        return angularAxisDistance(previousAngle, currentAngle) <= labelSwapAxisTolerance
+    }
+
+    private static func surroundingIndices(
+        at index: Int,
+        duration: Double,
+        evidence: [SwingFrameEvidence]
+    ) -> [Int] {
+        uniqueSorted(
+            timedIndices(endingAt: index, duration: duration, evidence: evidence)
+                + timedIndices(startingAt: index, duration: duration, evidence: evidence)
+        )
+    }
+
+    private static func windowSpans(
+        _ indices: [Int],
+        duration: Double,
+        evidence: [SwingFrameEvidence]
+    ) -> Bool {
+        guard let first = indices.first, let last = indices.last else { return false }
+        return evidence[last].time - evidence[first].time + 0.000_000_001
+            >= duration * minimumWindowCoverage
+    }
+
+    private static func uniqueSorted(_ indices: [Int]) -> [Int] {
+        Array(Set(indices)).sorted()
+    }
+
+    private static func normalizedAxisAngle(_ angle: Double) -> Double {
+        var normalized = angle.truncatingRemainder(dividingBy: 180)
+        if normalized < 0 { normalized += 180 }
+        return normalized
+    }
+
+    private static func angularAxisDistance(_ first: Double, _ second: Double) -> Double {
+        let difference = abs(first - second)
+        return min(difference, 180 - difference)
+    }
+
+    private static func median(_ values: [Double]) -> Double? {
+        guard !values.isEmpty else { return nil }
+        let sorted = values.sorted()
+        let middle = sorted.count / 2
+        if sorted.count.isMultiple(of: 2) {
+            return (sorted[middle - 1] + sorted[middle]) / 2
+        }
+        return sorted[middle]
+    }
+}
+
+extension Array where Element == SwingTemporalFrame {
+    var adaptiveBoundaryEvidence: AdaptiveBoundaryEvidence {
+        AdaptiveBoundaryEvidence(
+            hasAddressBoundary: contains(where: \.isAddressBoundary),
+            hasFinishBoundary: contains(where: \.isFinishPlateauStart)
+        )
+    }
 }
 
 enum SwingGeometry {
@@ -271,7 +666,7 @@ enum SwingFeatureExtractor {
         var previousHip: CGPoint?
         var previousTime: Double?
 
-        return frames.map { frame in
+        return frames.enumerated().map { index, frame in
             let pose = frame.pose
             let hand = pose.flatMap { SwingGeometry.center($0.leftWrist, $0.rightWrist) }
             let hip = pose.flatMap { SwingGeometry.center($0.leftHip, $0.rightHip) }
@@ -306,6 +701,7 @@ enum SwingFeatureExtractor {
                 sourceFrameIndex: frame.sourceFrameIndex,
                 time: frame.time,
                 pose: pose,
+                rawPose: sortedFrames[index].pose,
                 objectEvidence: frame.objectEvidence,
                 leadArm: leadArm,
                 leadArmAngle: angleFromHorizontal(armPoints.shoulder, armPoints.wrist),

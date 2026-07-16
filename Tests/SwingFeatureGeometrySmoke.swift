@@ -113,5 +113,35 @@ struct SwingFeatureGeometrySmoke {
             },
             "Shoulder and hip axes must remain unchanged when Vision exchanges left/right labels"
         )
+        let alternatingTorsoTimeline = SwingEvidenceTimeline.build(from: alternatingTorsoEvidence)
+        precondition(
+            alternatingTorsoTimeline.allSatisfy {
+                $0.direction == .stable
+                    && !$0.sustainedBackswing
+                    && !$0.sustainedDownswing
+            },
+            "Alternating left/right torso labels must not create a false direction transition"
+        )
+        precondition(
+            alternatingTorsoTimeline.contains { $0.qualityFlags.contains(.labelSwapSuspected) },
+            "Reversed raw torso endpoints should be reported without changing the undirected axes"
+        )
+
+        let isolatedSwapFrames = (0..<9).map { index in
+            SwingFrameSample(
+                sourceFrameIndex: 100 + index,
+                time: Double(index) / 30,
+                pose: index == 4 ? swappedTorsoPose : pose,
+                objectEvidence: .empty
+            )
+        }
+        let isolatedSwapTimeline = SwingEvidenceTimeline.build(
+            from: SwingFeatureExtractor.extract(frames: isolatedSwapFrames)
+        )
+        precondition(
+            isolatedSwapTimeline.first { $0.frame.sourceFrameIndex == 104 }?
+                .qualityFlags.contains(.labelSwapSuspected) == true,
+            "A single raw label reversal must remain visible after feature smoothing"
+        )
     }
 }
