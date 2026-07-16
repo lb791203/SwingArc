@@ -28,7 +28,10 @@ struct ContentView: View {
     @State private var activeTool: DrawingTool = .line
     @State private var selectedColor: Color = .green
     @State private var strokeWidth: CGFloat = 3.0
-    @State private var isKeyframeMode: Bool = true // 默认关键帧画线
+    @State private var isKeyframeMode: Bool = false // 默认持续显示，避免画线在离开当前帧后消失
+    @State private var isDrawingToolTrayVisible = true
+    @State private var committedVideoZoomScale: CGFloat = 1
+    @GestureState private var pinchVideoZoomScale: CGFloat = 1
     
     // 自动分析开关
     @State private var showPoseSkeleton = false
@@ -61,6 +64,10 @@ struct ContentView: View {
 
     private var visibleKeyframes: [KeyframeMarker] {
         analysisPresentation.allowsPoseOverlays ? keyframes : []
+    }
+
+    private var videoZoomScale: CGFloat {
+        VideoZoomPolicy.clampedScale(committedVideoZoomScale * pinchVideoZoomScale)
     }
     
     var body: some View {
@@ -294,29 +301,44 @@ struct ContentView: View {
     private func videoViewportZone(isLandscape: Bool) -> some View {
         ZStack {
             if let player = playbackManager.player {
-                // 底层视频画面
-                PlayerViewRepresentable(player: player) { rect in
-                    playbackManager.videoRect = rect
+                // 视频、画线和姿态叠层放进同一个缩放坐标系，确保放大后不会错位。
+                ZStack {
+                    PlayerViewRepresentable(player: player) { rect in
+                        playbackManager.videoRect = rect
+                    }
+
+                    if showGrid {
+                        GridView(rect: playbackManager.videoRect)
+                            .allowsHitTesting(false)
+                    }
+
+                    DrawingOverlay(
+                        playbackManager: playbackManager,
+                        drawings: $drawings,
+                        activeTool: $activeTool,
+                        selectedColor: $selectedColor,
+                        strokeWidth: $strokeWidth,
+                        isKeyframeMode: $isKeyframeMode,
+                        showPoseSkeleton: showPoseSkeleton,
+                        showHeadStability: showHeadStability,
+                        showSpineAngle: showSpineAngle
+                    )
                 }
-                
-                // 静态校正格栅线
-                if showGrid {
-                    GridView(rect: playbackManager.videoRect)
-                        .allowsHitTesting(false) // 确保网格线不会拦截触摸手势
-                }
-                
-                // 顶层画板与自动追踪层
-                DrawingOverlay(
-                    playbackManager: playbackManager,
-                    drawings: $drawings,
-                    activeTool: $activeTool,
-                    selectedColor: $selectedColor,
-                    strokeWidth: $strokeWidth,
-                    isKeyframeMode: $isKeyframeMode,
-                    showPoseSkeleton: showPoseSkeleton,
-                    showHeadStability: showHeadStability,
-                    showSpineAngle: showSpineAngle
+                .scaleEffect(videoZoomScale)
+                .simultaneousGesture(
+                    MagnificationGesture()
+                        .updating($pinchVideoZoomScale) { value, state, _ in
+                            state = value
+                        }
+                        .onEnded { value in
+                            committedVideoZoomScale = VideoZoomPolicy.clampedScale(committedVideoZoomScale * value)
+                        }
                 )
+                .onTapGesture(count: 2) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        committedVideoZoomScale = 1
+                    }
+                }
                 
                 // 竖屏浮动紧凑工具栏 (左侧浮动，最大化垂直分析空间)
                 if !isLandscape {
@@ -365,10 +387,26 @@ struct ContentView: View {
                         
                         Spacer()
                         
-                        // 画笔工具箱 (右侧)
+                        // 画笔工具箱 (右侧)：选中当前工具可收起，折叠后保留一个入口。
                         VStack(spacing: 12) {
-                            ForEach(DrawingTool.allCases) { tool in
-                                Button(action: { activeTool = tool }) {
+                            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isDrawingToolTrayVisible.toggle() } }) {
+                                Image(systemName: isDrawingToolTrayVisible ? "xmark" : "pencil.tip")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 36, height: 36)
+                                    .background(Color.white.opacity(0.12))
+                                    .clipShape(Circle())
+                            }
+
+                            if isDrawingToolTrayVisible {
+                                ForEach(DrawingTool.allCases) { tool in
+                                    Button(action: {
+                                        if activeTool == tool {
+                                            withAnimation(.easeInOut(duration: 0.2)) { isDrawingToolTrayVisible = false }
+                                        } else {
+                                            activeTool = tool
+                                        }
+                                    }) {
                                     Image(systemName: tool.iconName)
                                         .font(.system(size: 16))
                                         .foregroundColor(activeTool == tool ? .green : .white)
@@ -379,14 +417,14 @@ struct ContentView: View {
                                                 .stroke(activeTool == tool ? Color.green : Color.white.opacity(0.3), lineWidth: 1.5)
                                         )
                                         .clipShape(Circle())
+                                    }
                                 }
-                            }
                             
-                            Rectangle().fill(Color.white.opacity(0.3)).frame(width: 24, height: 1)
+                                Rectangle().fill(Color.white.opacity(0.3)).frame(width: 24, height: 1)
                             
                             // 颜色选择浮动点
-                            let colors: [Color] = [.green, .red, .cyan]
-                            ForEach(colors, id: \.self) { color in
+                                let colors: [Color] = [.green, .red, .cyan]
+                                ForEach(colors, id: \.self) { color in
                                 Circle()
                                     .fill(color)
                                     .frame(width: 14, height: 14)
@@ -397,27 +435,37 @@ struct ContentView: View {
                                     .onTapGesture {
                                         selectedColor = color
                                     }
-                            }
+                                }
+
+                                Button(action: { isKeyframeMode.toggle() }) {
+                                    Image(systemName: isKeyframeMode ? "pin.fill" : "pin.slash")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundColor(isKeyframeMode ? .orange : .white)
+                                        .frame(width: 30, height: 30)
+                                        .background(Color.white.opacity(0.1))
+                                        .clipShape(Circle())
+                                }
                             
-                            Rectangle().fill(Color.white.opacity(0.3)).frame(width: 24, height: 1)
+                                Rectangle().fill(Color.white.opacity(0.3)).frame(width: 24, height: 1)
                             
                             // 撤销与清除快捷键
-                            Button(action: undoDrawing) {
+                                Button(action: undoDrawing) {
                                 Image(systemName: "arrow.uturn.backward")
                                     .font(.system(size: 12, weight: .bold))
                                     .foregroundColor(.white)
                                     .frame(width: 30, height: 30)
                                     .background(Color.white.opacity(0.1))
                                     .clipShape(Circle())
-                            }
+                                }
                             
-                            Button(action: clearAllDrawings) {
+                                Button(action: clearAllDrawings) {
                                 Image(systemName: "trash")
                                     .font(.system(size: 12, weight: .bold))
                                     .foregroundColor(.red)
                                     .frame(width: 30, height: 30)
                                     .background(Color.white.opacity(0.1))
                                     .clipShape(Circle())
+                                }
                             }
                         }
                         .padding(.vertical, 10)
@@ -679,6 +727,7 @@ struct ContentView: View {
                 HStack(spacing: 8) {
                     ForEach(SwingStage.allCases) { stage in
                         let savedMarker = keyframes.first(where: { $0.stage == stage.rawValue })
+                        let detection = analysisPresentation.detection(for: stage)
                         
                         Button(action: {
                             print("DEBUG: Tap stage button \(stage.shortName)")
@@ -694,6 +743,11 @@ struct ContentView: View {
                                     .frame(width: 6, height: 6)
                                 Text(savedMarker == nil ? "\(stage.shortName) 未确定" : stage.shortName)
                                     .font(.system(size: 11, weight: .bold))
+                                if detection?.status == .lowConfidence {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.orange)
+                                }
                                 if savedMarker != nil {
                                     Image(systemName: "checkmark")
                                         .font(.system(size: 9))
@@ -944,7 +998,7 @@ struct ContentView: View {
     
     /// 标记节点
     private func saveKeyframe(stage: SwingStage) {
-        let marker = KeyframeMarker(time: playbackManager.currentTime, stage: stage)
+        let marker = KeyframeMarker(time: playbackManager.currentTime, stage: stage, source: .manual)
         // 滤重，防止同阶段多次标记
         keyframes.removeAll(where: { $0.stage == stage.rawValue })
         keyframes.append(marker)
@@ -965,7 +1019,7 @@ struct ContentView: View {
     
     private func runAISwingAnalysis() {
         playbackManager.analyzeSwing { result in
-            self.keyframes = result.detectedMarkers
+            self.keyframes = StageMarkerMerger.merge(existing: self.keyframes, automatic: result.detectedMarkers)
             withAnimation(.spring()) { self.showAnalysisReport = true }
         }
     }
@@ -979,7 +1033,9 @@ struct ContentView: View {
 
         pendingMediaAction = nil
         let time = playbackManager.currentTime
-        let drawingsForFrame = drawings.filter { $0.shouldShow(at: time) }
+        let drawingsForFrame = drawings.filter {
+            DrawingDisplayPolicy.shouldShow($0, at: time, isKeyframeMode: isKeyframeMode)
+        }
         isExporting = true
 
         Task {
@@ -1045,6 +1101,17 @@ struct ContentView: View {
 
                 if let analysisFailureMessage {
                     Text(analysisFailureMessage)
+                        .font(.system(size: 11))
+                        .foregroundColor(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color.orange.opacity(0.10))
+                        .cornerRadius(12)
+                }
+
+                let lowConfidenceStages = analysisPresentation.detections.filter { $0.status == .lowConfidence }
+                if !lowConfidenceStages.isEmpty {
+                    Text("低置信度：\(lowConfidenceStages.map { $0.stage.shortName }.joined(separator: "、"))，建议逐帧核对。")
                         .font(.system(size: 11))
                         .foregroundColor(.orange)
                         .frame(maxWidth: .infinity, alignment: .leading)

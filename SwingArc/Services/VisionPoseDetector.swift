@@ -26,6 +26,30 @@ struct PoseEstimationResult: Equatable {
     func point(for name: String) -> CGPoint? {
         return keypoints[name]?.position
     }
+
+    var aggregateConfidence: Float {
+        guard !keypoints.isEmpty else { return 0 }
+        return keypoints.values.map(\.confidence).reduce(0, +) / Float(keypoints.count)
+    }
+}
+
+extension SwingPoseSample {
+    init(time: Double, pose: PoseEstimationResult) {
+        self.init(
+            time: time,
+            leftWrist: pose.point(for: "leftWrist"),
+            rightWrist: pose.point(for: "rightWrist"),
+            leftElbow: pose.point(for: "leftElbow"),
+            rightElbow: pose.point(for: "rightElbow"),
+            leftShoulder: pose.point(for: "leftShoulder"),
+            rightShoulder: pose.point(for: "rightShoulder"),
+            leftHip: pose.point(for: "leftHip"),
+            rightHip: pose.point(for: "rightHip"),
+            head: pose.headCenter,
+            spineAngle: pose.spineAngle,
+            aggregateConfidence: pose.aggregateConfidence
+        )
+    }
 }
 
 /// 基于 Apple Vision 的实时姿态检测器

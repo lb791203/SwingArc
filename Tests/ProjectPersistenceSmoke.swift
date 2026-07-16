@@ -15,7 +15,7 @@ struct ProjectPersistenceSmoke {
                     videoTime: 1.25
                 )
             ],
-            keyframes: [KeyframeMarker(time: 1.25, stage: .impact)],
+            keyframes: [KeyframeMarker(time: 1.25, stage: .impact, source: .manual)],
             isKeyframeMode: true,
             showPoseSkeleton: true,
             showHeadStability: false,
@@ -27,6 +27,7 @@ struct ProjectPersistenceSmoke {
         precondition(restored.drawings.count == 1)
         precondition(restored.drawings[0].points == original.drawings[0].points)
         precondition(restored.keyframes == original.keyframes)
+        precondition(restored.keyframes[0].isLocked)
         precondition(restored.showPoseSkeleton)
         precondition(restored.showSpineAngle)
     }

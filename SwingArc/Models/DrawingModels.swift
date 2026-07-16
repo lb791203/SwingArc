@@ -66,15 +66,50 @@ enum SwingStage: String, CaseIterable, Identifiable {
 }
 
 /// 录制的关键帧标记数据
+enum KeyframeSource: String, Codable, Equatable {
+    case automatic
+    case manual
+}
+
 struct KeyframeMarker: Identifiable, Codable, Equatable {
     let id: UUID
     let time: Double // 视频时间（秒）
     let stage: String // SwingStage rawValue
+    let source: KeyframeSource
     
-    init(id: UUID = UUID(), time: Double, stage: SwingStage) {
+    init(id: UUID = UUID(), time: Double, stage: SwingStage, source: KeyframeSource = .automatic) {
         self.id = id
         self.time = time
         self.stage = stage.rawValue
+        self.source = source
+    }
+
+    var isLocked: Bool { source == .manual }
+
+    private enum CodingKeys: String, CodingKey { case id, time, stage, source }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        time = try container.decode(Double.self, forKey: .time)
+        stage = try container.decode(String.self, forKey: .stage)
+        source = try container.decodeIfPresent(KeyframeSource.self, forKey: .source) ?? .automatic
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(time, forKey: .time)
+        try container.encode(stage, forKey: .stage)
+        try container.encode(source, forKey: .source)
+    }
+}
+
+enum StageMarkerMerger {
+    static func merge(existing: [KeyframeMarker], automatic: [KeyframeMarker]) -> [KeyframeMarker] {
+        let lockedStages = Set(existing.filter(\.isLocked).map(\.stage))
+        return (existing.filter(\.isLocked) + automatic.filter { !lockedStages.contains($0.stage) })
+            .sorted { $0.time < $1.time }
     }
 }
 
@@ -136,6 +171,24 @@ struct DrawingElement: Identifiable, Equatable, Codable {
         try container.encode(lineWidth, forKey: .lineWidth)
         try container.encode(isKeyframeSpecific, forKey: .isKeyframeSpecific)
         try container.encode(videoTime, forKey: .videoTime)
+    }
+}
+
+/// The workspace display mode is authoritative for every saved line.  This
+/// lets an existing project switch from frame-only annotations to persistent
+/// annotations without requiring the user to redraw every element.
+enum DrawingDisplayPolicy {
+    static func shouldShow(_ element: DrawingElement, at currentTime: Double, isKeyframeMode: Bool) -> Bool {
+        !isKeyframeMode || element.shouldShow(at: currentTime)
+    }
+}
+
+enum VideoZoomPolicy {
+    static let minimumScale: CGFloat = 1
+    static let maximumScale: CGFloat = 4
+
+    static func clampedScale(_ scale: CGFloat) -> CGFloat {
+        min(max(scale, minimumScale), maximumScale)
     }
 }
 

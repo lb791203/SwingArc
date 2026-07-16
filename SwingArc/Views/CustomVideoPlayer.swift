@@ -27,6 +27,7 @@ class VideoPlaybackManager: ObservableObject {
     private let poseDetector = VisionPoseDetector()
     private let poseQueue = DispatchQueue(label: "com.liangbo.swingarc.pose", qos: .userInitiated)
     private var videoOrientation: CGImagePropertyOrientation = .up
+    private var isPoseDetectionInFlight = false
     
     init() {}
     
@@ -44,6 +45,8 @@ class VideoPlaybackManager: ObservableObject {
         analysisResult = nil
         analysisFailure = nil
         scanProgress = 0
+        currentPose = nil
+        isPoseDetectionInFlight = false
         
         let asset = AVAsset(url: url)
         
@@ -235,17 +238,27 @@ class VideoPlaybackManager: ObservableObject {
         if videoOutput.hasNewPixelBuffer(forItemTime: itemTime) {
             var presentationItemTimeForDisplay = CMTime.zero
             if let pixelBuffer = videoOutput.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: &presentationItemTimeForDisplay) {
-                let orientation = videoOrientation
-                // Vision request 只能在同一串行队列中使用，避免实时帧与 AI 扫描竞争。
-                poseQueue.async { [weak self] in
-                    guard let self = self else { return }
-                    
-                    if let result = self.poseDetector.detectPose(in: pixelBuffer, orientation: orientation) {
-                        DispatchQueue.main.async {
-                            self.currentPose = result
-                        }
-                    }
+                enqueuePoseDetection(pixelBuffer, orientation: videoOrientation)
+            }
+        }
+    }
+
+    /// Vision runs on a serial queue.  Keeping at most one request in flight
+    /// prevents display-link ticks from building a stale frame backlog, which
+    /// otherwise makes the overlay jump or disappear behind the video.
+    private func enqueuePoseDetection(_ pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation) {
+        guard !isPoseDetectionInFlight else { return }
+        isPoseDetectionInFlight = true
+        poseQueue.async { [weak self] in
+            guard let self = self else { return }
+            let result = self.poseDetector.detectPose(in: pixelBuffer, orientation: orientation)
+            DispatchQueue.main.async {
+                // Keep the last valid pose through a single missed Vision frame.
+                // This removes transient flashing without inventing pose data.
+                if let result {
+                    self.currentPose = result
                 }
+                self.isPoseDetectionInFlight = false
             }
         }
     }
@@ -290,20 +303,20 @@ class VideoPlaybackManager: ObservableObject {
             generator.requestedTimeToleranceBefore = .zero
             generator.requestedTimeToleranceAfter = .zero
             
-            let sampleCount = 90
+            let sampleTimes = SwingAnalysisSamplingPlan.sampleTimes(duration: durationSeconds)
             var poseSamples: [SwingPoseSample] = []
-            for index in 0..<sampleCount {
-                let time = CMTime(seconds: Double(index) * durationSeconds / Double(sampleCount - 1), preferredTimescale: 600)
+            for (index, seconds) in sampleTimes.enumerated() {
+                let time = CMTime(seconds: seconds, preferredTimescale: 600)
                 autoreleasepool {
                     guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else { return }
                     let pose = self.poseQueue.sync {
                         self.poseDetector.detectPose(in: cgImage, orientation: .up)
                     }
-                    if let wristY = pose?.point(for: "rightWrist")?.y {
-                        poseSamples.append(SwingPoseSample(time: time.seconds, wristY: wristY))
+                    if let pose {
+                        poseSamples.append(SwingPoseSample(time: time.seconds, pose: pose))
                     }
                 }
-                let progress = Double(index + 1) / Double(sampleCount)
+                let progress = Double(index + 1) / Double(sampleTimes.count)
                 DispatchQueue.main.async {
                     self.scanProgress = progress
                     self.analysisState = .scanning(progress: progress)

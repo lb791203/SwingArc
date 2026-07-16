@@ -64,7 +64,11 @@ struct DrawingOverlay: View {
                         // 绘制已保存的手动线条
                         for element in drawings {
                             // 检查该线条在当前视频时间戳下是否应该显现
-                            if element.shouldShow(at: playbackManager.currentTime) {
+                            if DrawingDisplayPolicy.shouldShow(
+                                element,
+                                at: playbackManager.currentTime,
+                                isKeyframeMode: isKeyframeMode
+                            ) {
                                 drawElement(context: context, element: element, rect: rect)
                             }
                         }
@@ -553,7 +557,11 @@ struct DrawingOverlay: View {
                 // 查找最近的控制端点
                 var closestDist: CGFloat = 30.0 // 30像素触碰阈值
                 for element in drawings {
-                    if element.shouldShow(at: playbackManager.currentTime) {
+                    if DrawingDisplayPolicy.shouldShow(
+                        element,
+                        at: playbackManager.currentTime,
+                        isKeyframeMode: isKeyframeMode
+                    ) {
                         for (idx, pt) in element.points.enumerated() {
                             let pX = rect.minX + pt.x * rect.width
                             let pY = rect.minY + pt.y * rect.height
