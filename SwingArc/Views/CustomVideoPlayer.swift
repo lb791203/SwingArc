@@ -32,6 +32,7 @@ class VideoPlaybackManager: ObservableObject {
     private var videoOrientation: CGImagePropertyOrientation = .up
     private var isPoseDetectionInFlight = false
     private let analysisRunGate = AnalysisRunGate()
+    private var analysisRunID: UUID?
     
     init() {}
     
@@ -297,19 +298,20 @@ class VideoPlaybackManager: ObservableObject {
     
     /// Runs the shared adaptive engine and publishes only the active run.
     func analyzeSwing(completion: @escaping (SwingAnalysisResult) -> Void) {
-        // A replacement request always invalidates the old run silently, even
-        // if the replacement asset itself turns out to be unusable.
-        analysisRunGate.cancel()
+        // Beginning a replacement atomically invalidates the old run without
+        // publishing an explicit-cancel failure.
+        let runID = AnalysisRunPublicationPolicy.beginReplacement(gate: analysisRunGate)
+        analysisRunID = runID
         guard let player = player,
               let currentItem = player.currentItem,
               let asset = currentItem.asset as? AVURLAsset else {
-            finishAnalysis(with: .noVideo, completion: completion)
+            AnalysisRunPublicationPolicy.complete(runID: runID, gate: analysisRunGate) {
+                self.analysisRunID = nil
+                self.finishAnalysis(with: .noVideo, completion: completion)
+            }
             return
         }
 
-        // `begin` atomically supersedes any older run without publishing a
-        // cancellation failure. Its callbacks are filtered by this new ID.
-        let runID = analysisRunGate.begin()
         isScanning = true
         scanProgress = 0.0
         analysisProgressPhase = .preparing
@@ -324,32 +326,43 @@ class VideoPlaybackManager: ObservableObject {
                 gate: self.analysisRunGate
             ) { [weak self] update in
                 DispatchQueue.main.async {
-                    guard let self, self.analysisRunGate.isActive(runID) else { return }
-                    self.analysisProgressPhase = update.phase
-                    self.scanProgress = update.progress
-                    self.analysisState = .scanning(progress: update.progress)
+                    guard let self else { return }
+                    AnalysisRunPublicationPolicy.publish(runID: runID, gate: self.analysisRunGate) {
+                        self.analysisProgressPhase = update.phase
+                        self.scanProgress = update.progress
+                        self.analysisState = .scanning(progress: update.progress)
+                    }
                 }
             }
             DispatchQueue.main.async {
-                guard self.analysisRunGate.isActive(runID) else { return }
-                self.isScanning = false
                 switch outcome {
-                case let .completed(output):
-                    self.scanProgress = 1
-                    self.sourceFrameRate = output.sourceFrameRate
-                    self.analysisResult = output.result
-                    self.analysisFailure = nil
-                    self.analysisState = .completed(output.result)
-                    self.analysisRunGate.complete(runID)
-                    completion(output.result)
-                case let .failed(reason):
-                    self.scanProgress = 0
-                    self.analysisResult = nil
-                    self.analysisFailure = reason
-                    self.analysisState = .failed(reason)
-                    self.analysisRunGate.complete(runID)
                 case .cancelled:
-                    break
+                    return
+                case let .completed(output):
+                    let didPublish = AnalysisRunPublicationPolicy.complete(
+                        runID: runID,
+                        gate: self.analysisRunGate
+                    ) {
+                        self.analysisRunID = nil
+                        self.isScanning = false
+                        self.scanProgress = 1
+                        self.sourceFrameRate = output.sourceFrameRate
+                        self.analysisResult = output.result
+                        self.analysisFailure = nil
+                        self.analysisState = .completed(output.result)
+                    }
+                    if didPublish {
+                        completion(output.result)
+                    }
+                case let .failed(reason):
+                    AnalysisRunPublicationPolicy.complete(runID: runID, gate: self.analysisRunGate) {
+                        self.analysisRunID = nil
+                        self.isScanning = false
+                        self.scanProgress = 0
+                        self.analysisResult = nil
+                        self.analysisFailure = reason
+                        self.analysisState = .failed(reason)
+                    }
                 }
             }
         }
@@ -357,14 +370,14 @@ class VideoPlaybackManager: ObservableObject {
 
     func cancelAnalysis() {
         let wasScanning = isScanning
-        if wasScanning {
-            analysisFailure = .analysisCancelled
-            analysisState = .failed(.analysisCancelled)
-            analysisResult = nil
+        if wasScanning, let runID = analysisRunID {
+            AnalysisRunPublicationPolicy.cancel(runID: runID, gate: analysisRunGate) {
+                self.analysisFailure = .analysisCancelled
+                self.analysisState = .failed(.analysisCancelled)
+                self.analysisResult = nil
+            }
         }
-        // Explicit cancellation publishes its reason before invalidating the ID.
-        // Supersession never calls this path; `begin()` silently replaces the ID.
-        analysisRunGate.cancel()
+        analysisRunID = nil
         isScanning = false
         scanProgress = 0
         analysisProgressPhase = .preparing

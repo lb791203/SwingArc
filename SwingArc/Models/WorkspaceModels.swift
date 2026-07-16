@@ -157,6 +157,14 @@ enum SwingVideoAnalysisProgressPolicy {
 }
 
 enum SwingVideoAnalysisValidationPolicy {
+    static func prioritizedFailure(
+        frameExtractionFailed: Bool,
+        evidenceFailure: AnalysisFailure?
+    ) -> AnalysisFailure? {
+        if frameExtractionFailed { return .frameExtractionFailed }
+        return evidenceFailure
+    }
+
     static func transitionFailure(
         hasTopTransition: Bool,
         hasImpactCandidates: Bool
@@ -168,7 +176,7 @@ enum SwingVideoAnalysisValidationPolicy {
 }
 
 final class AnalysisRunGate: @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = NSRecursiveLock()
     private var activeID: UUID?
 
     @discardableResult
@@ -207,6 +215,70 @@ final class AnalysisRunGate: @unchecked Sendable {
             activeID = nil
         }
         lock.unlock()
+    }
+
+    @discardableResult
+    func mutateIfActive(
+        _ id: UUID,
+        invalidatingAfterMutation: Bool,
+        _ mutation: () -> Void
+    ) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard activeID == id else { return false }
+        mutation()
+        if invalidatingAfterMutation, activeID == id {
+            activeID = nil
+        }
+        return true
+    }
+}
+
+/// The single publication boundary used after work has crossed an async queue.
+/// Replacement is silent; explicit cancellation publishes while the run is
+/// still active and invalidates it atomically after the mutation.
+enum AnalysisRunPublicationPolicy {
+    static func beginReplacement(gate: AnalysisRunGate) -> UUID {
+        gate.begin()
+    }
+
+    @discardableResult
+    static func publish(
+        runID: UUID,
+        gate: AnalysisRunGate,
+        _ mutation: () -> Void
+    ) -> Bool {
+        gate.mutateIfActive(
+            runID,
+            invalidatingAfterMutation: false,
+            mutation
+        )
+    }
+
+    @discardableResult
+    static func complete(
+        runID: UUID,
+        gate: AnalysisRunGate,
+        _ mutation: () -> Void
+    ) -> Bool {
+        gate.mutateIfActive(
+            runID,
+            invalidatingAfterMutation: true,
+            mutation
+        )
+    }
+
+    @discardableResult
+    static func cancel(
+        runID: UUID,
+        gate: AnalysisRunGate,
+        _ publishCancellation: () -> Void
+    ) -> Bool {
+        gate.mutateIfActive(
+            runID,
+            invalidatingAfterMutation: true,
+            publishCancellation
+        )
     }
 }
 
