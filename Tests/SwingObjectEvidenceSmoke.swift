@@ -35,10 +35,11 @@ struct SwingObjectEvidenceSmoke {
 
         let firstMiss = tracker.update(nil)
         precondition(firstMiss.stableBall != nil)
-        precondition(firstMiss.localChange > 0.5)
+        precondition(firstMiss.localChange == 1)
+        let lockedCenter = firstMiss.stableBall?.center
         precondition(tracker.update(nil).stableBall != nil)
         precondition(
-            tracker.update(nil).stableBall != nil,
+            tracker.update(nil).stableBall?.center == lockedCenter,
             "The address ball location must remain locked after the ball leaves at impact"
         )
     }

@@ -928,6 +928,132 @@ enum SwingStageDetectionStatus: String, Codable, Equatable {
     case unresolved
 }
 
+struct StageCandidate: Equatable {
+    let stage: SwingStage
+    let evidenceIndex: Int
+    let sourceFrameIndex: Int
+    let time: Double
+    let score: Double
+    let requirementsSatisfied: Bool
+    let maximumStatus: SwingStageDetectionStatus
+    let hasClubEvidence: Bool
+    let hasBallEvidence: Bool
+}
+
+struct ImpactCorridor: Equatable {
+    let candidates: [StageCandidate]
+}
+
+enum ImpactCorridorResolver {
+    private static let minimumCandidateScore = 0.38
+    private static let maximumCandidateCount = 5
+
+    static func candidates(in timeline: [SwingTemporalFrame]) -> [StageCandidate] {
+        var followThroughStarted = false
+        var candidates: [StageCandidate] = []
+
+        for (evidenceIndex, temporalFrame) in timeline.enumerated() {
+            if temporalFrame.sustainedFollowThrough {
+                followThroughStarted = true
+            }
+            guard !followThroughStarted,
+                  temporalFrame.sustainedDownswing else { continue }
+
+            let frame = temporalFrame.frame
+            let handNearHip = distance(frame.handCenter, frame.hipCenter).map {
+                clamp(1 - $0 / 0.24)
+            } ?? 0
+            let downwardSpeed = ramp(
+                Double(frame.handVelocity.y),
+                minimum: 0.15,
+                maximum: 1.0
+            )
+            let accelerationMagnitude = hypot(
+                Double(frame.handAcceleration.x),
+                Double(frame.handAcceleration.y)
+            )
+            let localAcceleration = ramp(
+                accelerationMagnitude,
+                minimum: 0.50,
+                maximum: 4.0
+            )
+            let hipOpen = ramp(
+                abs(frame.hipAngle ?? 0),
+                minimum: 8,
+                maximum: 32
+            )
+            let shaftBallAlignment = shaftBallAlignment(frame.objectEvidence)
+            let ballLocalChange = clamp(frame.objectEvidence.ballLocalChange)
+            let score = clamp(
+                handNearHip * 0.16
+                    + downwardSpeed * 0.15
+                    + localAcceleration * 0.09
+                    + hipOpen * 0.10
+                    + shaftBallAlignment * 0.22
+                    + ballLocalChange * 0.11
+                    + clamp(temporalFrame.shaftAngleContinuity) * 0.07
+                    + clamp(frame.poseCoverage) * 0.10
+            )
+            guard score >= minimumCandidateScore else { continue }
+
+            let hasRequiredObjects = shaftBallAlignment >= 0.55
+                || ballLocalChange >= 0.55
+            let objectEvidence = frame.objectEvidence
+            candidates.append(StageCandidate(
+                stage: .impact,
+                evidenceIndex: evidenceIndex,
+                sourceFrameIndex: frame.sourceFrameIndex,
+                time: frame.time,
+                score: score,
+                requirementsSatisfied: hasRequiredObjects,
+                maximumStatus: hasRequiredObjects ? .confirmed : .lowConfidence,
+                hasClubEvidence: objectEvidence.shaft != nil,
+                hasBallEvidence: objectEvidence.ball != nil || objectEvidence.stableBall != nil
+            ))
+        }
+
+        return candidates
+            .sorted {
+                if $0.score != $1.score { return $0.score > $1.score }
+                if $0.time != $1.time { return $0.time < $1.time }
+                return $0.sourceFrameIndex < $1.sourceFrameIndex
+            }
+            .prefix(maximumCandidateCount)
+            .sorted {
+                if $0.sourceFrameIndex != $1.sourceFrameIndex {
+                    return $0.sourceFrameIndex < $1.sourceFrameIndex
+                }
+                return $0.time < $1.time
+            }
+    }
+
+    private static func shaftBallAlignment(_ objectEvidence: SwingObjectEvidence) -> Double {
+        guard let shaft = objectEvidence.shaft,
+              let stableBall = objectEvidence.stableBall else { return 0 }
+        let alignment = 1 - min(
+            1,
+            shaft.distanceFromExtendedLine(to: stableBall) / 0.08
+        )
+        return clamp(alignment * shaft.confidence)
+    }
+
+    private static func distance(_ first: CGPoint?, _ second: CGPoint?) -> Double? {
+        guard let first, let second else { return nil }
+        let distance = SwingGeometry.distance(first, second)
+        return distance.isFinite ? distance : nil
+    }
+
+    private static func ramp(_ value: Double, minimum: Double, maximum: Double) -> Double {
+        guard value.isFinite, maximum > minimum else { return 0 }
+        return clamp((value - minimum) / (maximum - minimum))
+    }
+
+    private static func clamp(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(1, max(0, value))
+    }
+}
+
 struct SwingStageDetection: Equatable {
     let stage: SwingStage
     let time: Double?
@@ -1895,34 +2021,127 @@ enum FineSwingSamplingPlan {
 enum SparseObjectSamplingPlan {
     static let maximumFrameCount = 32
     private static let neighborRadius = 1
+    private static let sampledStages: Set<SwingStage> = [
+        .address,
+        .takeaway,
+        .impact,
+        .followThrough
+    ]
 
+    static func frames(
+        from references: [FineFrameReference],
+        candidates: [StageCandidate]
+    ) -> [FineFrameReference] {
+        guard !references.isEmpty else { return [] }
+        let sortedReferences = references.sorted {
+            if $0.time != $1.time { return $0.time < $1.time }
+            return $0.sourceFrameIndex < $1.sourceFrameIndex
+        }
+        guard !candidates.isEmpty else {
+            return evenlySpacedFallback(from: sortedReferences)
+        }
+
+        let eligible = candidates.filter { sampledStages.contains($0.stage) }
+        guard !eligible.isEmpty else { return [] }
+        let neighborhoods = eligible.map { candidate in
+            (candidate: candidate, indices: neighborhood(
+                around: candidate.time,
+                in: sortedReferences
+            ))
+        }
+        let allIndices = neighborhoods.reduce(into: Set<Int>()) {
+            $0.formUnion($1.indices)
+        }
+        if allIndices.count <= maximumFrameCount {
+            return allIndices.sorted().map { sortedReferences[$0] }
+        }
+
+        let prioritized = neighborhoods.sorted { first, second in
+            let firstIsImpact = first.candidate.stage == .impact
+            let secondIsImpact = second.candidate.stage == .impact
+            if firstIsImpact != secondIsImpact { return firstIsImpact }
+            if first.candidate.score != second.candidate.score {
+                return first.candidate.score > second.candidate.score
+            }
+            if first.candidate.time != second.candidate.time {
+                return first.candidate.time < second.candidate.time
+            }
+            return first.candidate.sourceFrameIndex < second.candidate.sourceFrameIndex
+        }
+        var selectedIndices = Set<Int>()
+        for entry in prioritized {
+            let additions = entry.indices.subtracting(selectedIndices)
+            guard selectedIndices.count + additions.count <= maximumFrameCount else {
+                continue
+            }
+            selectedIndices.formUnion(entry.indices)
+        }
+        return selectedIndices
+            .sorted()
+            .map { sortedReferences[$0] }
+    }
+
+    /// Compatibility bridge for the current player pipeline. Task 6 will pass
+    /// the ordered candidates directly after its orchestration migration.
     static func frames(
         from references: [FineFrameReference],
         preliminaryResult: SwingAnalysisResult
     ) -> [FineFrameReference] {
-        guard !references.isEmpty else { return [] }
-        var selectedIndices = Set<Int>()
-        for time in preliminaryResult.detections.compactMap(\.time) {
-            guard let nearest = references.indices.min(by: {
-                abs(references[$0].time - time) < abs(references[$1].time - time)
-            }) else { continue }
-            for index in max(references.startIndex, nearest - neighborRadius)...min(references.index(before: references.endIndex), nearest + neighborRadius) {
-                selectedIndices.insert(index)
-            }
+        let candidates = preliminaryResult.detections.enumerated().compactMap {
+            evidenceIndex, detection -> StageCandidate? in
+            guard let time = detection.time,
+                  let nearestReference = references.min(by: {
+                      let firstDistance = abs($0.time - time)
+                      let secondDistance = abs($1.time - time)
+                      if firstDistance != secondDistance {
+                          return firstDistance < secondDistance
+                      }
+                      return $0.sourceFrameIndex < $1.sourceFrameIndex
+                  }) else { return nil }
+            return StageCandidate(
+                stage: detection.stage,
+                evidenceIndex: evidenceIndex,
+                sourceFrameIndex: detection.sourceFrameIndex ?? nearestReference.sourceFrameIndex,
+                time: time,
+                score: detection.confidence,
+                requirementsSatisfied: detection.status != .unresolved,
+                maximumStatus: detection.status,
+                hasClubEvidence: detection.hasClubEvidence,
+                hasBallEvidence: detection.hasBallEvidence
+            )
         }
+        return frames(from: references, candidates: candidates)
+    }
 
-        if selectedIndices.isEmpty {
-            let fallbackCount = min(12, references.count)
-            for offset in 0..<fallbackCount {
-                let fraction = fallbackCount == 1 ? 0 : Double(offset) / Double(fallbackCount - 1)
-                selectedIndices.insert(Int((fraction * Double(references.count - 1)).rounded()))
-            }
+    private static func neighborhood(
+        around time: Double,
+        in references: [FineFrameReference]
+    ) -> Set<Int> {
+        guard let nearest = references.indices.min(by: {
+            let firstDistance = abs(references[$0].time - time)
+            let secondDistance = abs(references[$1].time - time)
+            if firstDistance != secondDistance { return firstDistance < secondDistance }
+            return references[$0].sourceFrameIndex < references[$1].sourceFrameIndex
+        }) else { return [] }
+        let lowerBound = max(references.startIndex, nearest - neighborRadius)
+        let upperBound = min(
+            references.index(before: references.endIndex),
+            nearest + neighborRadius
+        )
+        return Set(lowerBound...upperBound)
+    }
+
+    private static func evenlySpacedFallback(
+        from references: [FineFrameReference]
+    ) -> [FineFrameReference] {
+        let fallbackCount = min(12, references.count)
+        let selectedIndices = (0..<fallbackCount).map { offset in
+            let fraction = fallbackCount == 1
+                ? 0
+                : Double(offset) / Double(fallbackCount - 1)
+            return Int((fraction * Double(references.count - 1)).rounded())
         }
-
-        return selectedIndices
-            .sorted()
-            .prefix(maximumFrameCount)
-            .map { references[$0] }
+        return Array(Set(selectedIndices)).sorted().map { references[$0] }
     }
 }
 
