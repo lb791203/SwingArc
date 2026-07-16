@@ -329,7 +329,6 @@ class VideoPlaybackManager: ObservableObject {
             generator.requestedTimeToleranceAfter = .zero
 
             let golferTracker = PrimaryGolferTracker()
-            let coarseObjectDetector = SwingObjectDetector()
             let coarseTimes = SwingWindowLocator.sampleTimes(duration: durationSeconds)
             var coarseSamples: [CoarseSwingSample] = []
             var coarseFrameFailures = 0
@@ -348,12 +347,7 @@ class VideoPlaybackManager: ObservableObject {
                         : seconds
                     let selectedPose: PoseEstimationResult? = self.poseQueue.sync {
                         let candidates = self.poseDetector.detectPoses(in: cgImage, orientation: .up)
-                        let selected = golferTracker.select(
-                            from: candidates,
-                            stableBall: coarseObjectDetector.stableBall?.center
-                        )
-                        _ = coarseObjectDetector.detect(in: cgImage, pose: selected)
-                        return selected
+                        return golferTracker.select(from: candidates, stableBall: nil)
                     }
                     let sample = selectedPose.map {
                         SwingPoseSample(time: actualSeconds, pose: $0)
@@ -401,7 +395,7 @@ class VideoPlaybackManager: ObservableObject {
                 return
             }
 
-            let fineObjectDetector = SwingObjectDetector(seedBall: coarseObjectDetector.stableBall)
+            let fineObjectDetector = SwingObjectDetector()
             var fineFrames: [SwingFrameSample] = []
             var fineFrameFailures = 0
             for (index, reference) in fineReferences.enumerated() {

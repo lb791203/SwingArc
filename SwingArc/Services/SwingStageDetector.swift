@@ -1013,6 +1013,17 @@ enum SwingAnalysisSamplingPlan {
 
 // MARK: - Two-stage scan planning
 
+enum TwoStageScanPass: Equatable {
+    case coarse
+    case fine
+}
+
+enum TwoStageScanPolicy {
+    static func extractsObjectEvidence(during pass: TwoStageScanPass) -> Bool {
+        pass == .fine
+    }
+}
+
 struct CoarseSwingSample: Equatable {
     let time: Double
     let pose: SwingPoseSample?
