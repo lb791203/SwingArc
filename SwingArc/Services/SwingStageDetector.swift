@@ -147,7 +147,7 @@ enum SwingStageDetector {
         }
 
         var resolved: [SwingStage: SwingPoseSample] = [:]
-        guard let p4Index = samples.indices.min(by: { samples[$0].wristY < samples[$1].wristY }) else {
+        guard let p4Index = backswingTopIndex(in: samples) else {
             return unresolvedResult()
         }
 
@@ -177,28 +177,27 @@ enum SwingStageDetector {
             }
         }
 
-        // The first measurable reversal after P4 is P5.  Do not assume it is
-        // the next frame: high-frame-rate clips often contain a P4 plateau.
-        if let p5Index = samples.indices.first(where: {
-            $0 > p4Index && samples[$0].wristY > samples[p4Index].wristY + directionChangeThreshold
-        }) {
+        // P5 requires a sustained transition out of the P4 plateau. A single
+        // lower hand frame is commonly pose jitter, not the downswing.
+        if let p5Index = sustainedDownswingIndex(after: p4Index, in: samples) {
             resolved[.leadArmParallelDownswing] = samples[p5Index]
 
-            let finalIndices = (samples.count - 3)..<samples.count
-            let impactCandidates = samples.indices.filter { $0 >= p5Index && !finalIndices.contains($0) }
-            if let p6Index = impactCandidates.max(by: { samples[$0].wristY < samples[$1].wristY }),
-               samples[p6Index].wristY > samples[p5Index].wristY {
+            // P6 is the fastest hand movement through the hip zone, rather
+            // than the lowest observed wrist. That avoids a slow post-impact
+            // dip being reported as impact.
+            if let p6Index = impactIndex(after: p5Index, in: samples) {
                 resolved[.impact] = samples[p6Index]
 
-                if let p7Index = samples.indices.first(where: {
-                    $0 > p6Index && samples[$0].wristY < samples[p6Index].wristY - directionChangeThreshold
-                }) {
+                // P7 must similarly demonstrate a sustained rising hand path,
+                // so one noisy post-impact frame cannot create a false follow-through.
+                if let p7Index = sustainedFollowThroughIndex(after: p6Index, in: samples) {
                     resolved[.followThrough] = samples[p7Index]
 
-                    let penultimate = samples[samples.count - 2]
-                    let finish = samples[samples.count - 1]
-                    if abs(penultimate.wristY - finish.wristY) <= finishStabilityThreshold,
-                       finish.wristY < samples[p7Index].wristY {
+                    // A clip may continue long after the golfer finishes, so
+                    // P8 is the first stable post-P7 plateau, never simply the
+                    // last frame of the source video.
+                    if let p8Index = finishIndex(after: p7Index, in: samples) {
+                        let finish = samples[p8Index]
                         resolved[.finish] = finish
                     }
                 }
@@ -273,6 +272,76 @@ enum SwingStageDetector {
     private static func midpointY(_ first: CGPoint?, _ second: CGPoint?) -> CGFloat? {
         guard let first, let second else { return nil }
         return (first.y + second.y) / 2
+    }
+
+    private static func sustainedDownswingIndex(after topIndex: Int, in samples: [SwingPoseSample]) -> Int? {
+        guard topIndex + 2 < samples.count else { return nil }
+        return ((topIndex + 1)..<(samples.count - 1)).first { index in
+            samples[index].wristY > samples[topIndex].wristY + directionChangeThreshold &&
+            samples[index + 1].wristY > samples[index].wristY + directionChangeThreshold
+        }
+    }
+
+    private static func impactIndex(after downswingIndex: Int, in samples: [SwingPoseSample]) -> Int? {
+        guard downswingIndex + 1 < samples.count else { return nil }
+        let finalIndices = (samples.count - 3)..<samples.count
+        let candidates = ((downswingIndex + 1)..<(samples.count - 1)).filter { index in
+            guard !finalIndices.contains(index),
+                  let hipY = midpointY(samples[index].leftHip, samples[index].rightHip) else {
+                return false
+            }
+            return abs(samples[index].wristY - hipY) <= 0.35
+        }
+        return candidates.max { left, right in
+            handSpeed(at: left, in: samples) < handSpeed(at: right, in: samples)
+        }
+    }
+
+    private static func sustainedFollowThroughIndex(after impactIndex: Int, in samples: [SwingPoseSample]) -> Int? {
+        guard impactIndex + 2 < samples.count else { return nil }
+        return ((impactIndex + 1)..<(samples.count - 1)).first { index in
+            samples[index].wristY < samples[impactIndex].wristY - directionChangeThreshold &&
+            samples[index + 1].wristY < samples[index].wristY - directionChangeThreshold
+        }
+    }
+
+    private static func finishIndex(after followThroughIndex: Int, in samples: [SwingPoseSample]) -> Int? {
+        guard followThroughIndex + 2 < samples.count else { return nil }
+        return ((followThroughIndex + 1)..<(samples.count - 1)).first { index in
+            let first = samples[index]
+            let second = samples[index + 1]
+            return first.wristY < samples[followThroughIndex].wristY - directionChangeThreshold &&
+                abs(second.wristY - first.wristY) <= finishStabilityThreshold
+        }.map { $0 + 1 }
+    }
+
+    private static func handSpeed(at index: Int, in samples: [SwingPoseSample]) -> CGFloat {
+        guard index > 0 else { return 0 }
+        let elapsed = max(samples[index].time - samples[index - 1].time, .leastNonzeroMagnitude)
+        return abs(samples[index].wristY - samples[index - 1].wristY) / elapsed
+    }
+
+    /// P4 is the earliest high-hand apex that reverses into a downswing.  A
+    /// global minimum would incorrectly select a later follow-through or
+    /// finish position when the hands finish higher than the backswing top.
+    private static func backswingTopIndex(in samples: [SwingPoseSample]) -> Int? {
+        guard samples.count >= 5 else { return nil }
+
+        let candidates = (2..<(samples.count - 2)).compactMap { index -> (index: Int, score: CGFloat)? in
+            let candidateY = samples[index].wristY
+            let priorHigh = samples[..<index].map(\.wristY).max() ?? candidateY
+            let followingRange = (index + 1)...min(samples.count - 1, index + 3)
+            let followingLowHand = samples[followingRange].map(\.wristY).max() ?? candidateY
+            guard priorHigh > candidateY + directionChangeThreshold,
+                  followingLowHand > candidateY + directionChangeThreshold else {
+                return nil
+            }
+            return (index, (priorHigh - candidateY) + (followingLowHand - candidateY))
+        }
+
+        return candidates.max { lhs, rhs in
+            lhs.score == rhs.score ? lhs.index > rhs.index : lhs.score < rhs.score
+        }?.index
     }
 }
 
