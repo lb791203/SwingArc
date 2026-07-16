@@ -469,6 +469,23 @@ struct AnalysisProgressCard: View {
     }
 }
 
+struct AnalysisFailureBanner: View {
+    let failure: AnalysisFailure
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+            Text(AnalysisFailurePresentation(failure: failure).message)
+                .font(.caption)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .foregroundStyle(AnalysisTheme.current)
+        .padding(10)
+        .background(AnalysisTheme.chrome)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 struct StageInspectorView: View {
     let presentation: AnalysisWorkspacePresentation
     let keyframes: [KeyframeMarker]
@@ -558,6 +575,10 @@ struct WorkspaceInspectorView: View {
                     onSeek: onSeek,
                     onAdjust: onAdjust
                 )
+            }
+
+            if let failure = playbackManager.analysisFailure {
+                AnalysisFailureBanner(failure: failure)
             }
 
             Divider().overlay(.white.opacity(0.14))

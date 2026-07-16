@@ -169,16 +169,8 @@ struct AnalysisWorkspaceView: View {
                 .background(AnalysisTheme.chrome)
             }
 
-            if !isRegularLayout, let failureMessage {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                    Text(failureMessage)
-                        .font(.caption)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .foregroundStyle(AnalysisTheme.current)
-                .padding(10)
-                .background(AnalysisTheme.chrome)
+            if !isRegularLayout, let failure = playbackManager.analysisFailure {
+                AnalysisFailureBanner(failure: failure)
             }
 
             StageTimelineView(
@@ -253,39 +245,6 @@ struct AnalysisWorkspaceView: View {
         adjustmentStage = stage
     }
 
-    private var failureMessage: String? {
-        guard let failure = playbackManager.analysisFailure else { return nil }
-        switch failure {
-        case .noVideo:
-            return "没有可分析的视频，请重新导入或录制。"
-        case .invalidDuration:
-            return "视频读取失败，请重新导入。"
-        case .insufficientPoseEvidence:
-            return "未检测到清晰人体。请选择全身入镜、光线充足的视频；手工标注不会被清除。"
-        case .noStableGolfer:
-            return "无法持续锁定主球员。请使用固定机位、全身入镜且避免多人遮挡的视频。"
-        case .noSwingMotion:
-            return "没有找到完整挥杆动作。请确认视频包含从准备到收杆的连续挥杆。"
-        case .ambiguousSwingWindows:
-            return "检测到多个强度接近的挥杆片段。请裁剪为单次挥杆后重新分析。"
-        case .swingWindowTooLong:
-            return "挥杆候选片段超过 6 秒。请裁剪无关准备或走动部分后重试。"
-        case .frameExtractionFailed:
-            return "源视频帧读取不完整，无法进行逐帧定位。请重新导入原始视频。"
-        case .missingAddressBoundary:
-            return "无法确认准备姿态边界。请保留挥杆开始前的完整画面。"
-        case .missingTopTransition:
-            return "无法确认上杆顶点转换。请使用固定机位且确保手臂清晰可见。"
-        case .noImpactCorridor:
-            return "无法确认击球区间。请确保球和杆头区域清晰可见。"
-        case .missingFinishBoundary:
-            return "无法确认收杆边界。请保留击球后的完整收杆画面。"
-        case .incompleteSwingClip:
-            return "视频未包含完整挥杆。请导入从准备到收杆的连续片段。"
-        case .analysisCancelled:
-            return nil
-        }
-    }
 }
 
 struct VideoCanvasView: View {

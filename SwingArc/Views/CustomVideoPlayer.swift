@@ -28,6 +28,7 @@ class VideoPlaybackManager: ObservableObject {
     
     private let poseDetector = VisionPoseDetector()
     private let poseQueue = DispatchQueue(label: "com.liangbo.swingarc.pose", qos: .userInitiated)
+    private let analysisQueue = DispatchQueue(label: "com.liangbo.swingarc.analysis", qos: .userInitiated)
     private var videoOrientation: CGImagePropertyOrientation = .up
     private var isPoseDetectionInFlight = false
     private let analysisRunGate = AnalysisRunGate()
@@ -294,273 +295,84 @@ class VideoPlaybackManager: ObservableObject {
         player = nil
     }
     
-    /// Two-stage analysis: locate one swing at 8 FPS, then decode only that
-    /// window at the real source frame rate and solve P1–P8 as one path.
+    /// Runs the shared adaptive engine and publishes only the active run.
     func analyzeSwing(completion: @escaping (SwingAnalysisResult) -> Void) {
+        // A replacement request always invalidates the old run silently, even
+        // if the replacement asset itself turns out to be unusable.
         analysisRunGate.cancel()
         guard let player = player,
-              let currentItem = player.currentItem else {
+              let currentItem = player.currentItem,
+              let asset = currentItem.asset as? AVURLAsset else {
             finishAnalysis(with: .noVideo, completion: completion)
             return
         }
-        
-        let asset = currentItem.asset
-        let durationSeconds = asset.duration.seconds
-        guard durationSeconds > 0 && !durationSeconds.isNaN else {
-            finishAnalysis(with: .invalidDuration, completion: completion)
-            return
-        }
 
+        // `begin` atomically supersedes any older run without publishing a
+        // cancellation failure. Its callbacks are filtered by this new ID.
         let runID = analysisRunGate.begin()
-        
         isScanning = true
         scanProgress = 0.0
-        analysisProgressPhase = .locating
+        analysisProgressPhase = .preparing
         analysisResult = nil
         analysisFailure = nil
         analysisState = .scanning(progress: 0)
-        
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self, self.analysisRunGate.isActive(runID) else { return }
-
-            let generator = AVAssetImageGenerator(asset: asset)
-            generator.appliesPreferredTrackTransform = true
-            generator.requestedTimeToleranceBefore = .zero
-            generator.requestedTimeToleranceAfter = .zero
-
-            let golferTracker = PrimaryGolferTracker()
-            let coarseTimes = SwingWindowLocator.sampleTimes(duration: durationSeconds)
-            var coarseSamples: [CoarseSwingSample] = []
-            var coarseFrameFailures = 0
-
-            for (index, seconds) in coarseTimes.enumerated() {
-                guard self.analysisRunGate.isActive(runID) else { return }
-                let requestedTime = CMTime(seconds: seconds, preferredTimescale: 600)
-                autoreleasepool {
-                    var actualTime = CMTime.invalid
-                    guard let cgImage = try? generator.copyCGImage(at: requestedTime, actualTime: &actualTime) else {
-                        coarseFrameFailures += 1
-                        return
-                    }
-                    let actualSeconds = actualTime.isValid && actualTime.seconds.isFinite
-                        ? actualTime.seconds
-                        : seconds
-                    let selectedPose: PoseEstimationResult? = self.poseQueue.sync {
-                        let candidates = self.poseDetector.detectPoses(in: cgImage, orientation: .up)
-                        return golferTracker.select(from: candidates, stableBall: nil)
-                    }
-                    let sample = selectedPose.map {
-                        SwingPoseSample(time: actualSeconds, pose: $0)
-                    }
-                    coarseSamples.append(CoarseSwingSample(time: actualSeconds, pose: sample))
-                }
-                let progress = Double(index + 1) / Double(max(1, coarseTimes.count)) * 0.25
+        analysisQueue.async { [weak self] in
+            guard let self, self.analysisRunGate.isActive(runID) else { return }
+            let outcome = SwingVideoAnalysisEngine().analyze(
+                url: asset.url,
+                runID: runID,
+                gate: self.analysisRunGate
+            ) { [weak self] update in
                 DispatchQueue.main.async {
-                    guard self.analysisRunGate.isActive(runID) else { return }
-                    self.analysisProgressPhase = .locating
-                    self.scanProgress = progress
-                    self.analysisState = .scanning(progress: progress)
+                    guard let self, self.analysisRunGate.isActive(runID) else { return }
+                    self.analysisProgressPhase = update.phase
+                    self.scanProgress = update.progress
+                    self.analysisState = .scanning(progress: update.progress)
                 }
             }
-
-            guard self.analysisRunGate.isActive(runID) else { return }
-            if coarseSamples.isEmpty || coarseFrameFailures > coarseTimes.count / 2 {
-                self.publishAnalysisFailure(.frameExtractionFailed, runID: runID, completion: completion)
-                return
-            }
-
-            let window: SwingWindow
-            switch SwingWindowLocator.locate(samples: coarseSamples) {
-            case let .located(locatedWindow):
-                window = locatedWindow
-            case let .failed(reason):
-                let failure: AnalysisFailure
-                switch reason {
-                case .insufficientPoseEvidence: failure = .noStableGolfer
-                case .noSwingMotion: failure = .noSwingMotion
-                case .ambiguousCandidates: failure = .ambiguousSwingWindows
-                case .windowTooLong: failure = .swingWindowTooLong
-                }
-                self.publishAnalysisFailure(failure, runID: runID, completion: completion)
-                return
-            }
-
-            let fineReferences = FineSwingSamplingPlan.frames(
-                window: window,
-                sourceFrameRate: self.sourceFrameRate,
-                duration: durationSeconds
-            )
-            guard !fineReferences.isEmpty else {
-                self.publishAnalysisFailure(.frameExtractionFailed, runID: runID, completion: completion)
-                return
-            }
-
-            var fineFrames: [SwingFrameSample] = []
-            var rawPosesByFrame: [Int: PoseEstimationResult] = [:]
-            var fineFrameFailures = 0
-            for (index, reference) in fineReferences.enumerated() {
-                guard self.analysisRunGate.isActive(runID) else { return }
-                let requestedTime = CMTime(seconds: reference.time, preferredTimescale: 60_000)
-                autoreleasepool {
-                    guard let cgImage = try? generator.copyCGImage(at: requestedTime, actualTime: nil) else {
-                        fineFrameFailures += 1
-                        return
-                    }
-                    let selected: PoseEstimationResult? = self.poseQueue.sync {
-                        let candidates = self.poseDetector.detectPoses(in: cgImage, orientation: .up)
-                        return golferTracker.select(from: candidates, stableBall: nil)
-                    }
-                    if let selected {
-                        rawPosesByFrame[reference.sourceFrameIndex] = selected
-                    }
-                    let pose = selected.map {
-                        SwingPoseSample(
-                            time: reference.time,
-                            sourceFrameIndex: reference.sourceFrameIndex,
-                            pose: $0
-                        )
-                    }
-                    fineFrames.append(
-                        SwingFrameSample(
-                            sourceFrameIndex: reference.sourceFrameIndex,
-                            time: reference.time,
-                            pose: pose,
-                            objectEvidence: .empty
-                        )
-                    )
-                }
-
-                let progress = 0.25 + Double(index + 1) / Double(max(1, fineReferences.count)) * 0.55
-                DispatchQueue.main.async {
-                    guard self.analysisRunGate.isActive(runID) else { return }
-                    self.analysisProgressPhase = .extracting
-                    self.scanProgress = progress
-                    self.analysisState = .scanning(progress: progress)
-                }
-            }
-
-            guard self.analysisRunGate.isActive(runID) else { return }
-            let poseFrameCount = fineFrames.filter { $0.pose != nil }.count
-            if fineFrameFailures > fineReferences.count / 3 {
-                self.publishAnalysisFailure(.frameExtractionFailed, runID: runID, completion: completion)
-                return
-            }
-            guard poseFrameCount >= SwingStage.allCases.count else {
-                self.publishAnalysisFailure(.noStableGolfer, runID: runID, completion: completion)
-                return
-            }
-
-            let preliminaryResult = SwingStageDetector.detect(frames: fineFrames)
-            let objectReferences = SparseObjectSamplingPlan.frames(
-                from: fineReferences,
-                preliminaryResult: preliminaryResult
-            )
-            let fineObjectDetector = SwingObjectDetector()
-            var objectEvidenceByFrame: [Int: SwingObjectEvidence] = [:]
-            for (index, reference) in objectReferences.enumerated() {
-                guard self.analysisRunGate.isActive(runID) else { return }
-                let requestedTime = CMTime(seconds: reference.time, preferredTimescale: 60_000)
-                autoreleasepool {
-                    guard let cgImage = try? generator.copyCGImage(at: requestedTime, actualTime: nil) else {
-                        return
-                    }
-                    let objects = self.poseQueue.sync {
-                        fineObjectDetector.detect(
-                            in: cgImage,
-                            pose: rawPosesByFrame[reference.sourceFrameIndex]
-                        )
-                    }
-                    objectEvidenceByFrame[reference.sourceFrameIndex] = objects
-                }
-
-                let progress = 0.80 + Double(index + 1) / Double(max(1, objectReferences.count)) * 0.15
-                DispatchQueue.main.async {
-                    guard self.analysisRunGate.isActive(runID) else { return }
-                    self.analysisProgressPhase = .extracting
-                    self.scanProgress = progress
-                    self.analysisState = .scanning(progress: progress)
-                }
-            }
-
-            let stableBall = fineObjectDetector.stableBall?.center
-            fineFrames = fineFrames.map { frame in
-                let detected = objectEvidenceByFrame[frame.sourceFrameIndex] ?? .empty
-                let objects: SwingObjectEvidence
-                if detected.stableBall == nil, let stableBall {
-                    objects = SwingObjectEvidence(
-                        shaft: detected.shaft,
-                        ball: detected.ball,
-                        stableBall: stableBall,
-                        ballLocalChange: detected.ballLocalChange
-                    )
-                } else {
-                    objects = detected
-                }
-                return SwingFrameSample(
-                    sourceFrameIndex: frame.sourceFrameIndex,
-                    time: frame.time,
-                    pose: frame.pose,
-                    objectEvidence: objects
-                )
-            }
-
             DispatchQueue.main.async {
                 guard self.analysisRunGate.isActive(runID) else { return }
-                self.analysisProgressPhase = .solving
-                self.scanProgress = 0.97
-                self.analysisState = .scanning(progress: 0.97)
-            }
-
-            let result = SwingStageDetector.detect(frames: fineFrames)
-            DispatchQueue.main.async {
-                guard self.analysisRunGate.isActive(runID) else { return }
-                self.analysisRunGate.complete(runID)
                 self.isScanning = false
-                self.scanProgress = 1
-                self.analysisResult = result
-                if result.detectedMarkers.isEmpty {
-                    self.analysisFailure = .insufficientPoseEvidence
-                    self.analysisState = .failed(.insufficientPoseEvidence)
-                } else {
-                    self.analysisState = .completed(result)
+                switch outcome {
+                case let .completed(output):
+                    self.scanProgress = 1
+                    self.sourceFrameRate = output.sourceFrameRate
+                    self.analysisResult = output.result
+                    self.analysisFailure = nil
+                    self.analysisState = .completed(output.result)
+                    self.analysisRunGate.complete(runID)
+                    completion(output.result)
+                case let .failed(reason):
+                    self.scanProgress = 0
+                    self.analysisResult = nil
+                    self.analysisFailure = reason
+                    self.analysisState = .failed(reason)
+                    self.analysisRunGate.complete(runID)
+                case .cancelled:
+                    break
                 }
-                completion(result)
             }
-        }
-    }
-
-    private func publishAnalysisFailure(
-        _ failure: AnalysisFailure,
-        runID: UUID,
-        completion: @escaping (SwingAnalysisResult) -> Void
-    ) {
-        let result = SwingAnalysisResult(
-            detectedMarkers: [],
-            unresolvedStages: Set(SwingStage.allCases),
-            detections: SwingStage.allCases.map {
-                SwingStageDetection(stage: $0, time: nil, confidence: 0, status: .unresolved)
-            }
-        )
-        DispatchQueue.main.async {
-            guard self.analysisRunGate.isActive(runID) else { return }
-            self.analysisRunGate.complete(runID)
-            self.isScanning = false
-            self.scanProgress = 0
-            self.analysisResult = result
-            self.analysisFailure = failure
-            self.analysisState = .failed(failure)
-            completion(result)
         }
     }
 
     func cancelAnalysis() {
+        let wasScanning = isScanning
+        if wasScanning {
+            analysisFailure = .analysisCancelled
+            analysisState = .failed(.analysisCancelled)
+            analysisResult = nil
+        }
+        // Explicit cancellation publishes its reason before invalidating the ID.
+        // Supersession never calls this path; `begin()` silently replaces the ID.
         analysisRunGate.cancel()
         isScanning = false
         scanProgress = 0
         analysisProgressPhase = .preparing
-        analysisState = .idle
-        analysisResult = nil
-        analysisFailure = nil
+        if !wasScanning {
+            analysisState = .idle
+            analysisResult = nil
+            analysisFailure = nil
+        }
     }
 
     /// 兼容旧界面调用；新界面应使用 analyzeSwing 读取完整状态。
@@ -570,6 +382,9 @@ class VideoPlaybackManager: ObservableObject {
 
     private func finishAnalysis(with failure: AnalysisFailure, completion: @escaping (SwingAnalysisResult) -> Void) {
         let result = SwingAnalysisResult(detectedMarkers: [], unresolvedStages: Set(SwingStage.allCases))
+        isScanning = false
+        scanProgress = 0
+        analysisProgressPhase = .preparing
         analysisResult = result
         analysisFailure = failure
         analysisState = .failed(failure)

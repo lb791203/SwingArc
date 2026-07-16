@@ -65,7 +65,8 @@ struct WorkspaceModeTransition: Equatable {
 enum AnalysisProgressPhase: Equatable {
     case preparing
     case locating
-    case extracting
+    case expanding
+    case evidence
     case solving
 }
 
@@ -76,9 +77,10 @@ struct AnalysisProgressPresentation: Equatable {
     var title: String {
         switch phase {
         case .preparing: return "准备视频"
-        case .locating: return "定位挥杆段"
-        case .extracting: return "逐帧提取"
-        case .solving: return "阶段求解"
+        case .locating: return "定位挥杆核心"
+        case .expanding: return "扩展挥杆边界"
+        case .evidence: return "提取候选证据"
+        case .solving: return "全局阶段求解"
         }
     }
 
@@ -86,13 +88,82 @@ struct AnalysisProgressPresentation: Equatable {
         switch phase {
         case .preparing: return "正在读取视频信息"
         case .locating: return "正在以 8 FPS 粗扫完整视频"
-        case .extracting: return "正在提取人体关节证据"
-        case .solving: return "正在按时间顺序定位 P1–P8"
+        case .expanding: return "正在寻找准备位和稳定收杆"
+        case .evidence: return "正在检查关节、杆身和球位"
+        case .solving: return "正在联合定位 P1–P8"
         }
     }
 
     var percentage: Int {
         Int((min(max(progress, 0), 1) * 100).rounded())
+    }
+}
+
+struct AnalysisFailurePresentation: Equatable {
+    let failure: AnalysisFailure
+
+    var message: String {
+        switch failure {
+        case .noVideo:
+            return "没有可分析的视频，请重新导入或录制。"
+        case .invalidDuration:
+            return "视频读取失败，请重新导入。"
+        case .insufficientPoseEvidence:
+            return "未检测到清晰人体。请选择全身入镜、光线充足的视频；手工标注不会被清除。"
+        case .noStableGolfer:
+            return "无法持续锁定主球员。请使用固定机位、全身入镜且避免多人遮挡的视频。"
+        case .noSwingMotion:
+            return "没有找到完整挥杆动作。请确认视频包含从准备到收杆的连续挥杆。"
+        case .ambiguousSwingWindows:
+            return "检测到多个强度接近的挥杆片段。请裁剪为单次挥杆后重新分析。"
+        case .swingWindowTooLong:
+            return "挥杆候选片段超过 6 秒。请裁剪无关准备或走动部分后重试。"
+        case .frameExtractionFailed:
+            return "源视频帧读取不完整，无法进行逐帧定位。请重新导入原始视频。"
+        case .missingAddressBoundary:
+            return "找不到准备位到起杆的边界"
+        case .missingTopTransition:
+            return "找不到上杆顶点到下杆的转换"
+        case .noImpactCorridor:
+            return "找不到可信的击球候选段"
+        case .missingFinishBoundary:
+            return "找不到稳定收杆位置"
+        case .incompleteSwingClip:
+            return "视频缺少完整挥杆前段或后段"
+        case .analysisCancelled:
+            return "分析已取消"
+        }
+    }
+}
+
+enum SwingVideoAnalysisProgressPolicy {
+    static func expansionProgress(
+        cachedFrameCount: Int,
+        maximumFrameBudget: Int
+    ) -> Double {
+        let denominator = max(1, maximumFrameBudget)
+        let ratio = min(1, max(0, Double(cachedFrameCount) / Double(denominator)))
+        return 0.20 + ratio * 0.50
+    }
+
+    static func evidenceProgress(
+        processedReferenceCount: Int,
+        totalReferenceCount: Int
+    ) -> Double {
+        let denominator = max(1, totalReferenceCount)
+        let ratio = min(1, max(0, Double(processedReferenceCount) / Double(denominator)))
+        return 0.70 + ratio * 0.25
+    }
+}
+
+enum SwingVideoAnalysisValidationPolicy {
+    static func transitionFailure(
+        hasTopTransition: Bool,
+        hasImpactCandidates: Bool
+    ) -> AnalysisFailure? {
+        guard hasTopTransition else { return .missingTopTransition }
+        guard hasImpactCandidates else { return .noImpactCorridor }
+        return nil
     }
 }
 
@@ -113,6 +184,15 @@ final class AnalysisRunGate: @unchecked Sendable {
         lock.lock()
         activeID = nil
         lock.unlock()
+    }
+
+    @discardableResult
+    func cancel(_ id: UUID) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard activeID == id else { return false }
+        activeID = nil
+        return true
     }
 
     func isActive(_ id: UUID) -> Bool {

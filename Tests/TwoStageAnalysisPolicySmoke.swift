@@ -3,16 +3,31 @@ import Foundation
 @main
 struct TwoStageAnalysisPolicySmoke {
     static func main() {
-        let locating = AnalysisProgressPresentation(phase: .locating, progress: 0.25)
-        precondition(locating.title == "定位挥杆段")
-        precondition(locating.detail.contains("粗扫"))
+        precondition(AnalysisProgressPresentation(phase: .locating, progress: 0.20).detail.contains("8 FPS"))
+        precondition(AnalysisProgressPresentation(phase: .expanding, progress: 0.50).title == "扩展挥杆边界")
+        precondition(AnalysisProgressPresentation(phase: .evidence, progress: 0.80).title == "提取候选证据")
+        precondition(AnalysisProgressPresentation(phase: .solving, progress: 0.96).title == "全局阶段求解")
 
-        let failures: [AnalysisFailure] = [
-            .noStableGolfer,
-            .noSwingMotion,
-            .ambiguousSwingWindows,
-            .swingWindowTooLong
+        let explicitFailures: [AnalysisFailure] = [
+            .missingAddressBoundary,
+            .missingTopTransition,
+            .noImpactCorridor,
+            .missingFinishBoundary,
+            .incompleteSwingClip,
+            .analysisCancelled
         ]
-        precondition(failures.count == 4)
+        precondition(explicitFailures.count == 6)
+
+        let expectedCopy: [(AnalysisFailure, String)] = [
+            (.missingAddressBoundary, "找不到准备位到起杆的边界"),
+            (.missingTopTransition, "找不到上杆顶点到下杆的转换"),
+            (.noImpactCorridor, "找不到可信的击球候选段"),
+            (.missingFinishBoundary, "找不到稳定收杆位置"),
+            (.incompleteSwingClip, "视频缺少完整挥杆前段或后段"),
+            (.analysisCancelled, "分析已取消")
+        ]
+        for (failure, message) in expectedCopy {
+            precondition(AnalysisFailurePresentation(failure: failure).message == message)
+        }
     }
 }

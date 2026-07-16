@@ -6,8 +6,8 @@ struct WorkspaceModelsSmoke {
         precondition(WorkspaceLayoutMode.resolve(isRegularWidth: false) == .compact)
         precondition(WorkspaceLayoutMode.resolve(isRegularWidth: true) == .regular)
 
-        let extraction = AnalysisProgressPresentation(phase: .extracting, progress: 0.5)
-        precondition(extraction.title == "逐帧提取")
+        let extraction = AnalysisProgressPresentation(phase: .evidence, progress: 0.5)
+        precondition(extraction.title == "提取候选证据")
         precondition(extraction.percentage == 50)
         precondition(AnalysisProgressPresentation(phase: .solving, progress: 1.4).percentage == 100)
 
