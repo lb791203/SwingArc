@@ -75,7 +75,11 @@ SwingArc 是一款专为 iOS 设备开发的**原生高尔夫挥杆分析与画�
 
 在真实 iPhone 上重新构建后，使用正面或近正面挥杆视频逐项验证：正常稳定挥杆、上杆顶点短暂停顿、单侧手腕遮挡、快挥、慢挥、无人体视频、包含两次挥杆的视频，以及手动校正 P4 后重新分析并保存/重开项目。
 
-对每个视频记录 P1–P8 的人工帧、自动帧、帧误差、`已确认 / 低置信度 / 未确定`、杆身证据和球位证据。当前基准目标为 P6 误差不超过正负 1 个源视频帧，其余阶段不超过正负 2 帧。无充分杆球证据时 P6 不得显示为已确认；手动设置的阶段必须在重新分析、保存和恢复后保持不变。跨视频泛化结论必须至少增加 4 段同视角人工标注视频后才能给出。
+对每个视频记录 P1–P8 的人工帧、自动帧、帧误差、`已确认 / 低置信度 / 未确定`、杆身证据和球位证据。当前冻结基准要求所有 P1–P8 阶段误差不超过正负 1 个源视频帧。无充分杆球证据时 P6 不得显示为已确认；手动设置的阶段必须在重新分析、保存和恢复后保持不变。跨视频泛化结论必须至少增加 4 段同视角人工标注视频后才能给出。
+
+### P1–P8 accuracy contract
+
+Automatic stages always reference observed source frames. Accepted complete fixed-camera clips must place every P1–P8 stage within ±1 source frame of a frozen two-pass manual annotation. Missing required evidence is reported as low confidence, unresolved, or a specific clip failure; the app never fills a stage from a fixed timestamp or video percentage.
 
 ## Studio Focus 通用界面
 
