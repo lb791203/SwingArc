@@ -3,6 +3,8 @@ import Foundation
 @main
 struct ImpactCorridorResolverSmoke {
     static func main() {
+        verifyBuiltTimelineDoesNotCloseCorridorDuringBackswing()
+
         let stableBall = CGPoint(x: 0.70, y: 0.82)
         let alignedShaft = ClubShaftEvidence(
             start: CGPoint(x: 0.50, y: 0.60),
@@ -70,6 +72,92 @@ struct ImpactCorridorResolverSmoke {
         let bestFive = ImpactCorridorResolver.candidates(in: crowdedTimeline)
         precondition(bestFive.count == 5)
         precondition(bestFive.map(\.sourceFrameIndex) == [602, 603, 604, 605, 606])
+    }
+
+    private static func verifyBuiltTimelineDoesNotCloseCorridorDuringBackswing() {
+        let impactOrdinals = Set([34, 35, 36])
+        let lateDownswingOrdinals = Set([69, 70, 71])
+        let evidence = (0...78).map { ordinal -> SwingFrameEvidence in
+            let time = Double(ordinal) / 30
+            let velocityY: CGFloat
+            switch ordinal {
+            case 0...8, 24...29, 58...68, 76...78:
+                velocityY = 0
+            case 9...23, 45...57:
+                velocityY = -0.50
+            default:
+                velocityY = 1.50
+            }
+
+            let isCorridorFrame = impactOrdinals.contains(ordinal)
+                || lateDownswingOrdinals.contains(ordinal)
+            let hand = isCorridorFrame
+                ? CGPoint(x: 0.50, y: 0.61)
+                : CGPoint(x: 0.20, y: 0.20)
+            let stableBall = isCorridorFrame ? CGPoint(x: 0.70, y: 0.82) : nil
+            let alignedShaft = isCorridorFrame
+                ? ClubShaftEvidence(
+                    start: CGPoint(x: 0.50, y: 0.60),
+                    end: CGPoint(x: 0.60, y: 0.71),
+                    confidence: 0.95
+                )
+                : nil
+            let pose = completePose(
+                time: time,
+                sourceFrameIndex: 1_000 + ordinal,
+                hand: hand
+            )
+            return SwingFrameEvidence(
+                sourceFrameIndex: 1_000 + ordinal,
+                time: time,
+                pose: pose,
+                objectEvidence: SwingObjectEvidence(
+                    shaft: alignedShaft,
+                    ball: stableBall.map {
+                        BallEvidence(center: $0, radius: 0.012, confidence: 0.95)
+                    },
+                    stableBall: stableBall,
+                    ballLocalChange: isCorridorFrame ? 0.80 : 0
+                ),
+                leadArm: .left,
+                leadArmAngle: 30,
+                leadArmExtension: 175,
+                shoulderAngle: 12,
+                hipAngle: isCorridorFrame ? 32 : 0,
+                handCenter: hand,
+                hipCenter: CGPoint(x: 0.50, y: 0.62),
+                handVelocity: CGPoint(x: 0, y: velocityY),
+                handAcceleration: isCorridorFrame ? CGPoint(x: 0, y: 4) : .zero,
+                headSpeed: velocityY == 0 ? 0.01 : 0.03,
+                hipSpeed: velocityY == 0 ? 0.01 : 0.03,
+                poseCoverage: 1
+            )
+        }
+
+        let timeline = SwingEvidenceTimeline.build(from: evidence)
+        guard let downswingStart = timeline.firstIndex(where: \.sustainedDownswing) else {
+            preconditionFailure("fixture must contain sustained downswing")
+        }
+        precondition(timeline[..<downswingStart].contains {
+            $0.sustainedBackswing && $0.sustainedFollowThrough
+        })
+        precondition(timeline.contains {
+            $0.frame.sourceFrameIndex >= 1_045 && $0.sustainedFollowThrough
+        })
+        precondition(timeline.contains(where: \.isAddressBoundary))
+        precondition(timeline.contains(where: \.isTopPlateauEnd))
+        precondition(timeline.contains(where: \.isFinishPlateauStart))
+
+        let candidates = ImpactCorridorResolver.candidates(in: timeline)
+        let candidateFrames = Set(candidates.map(\.sourceFrameIndex))
+        precondition(
+            candidateFrames.isSuperset(of: [1_034, 1_035, 1_036]),
+            "pre-top backswing closed the corridor before P6: \(candidates)"
+        )
+        precondition(
+            candidateFrames.isDisjoint(with: [1_069, 1_070, 1_071]),
+            "actual follow-through did not close the corridor: \(candidates)"
+        )
     }
 
     private static func temporalFrame(

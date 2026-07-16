@@ -949,11 +949,15 @@ enum ImpactCorridorResolver {
     private static let maximumCandidateCount = 5
 
     static func candidates(in timeline: [SwingTemporalFrame]) -> [StageCandidate] {
+        var downswingStarted = false
         var followThroughStarted = false
         var candidates: [StageCandidate] = []
 
         for (evidenceIndex, temporalFrame) in timeline.enumerated() {
-            if temporalFrame.sustainedFollowThrough {
+            if temporalFrame.sustainedDownswing {
+                downswingStarted = true
+            }
+            if downswingStarted && temporalFrame.sustainedFollowThrough {
                 followThroughStarted = true
             }
             guard !followThroughStarted,
