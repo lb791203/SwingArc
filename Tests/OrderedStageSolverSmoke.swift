@@ -102,6 +102,7 @@ struct OrderedStageSolverSmoke {
             sourceFrameIndex: frameIndex,
             time: time,
             pose: pose,
+            rawPose: pose,
             objectEvidence: object,
             leadArm: .left,
             leadArmAngle: armAngle,

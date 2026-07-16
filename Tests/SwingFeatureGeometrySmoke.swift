@@ -143,5 +143,64 @@ struct SwingFeatureGeometrySmoke {
                 .qualityFlags.contains(.labelSwapSuspected) == true,
             "A single raw label reversal must remain visible after feature smoothing"
         )
+
+        let ambiguousPose = SwingPoseSample(
+            time: 0,
+            leftWrist: CGPoint(x: 0.25, y: 0.42),
+            rightWrist: CGPoint(x: 0.75, y: 0.42),
+            leftElbow: CGPoint(x: 0.37, y: 0.42),
+            rightElbow: CGPoint(x: 0.63, y: 0.42),
+            leftShoulder: CGPoint(x: 0.49, y: 0.42),
+            rightShoulder: CGPoint(x: 0.51, y: 0.42),
+            leftHip: CGPoint(x: 0.46, y: 0.64),
+            rightHip: CGPoint(x: 0.54, y: 0.64),
+            head: CGPoint(x: 0.50, y: 0.20),
+            spineAngle: 0,
+            aggregateConfidence: 0.95
+        )
+        let ambiguousFrames = (0..<7).map { index in
+            SwingFrameSample(
+                sourceFrameIndex: 200 + index,
+                time: Double(index) / 30,
+                pose: ambiguousPose,
+                objectEvidence: .empty
+            )
+        }
+        let ambiguousTimeline = SwingEvidenceTimeline.build(
+            from: SwingFeatureExtractor.extract(frames: ambiguousFrames)
+        )
+        precondition(ambiguousTimeline.allSatisfy { $0.frame.leadArm == .unknown })
+        precondition(ambiguousTimeline.allSatisfy { $0.frame.leadArmAngle == nil })
+        precondition(ambiguousTimeline.allSatisfy { $0.frame.leadArmExtension == nil })
+        precondition(ambiguousTimeline.allSatisfy { $0.qualityFlags.contains(.missingLeadArm) })
+
+        let occludedLeft = SwingPoseSample(
+            time: pose.time,
+            leftWrist: pose.leftWrist,
+            rightWrist: pose.rightWrist,
+            leftElbow: nil,
+            rightElbow: pose.rightElbow,
+            leftShoulder: pose.leftShoulder,
+            rightShoulder: pose.rightShoulder,
+            leftHip: pose.leftHip,
+            rightHip: pose.rightHip,
+            head: pose.head,
+            spineAngle: pose.spineAngle,
+            aggregateConfidence: pose.aggregateConfidence
+        )
+        let occludedFrames = (0..<7).map { index in
+            SwingFrameSample(
+                sourceFrameIndex: 300 + index,
+                time: Double(index) / 30,
+                pose: index == 3 ? occludedLeft : pose,
+                objectEvidence: object
+            )
+        }
+        let occludedTimeline = SwingEvidenceTimeline.build(
+            from: SwingFeatureExtractor.extract(frames: occludedFrames)
+        )
+        let selectedOcclusion = occludedTimeline[3]
+        precondition(selectedOcclusion.frame.leadArmAngle != nil, "Smoothing may retain ranking geometry")
+        precondition(selectedOcclusion.qualityFlags.contains(.missingLeadArm))
     }
 }

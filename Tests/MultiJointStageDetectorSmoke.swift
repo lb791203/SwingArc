@@ -11,7 +11,7 @@ struct MultiJointStageDetectorSmoke {
             sample(0.96, 0.45)
         ]
 
-        let result = SwingStageDetector.detect(samples: samples)
+        let result = SwingStageDetector.detectLegacySamplesForSmokeTests(samples)
         precondition(result.detections.map(\.stage) == SwingStage.allCases)
         precondition(result.detections.allSatisfy { $0.status == .confirmed })
         let times = result.detections.compactMap(\.time)
@@ -27,7 +27,7 @@ struct MultiJointStageDetectorSmoke {
                 head: nil, spineAngle: nil, aggregateConfidence: 0.8
             )
         }
-        precondition(SwingStageDetector.detect(samples: occluded).detections.allSatisfy { $0.status != .confirmed })
+        precondition(SwingStageDetector.detectLegacySamplesForSmokeTests(occluded).detections.allSatisfy { $0.status != .confirmed })
 
         // The frame-based production entry point must not fall back to the
         // ordered solver and invent a complete path when club/ball and robust

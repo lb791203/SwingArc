@@ -30,9 +30,23 @@ struct FineSwingSamplingPlanSmoke {
             sourceFrameRate: 30,
             duration: 1
         )
-        precondition(lowRate.count == 31)
+        precondition(lowRate.count == 30)
+        precondition(lowRate.last?.sourceFrameIndex == 29)
         precondition(zip(lowRate, lowRate.dropFirst()).allSatisfy {
             $1.sourceFrameIndex - $0.sourceFrameIndex == 1
         })
+
+        let explicitBound = FineSwingSamplingPlan.frames(
+            window: SwingWindow(startTime: 0.8, endTime: 1.0),
+            sourceFrameRate: 30,
+            duration: 1,
+            maximumSourceFrameIndex: 28
+        )
+        precondition(explicitBound.last?.sourceFrameIndex == 28)
+        precondition(explicitBound.allSatisfy { $0.sourceFrameIndex <= 28 })
+
+        precondition(
+            SourceFrameBounds.maximumSourceFrameIndex(duration: 1, sourceFrameRate: 30) == 29
+        )
     }
 }

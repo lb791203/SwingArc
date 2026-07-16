@@ -117,7 +117,7 @@ struct AnalysisFailurePresentation: Equatable {
         case .ambiguousSwingWindows:
             return "检测到多个强度接近的挥杆片段。请裁剪为单次挥杆后重新分析。"
         case .swingWindowTooLong:
-            return "挥杆候选片段超过 6 秒。请裁剪无关准备或走动部分后重试。"
+            return "挥杆候选片段超过 8 秒。请裁剪无关准备或走动部分后重试。"
         case .frameExtractionFailed:
             return "源视频帧读取不完整，无法进行逐帧定位。请重新导入原始视频。"
         case .missingAddressBoundary:

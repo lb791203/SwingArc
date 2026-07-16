@@ -15,7 +15,7 @@ struct SwingStageDetectorSmoke {
             SwingPoseSample(time: 0.9, wristY: 0.46)
         ]
 
-        let result = SwingStageDetector.detect(samples: samples)
+        let result = SwingStageDetector.detectLegacySamplesForSmokeTests(samples)
         precondition(result.detectedMarkers.isEmpty)
         precondition(result.unresolvedStages == Set(SwingStage.allCases))
         precondition(SwingStage.allCases.count == 8)
@@ -41,7 +41,7 @@ struct SwingStageDetectorSmoke {
             SwingPoseSample(time: 1.04, wristY: 0.46),
             SwingPoseSample(time: 1.12, wristY: 0.46)
         ]
-        precondition(SwingStageDetector.detect(samples: plateauedSwing).unresolvedStages == Set(SwingStage.allCases))
+        precondition(SwingStageDetector.detectLegacySamplesForSmokeTests(plateauedSwing).unresolvedStages == Set(SwingStage.allCases))
 
         // P4 is the first backswing apex that reverses into the downswing.
         // A later follow-through/finish height must never replace it merely
@@ -51,11 +51,11 @@ struct SwingStageDetectorSmoke {
             (0.32, 0.38), (0.40, 0.66), (0.48, 0.86), (0.56, 0.52),
             (0.64, 0.30), (0.72, 0.12), (0.80, 0.12)
         ].map { completeSample(time: $0.0, wristY: $0.1) }
-        let topDetection = SwingStageDetector.detect(samples: followThroughHigherThanTop)
+        let topDetection = SwingStageDetector.detectLegacySamplesForSmokeTests(followThroughHigherThanTop)
             .detections.first(where: { $0.stage == .top })
         precondition(topDetection?.time == 0.24)
 
-        let empty = SwingStageDetector.detect(samples: [])
+        let empty = SwingStageDetector.detectLegacySamplesForSmokeTests([])
         precondition(empty.detectedMarkers.isEmpty)
         precondition(empty.unresolvedStages == Set(SwingStage.allCases))
     }

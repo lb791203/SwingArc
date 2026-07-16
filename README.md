@@ -71,7 +71,7 @@ SwingArc 是一款专为 iOS 设备开发的**原生高尔夫挥杆分析与画�
 
 ## P1–P8 多关节定位验收
 
-当前首版面向 30–120 FPS、正面或近正面固定机位。生产流程为：8 FPS 姿态粗扫定位唯一挥杆核心 → 向前/向后自适应扩展边界 → 按源视频真实帧率提取未缓存帧 → 在候选邻域稀疏提取杆身与球位证据 → 以冲击走廊为锚点双向生成 P1–P8 候选 → 通过方向、关节、手相对髋部位置与相邻阶段节奏联合求解。整个自适应窗口最多 8 秒；超出后明确返回失败，不继续无边界扫描。
+当前首版面向 30–120 FPS、正面或近正面固定机位。生产流程为：8 FPS 姿态粗扫定位唯一挥杆核心 → 向前/向后自适应扩展边界 → 按源视频真实帧率提取未缓存帧 → 在候选邻域稀疏提取杆身与球位证据 → 以冲击走廊为锚点双向生成 P1–P8 候选 → 通过方向、关节、手相对髋部位置与证据质量联合求解。整个自适应窗口严格不超过 8 秒；达到上限后以固定宽度朝缺失边界移动，并淘汰离开窗口的细扫缓存，不重复解码源帧。
 
 所有自动阶段必须对应实际提取到的源视频帧。分析不插帧、不按视频百分比补点，也不把固定时间偏移当作阶段。缺少地址、顶点、冲击走廊或收杆边界时会返回对应失败；剪掉挥杆首尾的素材返回不完整挥杆错误。P6 没有有效杆身/球位变化证据时最高只能是“低置信度”，不能显示为“已确认”。
 
@@ -83,7 +83,7 @@ SwingArc 是一款专为 iOS 设备开发的**原生高尔夫挥杆分析与画�
 
 Automatic stages always reference observed source frames. Accepted complete fixed-camera clips must place every P1–P8 stage within ±1 source frame of a frozen two-pass manual annotation. Missing required evidence is reported as low confidence, unresolved, or a specific clip failure; the app never fills a stage from a fixed timestamp or video percentage.
 
-当前已验证基准 `/Users/liangbo/Desktop/IMG_4500.mov`：P1–P8 实际帧为 `374, 414, 432, 453, 466, 480, 495, 513`，相对冻结人工帧的绝对误差为 `1, 0, 1, 0, 0, 1, 1, 0`，本机分析耗时约 14.40 秒。可重复运行：
+当前已验证基准 `/Users/liangbo/Desktop/IMG_4500.mov`：P1–P8 实际帧为 `374, 414, 432, 453, 466, 480, 495, 513`，相对冻结人工帧的绝对误差为 `1, 0, 1, 0, 0, 1, 1, 0`；自适应窗口为 `12.2667–20.2667` 秒（严格 8.0 秒），本机分析耗时约 12.55 秒。可重复运行：
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \

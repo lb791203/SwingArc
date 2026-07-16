@@ -39,6 +39,30 @@ struct AdaptiveSwingWindowPlannerSmoke {
             ) == .ready(initial)
         )
 
+        let justBelowLimit = SwingWindow(startTime: 5, endTime: 12.9)
+        precondition(
+            AdaptiveSwingWindowPlanner.nextAction(
+                current: justBelowLimit,
+                duration: duration,
+                evidence: AdaptiveBoundaryEvidence(
+                    hasAddressBoundary: true,
+                    hasFinishBoundary: false
+                )
+            ) == .expand(SwingWindow(startTime: 5.4, endTime: 13.4)),
+            "The final growth step must cap at exactly eight seconds and shift toward the missing finish"
+        )
+        precondition(
+            AdaptiveSwingWindowPlanner.nextAction(
+                current: SwingWindow(startTime: 5, endTime: 13.01),
+                duration: duration,
+                evidence: AdaptiveBoundaryEvidence(
+                    hasAddressBoundary: true,
+                    hasFinishBoundary: true
+                )
+            ) != .ready(SwingWindow(startTime: 5, endTime: 13.01)),
+            "A window above the eight-second contract must never become ready"
+        )
+
         precondition(
             AdaptiveSwingWindowPlanner.nextAction(
                 current: SwingWindow(startTime: 0, endTime: 3),
@@ -69,7 +93,8 @@ struct AdaptiveSwingWindowPlannerSmoke {
                     hasAddressBoundary: false,
                     hasFinishBoundary: true
                 )
-            ) == .failed(.missingAddressBoundary)
+            ) == .expand(SwingWindow(startTime: 4.5, endTime: 12.5)),
+            "At maximum width the planner must shift left toward a missing address"
         )
         precondition(
             AdaptiveSwingWindowPlanner.nextAction(
@@ -79,7 +104,20 @@ struct AdaptiveSwingWindowPlannerSmoke {
                     hasAddressBoundary: true,
                     hasFinishBoundary: false
                 )
-            ) == .failed(.missingFinishBoundary)
+            ) == .expand(SwingWindow(startTime: 5.5, endTime: 13.5)),
+            "At maximum width the planner must shift right toward a missing finish"
+        )
+
+        let nearEnd = SwingWindow(startTime: 17.23, endTime: 25.23)
+        precondition(
+            AdaptiveSwingWindowPlanner.nextAction(
+                current: nearEnd,
+                duration: duration,
+                evidence: AdaptiveBoundaryEvidence(
+                    hasAddressBoundary: true,
+                    hasFinishBoundary: false
+                )
+            ) == .failed(.incompleteSwingClip)
         )
     }
 }

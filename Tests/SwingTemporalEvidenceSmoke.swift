@@ -611,6 +611,7 @@ struct SwingTemporalEvidenceSmoke {
             sourceFrameIndex: sourceFrameIndex,
             time: time,
             pose: pose,
+            rawPose: pose,
             objectEvidence: SwingObjectEvidence(
                 shaft: shaft,
                 ball: stableBall.map { BallEvidence(center: $0, radius: 0.012, confidence: 0.95) },

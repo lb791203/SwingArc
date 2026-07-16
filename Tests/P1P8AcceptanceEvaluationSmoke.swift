@@ -29,6 +29,81 @@ struct P1P8AcceptanceEvaluationSmoke {
         )
         precondition(RealVideoAcceptance.evaluate(manifest: manifest, result: correctResult).allSatisfy(\.passed))
 
+        let duplicateImpact = SwingAnalysisResult(
+            detectedMarkers: [],
+            unresolvedStages: [],
+            detections: correctDetections + [correctDetections[5]]
+        )
+        precondition(
+            RealVideoAcceptance.evaluate(manifest: manifest, result: duplicateImpact)
+                .first { $0.stage == "P6" }?.passed == false,
+            "Acceptance requires exactly one detection for every stage"
+        )
+        let unresolved = SwingAnalysisResult(
+            detectedMarkers: [],
+            unresolvedStages: [.followThrough],
+            detections: correctDetections.map { detection in
+                detection.stage == .followThrough
+                    ? SwingStageDetection(
+                        stage: detection.stage,
+                        time: detection.time,
+                        sourceFrameIndex: detection.sourceFrameIndex,
+                        confidence: detection.confidence,
+                        status: .unresolved
+                    )
+                    : detection
+            }
+        )
+        precondition(
+            RealVideoAcceptance.evaluate(manifest: manifest, result: unresolved)
+                .first { $0.stage == "P7" }?.passed == false
+        )
+        let unsupportedImpact = SwingAnalysisResult(
+            detectedMarkers: [],
+            unresolvedStages: [],
+            detections: correctDetections.map { detection in
+                detection.stage == .impact
+                    ? SwingStageDetection(
+                        stage: .impact,
+                        time: detection.time,
+                        sourceFrameIndex: detection.sourceFrameIndex,
+                        confidence: detection.confidence,
+                        status: .confirmed,
+                        hasClubEvidence: false,
+                        hasBallEvidence: false
+                    )
+                    : detection
+            }
+        )
+        precondition(
+            RealVideoAcceptance.evaluate(manifest: manifest, result: unsupportedImpact)
+                .first { $0.stage == "P6" }?.passed == false,
+            "Confirmed P6 requires honest object evidence"
+        )
+        let ballChangeImpact = SwingAnalysisResult(
+            detectedMarkers: [],
+            unresolvedStages: [],
+            detections: correctDetections.map { detection in
+                detection.stage == .impact
+                    ? SwingStageDetection(
+                        stage: .impact,
+                        time: detection.time,
+                        sourceFrameIndex: detection.sourceFrameIndex,
+                        confidence: detection.confidence,
+                        status: .confirmed,
+                        hasClubEvidence: false,
+                        hasBallEvidence: true,
+                        hasBallChangeEvidence: true
+                    )
+                    : detection
+            }
+        )
+        precondition(
+            RealVideoAcceptance.evaluate(manifest: manifest, result: ballChangeImpact)
+                .first { $0.stage == "P6" }?.passed == true,
+            "Explicit ball-change evidence is distinct from stable-ball presence"
+        )
+
         let p4Truth = manifest.stages.first { $0.stage == "P4" }!
         let wrongP4Frame = p4Truth.sourceFrameIndex + 2
         let wrongDetections = correctDetections.map { detection in
@@ -73,6 +148,36 @@ struct P1P8AcceptanceEvaluationSmoke {
         try expectRejected(validData) { json in
             var stages = json["stages"] as! [[String: Any]]
             stages[7]["stage"] = "P7"
+            json["stages"] = stages
+        }
+        try expectRejected(validData) { json in
+            var stages = json["stages"] as! [[String: Any]]
+            stages[0]["sourceFrameIndex"] = -1
+            json["stages"] = stages
+        }
+        try expectRejected(validData) { json in
+            var stages = json["stages"] as! [[String: Any]]
+            stages[7]["sourceFrameIndex"] = 999_999
+            json["stages"] = stages
+        }
+        try expectRejected(validData) { json in
+            var stages = json["stages"] as! [[String: Any]]
+            stages[2]["sourceFrameIndex"] = stages[1]["sourceFrameIndex"]
+            json["stages"] = stages
+        }
+        try expectRejected(validData) { json in
+            var stages = json["stages"] as! [[String: Any]]
+            stages[1]["sourceFrameIndex"] = 500
+            json["stages"] = stages
+        }
+        try expectRejected(validData) { json in
+            var stages = json["stages"] as! [[String: Any]]
+            stages[4]["definition"] = ""
+            json["stages"] = stages
+        }
+        try expectRejected(validData) { json in
+            var stages = json["stages"] as! [[String: Any]]
+            stages[5]["definition"] = "changed definition"
             json["stages"] = stages
         }
     }

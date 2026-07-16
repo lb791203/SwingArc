@@ -185,6 +185,7 @@ struct ImpactCorridorResolverSmoke {
                 sourceFrameIndex: 1_000 + ordinal,
                 time: time,
                 pose: pose,
+                rawPose: pose,
                 objectEvidence: SwingObjectEvidence(
                     shaft: alignedShaft,
                     ball: stableBall.map {
@@ -255,6 +256,7 @@ struct ImpactCorridorResolverSmoke {
             sourceFrameIndex: sourceFrameIndex,
             time: time,
             pose: pose,
+            rawPose: pose,
             objectEvidence: SwingObjectEvidence(
                 shaft: shaft,
                 ball: stableBall.map {

@@ -12,7 +12,7 @@ struct SwingPhaseTransitionSmoke {
             make(0.96, 0.65), make(1.04, 0.65) // later clip tail, not P8.
         ]
 
-        let detections = SwingStageDetector.detect(samples: samples).detections
+        let detections = SwingStageDetector.detectLegacySamplesForSmokeTests(samples).detections
         precondition(detections.first(where: { $0.stage == .leadArmParallelDownswing })?.time == 0.48)
         precondition(detections.first(where: { $0.stage == .impact })?.time == 0.56)
         precondition(detections.first(where: { $0.stage == .followThrough })?.time == 0.72)

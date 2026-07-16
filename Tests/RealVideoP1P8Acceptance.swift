@@ -69,6 +69,8 @@ struct RealVideoP1P8Acceptance {
             FileHandle.standardOutput.write(Data("\n".utf8))
             guard stages.count == SwingStage.allCases.count,
                   stages.allSatisfy(\.passed),
+                  output.adaptiveWindow.duration <= AdaptiveSwingWindowPlanner.maximumSpan
+                    + 0.000_000_001,
                   output.elapsedSeconds < 45.0 else {
                 exit(EXIT_FAILURE)
             }

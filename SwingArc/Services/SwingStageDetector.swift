@@ -743,7 +743,9 @@ enum SwingEvidenceTimeline {
         var flags: Set<SwingEvidenceQualityFlag> = []
         let frame = evidence[index]
         if frame.handCenter == nil { flags.insert(.missingHands) }
-        if frame.leadArm == .unknown { flags.insert(.missingLeadArm) }
+        if frame.leadArm == .unknown || !rawPoseObservesLeadArm(frame) {
+            flags.insert(.missingLeadArm)
+        }
         if index > evidence.startIndex,
            labelEndpointsReversed(
                previous: evidence[index - 1].rawPose ?? evidence[index - 1].pose,
@@ -752,6 +754,22 @@ enum SwingEvidenceTimeline {
             flags.insert(.labelSwapSuspected)
         }
         return flags
+    }
+
+    private static func rawPoseObservesLeadArm(_ frame: SwingFrameEvidence) -> Bool {
+        guard let rawPose = frame.rawPose else { return false }
+        switch frame.leadArm {
+        case .left:
+            return rawPose.leftShoulder != nil
+                && rawPose.leftElbow != nil
+                && rawPose.leftWrist != nil
+        case .right:
+            return rawPose.rightShoulder != nil
+                && rawPose.rightElbow != nil
+                && rawPose.rightWrist != nil
+        case .unknown:
+            return false
+        }
     }
 
     private static func labelEndpointsReversed(
@@ -1059,10 +1077,9 @@ enum SwingFeatureExtractor {
         case .right:
             return (pose.rightShoulder, pose.rightElbow, pose.rightWrist)
         case .unknown:
-            let leftComplete = pose.leftShoulder != nil && pose.leftElbow != nil && pose.leftWrist != nil
-            return leftComplete
-                ? (pose.leftShoulder, pose.leftElbow, pose.leftWrist)
-                : (pose.rightShoulder, pose.rightElbow, pose.rightWrist)
+            // Lead-arm identity is run-wide. Never switch arms frame by frame
+            // merely because one side happens to be visible in this frame.
+            return (nil, nil, nil)
         }
     }
 
@@ -1114,6 +1131,31 @@ struct StageCandidate: Equatable {
     let maximumStatus: SwingStageDetectionStatus
     let hasClubEvidence: Bool
     let hasBallEvidence: Bool
+    let hasBallChangeEvidence: Bool
+
+    init(
+        stage: SwingStage,
+        evidenceIndex: Int,
+        sourceFrameIndex: Int,
+        time: Double,
+        score: Double,
+        requirementsSatisfied: Bool,
+        maximumStatus: SwingStageDetectionStatus,
+        hasClubEvidence: Bool,
+        hasBallEvidence: Bool,
+        hasBallChangeEvidence: Bool = false
+    ) {
+        self.stage = stage
+        self.evidenceIndex = evidenceIndex
+        self.sourceFrameIndex = sourceFrameIndex
+        self.time = time
+        self.score = score
+        self.requirementsSatisfied = requirementsSatisfied
+        self.maximumStatus = maximumStatus
+        self.hasClubEvidence = hasClubEvidence
+        self.hasBallEvidence = hasBallEvidence
+        self.hasBallChangeEvidence = hasBallChangeEvidence
+    }
 }
 
 struct ImpactCorridor: Equatable {
@@ -1222,43 +1264,16 @@ enum TakeawayStageEvidence {
     }
 }
 
-enum StageTransitionEvidence {
-    static let maximumScore = 0.06
-    private static let perStageMaximum = maximumScore / 2
-    private static let targetAnchorPosition = 0.55
-    private static let anchorPositionTolerance = 0.25
-
+enum StagePathTieBreakEvidence {
+    /// Small, observed-evidence-only tie break. Timestamps and phase position
+    /// deliberately do not participate, so tempo variants receive no prior.
     static func score(_ path: [StageCandidate]) -> Double {
         guard path.count == SwingStage.allCases.count else { return 0 }
-        let downswingParallel = anchorPositionScore(
-            candidate: path[4],
-            start: path[3],
-            end: path[5]
-        )
-        let followThroughParallel = anchorPositionScore(
-            candidate: path[6],
-            start: path[5],
-            end: path[7]
-        )
-        return min(
-            maximumScore,
-            (downswingParallel + followThroughParallel) * perStageMaximum
-        )
-    }
-
-    private static func anchorPositionScore(
-        candidate: StageCandidate,
-        start: StageCandidate,
-        end: StageCandidate
-    ) -> Double {
-        let duration = end.time - start.time
-        guard duration > 0 else { return 0 }
-        let position = (candidate.time - start.time) / duration
-        guard (0...1).contains(position) else { return 0 }
-        return max(
-            0,
-            1 - abs(position - targetAnchorPosition) / anchorPositionTolerance
-        )
+        let requirementQuality = Double(path.filter(\.requirementsSatisfied).count)
+            / Double(path.count)
+        let objectQuality = Double(path.filter { $0.hasClubEvidence || $0.hasBallEvidence }.count)
+            / Double(path.count)
+        return min(0.06, requirementQuality * 0.04 + objectQuality * 0.02)
     }
 }
 
@@ -1388,7 +1403,8 @@ enum ImpactCorridorResolver {
                 requirementsSatisfied: hasRequiredObjects,
                 maximumStatus: hasRequiredObjects ? .confirmed : .lowConfidence,
                 hasClubEvidence: objectEvidence.shaft != nil,
-                hasBallEvidence: objectEvidence.ball != nil || objectEvidence.stableBall != nil
+                hasBallEvidence: objectEvidence.ball != nil || objectEvidence.stableBall != nil,
+                hasBallChangeEvidence: ballLocalChange >= 0.55
             ))
         }
 
@@ -1869,14 +1885,26 @@ enum BidirectionalStageCandidateResolver {
         timeline: [SwingTemporalFrame]
     ) -> StageCandidate {
         let frame = timeline[index].frame
+        let armDefinedStage: Bool
+        switch stage {
+        case .leadArmParallelBackswing, .leadArmParallelDownswing, .followThrough:
+            armDefinedStage = true
+        default:
+            armDefinedStage = false
+        }
+        let armEvidenceLimited = armDefinedStage && (
+            timeline[index].qualityFlags.contains(.missingLeadArm)
+                || timeline[index].qualityFlags.contains(.labelSwapSuspected)
+        )
+        let verifiedRequirements = requirementsSatisfied && !armEvidenceLimited
         return StageCandidate(
             stage: stage,
             evidenceIndex: index,
             sourceFrameIndex: frame.sourceFrameIndex,
             time: frame.time,
             score: clamp(score),
-            requirementsSatisfied: requirementsSatisfied,
-            maximumStatus: requirementsSatisfied ? .confirmed : .lowConfidence,
+            requirementsSatisfied: verifiedRequirements,
+            maximumStatus: verifiedRequirements ? .confirmed : .lowConfidence,
             hasClubEvidence: frame.objectEvidence.shaft != nil,
             hasBallEvidence: frame.objectEvidence.ball != nil
                 || frame.objectEvidence.stableBall != nil
@@ -1979,6 +2007,7 @@ struct SwingStageDetection: Equatable {
     let status: SwingStageDetectionStatus
     let hasClubEvidence: Bool
     let hasBallEvidence: Bool
+    let hasBallChangeEvidence: Bool
 
     init(
         stage: SwingStage,
@@ -1987,7 +2016,8 @@ struct SwingStageDetection: Equatable {
         confidence: Double,
         status: SwingStageDetectionStatus,
         hasClubEvidence: Bool = false,
-        hasBallEvidence: Bool = false
+        hasBallEvidence: Bool = false,
+        hasBallChangeEvidence: Bool = false
     ) {
         self.stage = stage
         self.time = time
@@ -1996,6 +2026,7 @@ struct SwingStageDetection: Equatable {
         self.status = status
         self.hasClubEvidence = hasClubEvidence
         self.hasBallEvidence = hasBallEvidence
+        self.hasBallChangeEvidence = hasBallChangeEvidence
     }
 
     var marker: KeyframeMarker? {
@@ -2048,7 +2079,7 @@ enum ConstrainedSwingPathSolver {
                     path: path,
                     timeline: timeline
                 )
-                let stageTransitionScore = StageTransitionEvidence.score(path)
+                let stageTransitionScore = StagePathTieBreakEvidence.score(path)
                 let scored = ScoredPath(
                     candidates: path,
                     total: evidenceScore + transitionScore + stageTransitionScore
@@ -2096,7 +2127,8 @@ enum ConstrainedSwingPathSolver {
                 confidence: confidence,
                 status: status,
                 hasClubEvidence: candidate.hasClubEvidence,
-                hasBallEvidence: candidate.hasBallEvidence
+                hasBallEvidence: candidate.hasBallEvidence,
+                hasBallChangeEvidence: candidate.hasBallChangeEvidence
             )
         }
         let unresolved = Set(
@@ -2718,7 +2750,12 @@ enum SwingStageDetector {
         )
     }
 
-    static func detect(samples rawSamples: [SwingPoseSample]) -> SwingAnalysisResult {
+    /// Compatibility adapter retained only for standalone legacy smoke fixtures.
+    /// Production video analysis must call `detect(frames:)` or the shared engine.
+    @available(iOS, unavailable, message: "Legacy smoke-test adapter; use detect(frames:) in production")
+    static func detectLegacySamplesForSmokeTests(
+        _ rawSamples: [SwingPoseSample]
+    ) -> SwingAnalysisResult {
         let samples = rawSamples
             .filter { !$0.wristY.isNaN }
             .sorted { $0.time < $1.time }
@@ -2732,10 +2769,8 @@ enum SwingStageDetector {
             return unresolvedResult()
         }
 
-        // Repeated video frames at P1 and P4 are normal.  Choose the latest
-        // address plateau before the top, then select observed one-third and
-        // two-third samples along that measured ascent instead of requiring
-        // three immediately-adjacent, strictly decreasing frames.
+        // Repeated video frames at P1 and P4 are normal. This compatibility
+        // path is not part of the production candidate/solver pipeline.
         if p4Index >= 3 {
             let p1Index = (0..<p4Index).reduce(0) { best, index in
                 samples[index].wristY >= samples[best].wristY ? index : best
@@ -3019,6 +3054,12 @@ enum AdaptiveSwingWindowPlanner {
     static let initialPadding = 0.5
     static let maximumSpan = 8.0
 
+    static func missingBoundaryFailure(
+        evidence: AdaptiveBoundaryEvidence
+    ) -> AnalysisFailure {
+        evidence.hasAddressBoundary ? .missingFinishBoundary : .missingAddressBoundary
+    }
+
     static func initialWindow(core: SwingCore, duration: Double) -> SwingWindow {
         SwingWindow(
             startTime: max(0, core.startTime - initialPadding),
@@ -3031,23 +3072,36 @@ enum AdaptiveSwingWindowPlanner {
         duration: Double,
         evidence: AdaptiveBoundaryEvidence
     ) -> AdaptiveSwingWindowAction {
-        if evidence.hasAddressBoundary && evidence.hasFinishBoundary { return .ready(current) }
-        if current.duration >= maximumSpan {
-            return .failed(
-                evidence.hasAddressBoundary ? .missingFinishBoundary : .missingAddressBoundary
-            )
+        let epsilon = 0.000_000_001
+        guard current.duration <= maximumSpan + epsilon else {
+            return .failed(.swingWindowTooLong)
         }
+        if evidence.hasAddressBoundary && evidence.hasFinishBoundary { return .ready(current) }
         if !evidence.hasAddressBoundary {
             guard current.startTime > 0 else { return .failed(.incompleteSwingClip) }
+            let proposedStart = max(0, current.startTime - expansionStep)
+            if current.endTime - proposedStart <= maximumSpan + epsilon {
+                return .expand(SwingWindow(
+                    startTime: max(current.endTime - maximumSpan, proposedStart),
+                    endTime: current.endTime
+                ))
+            }
             return .expand(SwingWindow(
-                startTime: max(0, current.startTime - expansionStep),
-                endTime: current.endTime
+                startTime: proposedStart,
+                endTime: proposedStart + maximumSpan
             ))
         }
         guard current.endTime < duration else { return .failed(.incompleteSwingClip) }
+        let proposedEnd = min(duration, current.endTime + expansionStep)
+        if proposedEnd - current.startTime <= maximumSpan + epsilon {
+            return .expand(SwingWindow(
+                startTime: current.startTime,
+                endTime: min(current.startTime + maximumSpan, proposedEnd)
+            ))
+        }
         return .expand(SwingWindow(
-            startTime: current.startTime,
-            endTime: min(duration, current.endTime + expansionStep)
+            startTime: proposedEnd - maximumSpan,
+            endTime: proposedEnd
         ))
     }
 }
@@ -3277,7 +3331,8 @@ enum FineSwingSamplingPlan {
     static func frames(
         window: SwingWindow,
         sourceFrameRate: Double,
-        duration: Double
+        duration: Double,
+        maximumSourceFrameIndex explicitMaximumSourceFrameIndex: Int? = nil
     ) -> [FineFrameReference] {
         guard sourceFrameRate.isFinite,
               sourceFrameRate > 0,
@@ -3288,7 +3343,15 @@ enum FineSwingSamplingPlan {
         let boundedStart = max(0, min(window.startTime, duration))
         let boundedEnd = max(boundedStart, min(window.endTime, duration))
         let firstFrame = Int(ceil(boundedStart * sourceFrameRate))
-        let lastFrame = Int(floor(boundedEnd * sourceFrameRate))
+        let maximumSourceFrameIndex = explicitMaximumSourceFrameIndex
+            ?? SourceFrameBounds.maximumSourceFrameIndex(
+                duration: duration,
+                sourceFrameRate: sourceFrameRate
+            )
+        let lastFrame = min(
+            maximumSourceFrameIndex,
+            Int(floor(boundedEnd * sourceFrameRate))
+        )
         guard firstFrame <= lastFrame else { return [] }
 
         let frameStride = max(1, Int(ceil(sourceFrameRate / maximumSamplesPerSecond)))
@@ -3300,6 +3363,19 @@ enum FineSwingSamplingPlan {
             references.append(FineFrameReference(sourceFrameIndex: lastFrame, time: Double(lastFrame) / sourceFrameRate))
         }
         return references
+    }
+}
+
+enum SourceFrameBounds {
+    static func maximumSourceFrameIndex(
+        duration: Double,
+        sourceFrameRate: Double
+    ) -> Int {
+        guard duration.isFinite,
+              duration > 0,
+              sourceFrameRate.isFinite,
+              sourceFrameRate > 0 else { return -1 }
+        return max(0, Int(ceil(duration * sourceFrameRate)) - 1)
     }
 }
 

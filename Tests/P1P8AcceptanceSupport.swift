@@ -22,6 +22,8 @@ enum GroundTruthManifestValidationError: Error, CustomStringConvertible {
     case annotationPasses(Int)
     case maximumAcceptedFrameError(Int)
     case stageCodes([String])
+    case stageDefinitions
+    case stageFrameIndices([Int])
 
     var description: String {
         switch self {
@@ -37,6 +39,10 @@ enum GroundTruthManifestValidationError: Error, CustomStringConvertible {
             return "manifest threshold must be exactly 1 frame; found \(error)"
         case let .stageCodes(codes):
             return "manifest must contain exactly one of P1...P8; found \(codes)"
+        case .stageDefinitions:
+            return "manifest stage definitions must match the canonical P1-P8 definitions"
+        case let .stageFrameIndices(indices):
+            return "manifest source frames must be unique, strictly increasing, and in range; found \(indices)"
         }
     }
 }
@@ -48,7 +54,17 @@ enum GroundTruthManifestValidator {
     /// Container duration can differ by a final partial frame. Fifty
     /// milliseconds covers one frame at 24/25/30 FPS while remaining strict.
     static let durationTolerance = 0.05
-    private static let requiredStageCodes = Set((1...8).map { "P\($0)" })
+    private static let requiredStageCodes = (1...8).map { "P\($0)" }
+    private static let canonicalDefinitions = [
+        "last stable address frame before sustained takeaway",
+        "backswing shaft-horizontal frame",
+        "backswing lead-arm-horizontal frame",
+        "last top-plateau frame before sustained downswing",
+        "downswing lead-arm-horizontal frame",
+        "clubhead at stable ball position",
+        "post-impact extension parallel frame",
+        "first stable finish-plateau frame"
+    ]
 
     static func validate(
         _ manifest: GroundTruthManifest,
@@ -87,9 +103,21 @@ enum GroundTruthManifestValidator {
             )
         }
         let codes = manifest.stages.map(\.stage)
-        guard codes.count == requiredStageCodes.count,
-              Set(codes) == requiredStageCodes else {
+        guard codes == requiredStageCodes else {
             throw GroundTruthManifestValidationError.stageCodes(codes)
+        }
+        guard manifest.stages.map(\.definition) == canonicalDefinitions else {
+            throw GroundTruthManifestValidationError.stageDefinitions
+        }
+        let indices = manifest.stages.map(\.sourceFrameIndex)
+        let maximumSourceFrameIndex = max(
+            0,
+            Int(ceil(manifest.duration * manifest.sourceFrameRate)) - 1
+        )
+        guard indices.allSatisfy({ (0...maximumSourceFrameIndex).contains($0) }),
+              Set(indices).count == indices.count,
+              zip(indices, indices.dropFirst()).allSatisfy(<) else {
+            throw GroundTruthManifestValidationError.stageFrameIndices(indices)
         }
     }
 }
@@ -104,6 +132,7 @@ struct StageAcceptance: Codable {
     let confidence: Double
     let hasClubEvidence: Bool
     let hasBallEvidence: Bool
+    let hasBallChangeEvidence: Bool
     let passed: Bool
 }
 
@@ -126,8 +155,14 @@ enum RealVideoAcceptance {
     ) -> [StageAcceptance] {
         manifest.stages.map { truth in
             let expectedStage = stagesByCode[truth.stage]
-            let detection = result.detections.first { $0.stage == expectedStage }
+            let matchingDetections = result.detections.filter { $0.stage == expectedStage }
+            let detection = matchingDetections.count == 1 ? matchingDetections[0] : nil
             let error = detection?.sourceFrameIndex.map { abs($0 - truth.sourceFrameIndex) }
+            let isResolved = detection?.status != .unresolved
+            let hasRequiredImpactEvidence = expectedStage != .impact
+                || detection?.status != .confirmed
+                || ((detection?.hasClubEvidence == true) && (detection?.hasBallEvidence == true))
+                || detection?.hasBallChangeEvidence == true
             return StageAcceptance(
                 stage: truth.stage,
                 expectedFrame: truth.sourceFrameIndex,
@@ -138,7 +173,11 @@ enum RealVideoAcceptance {
                 confidence: detection?.confidence ?? 0,
                 hasClubEvidence: detection?.hasClubEvidence ?? false,
                 hasBallEvidence: detection?.hasBallEvidence ?? false,
-                passed: error.map { $0 <= maximumAcceptedFrameError } ?? false
+                hasBallChangeEvidence: detection?.hasBallChangeEvidence ?? false,
+                passed: matchingDetections.count == 1
+                    && isResolved
+                    && hasRequiredImpactEvidence
+                    && (error.map { $0 <= maximumAcceptedFrameError } ?? false)
             )
         }
     }

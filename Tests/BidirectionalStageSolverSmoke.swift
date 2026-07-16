@@ -138,6 +138,7 @@ struct BidirectionalStageSolverSmoke {
         verifyCounterRotatingFollowThroughCannotConfirm()
         verifyChestContinuationIsRequired()
         verifyFollowThroughRequiresLeadArmExtension()
+        verifyFeaturePipelineCapsUnreliableLeadArmEvidence()
         verifyOccludedFollowThroughRemainsLowConfidence()
         verifyDeclaredImpactAnchorCannotDiverge()
         verifyStageAwareTransitionEvidenceScalesAcrossTempo()
@@ -245,6 +246,183 @@ struct BidirectionalStageSolverSmoke {
         precondition(followThrough.status == .confirmed)
     }
 
+    private static func verifyFeaturePipelineCapsUnreliableLeadArmEvidence() {
+        let sourceEvidence = fixture(includeImpactObjects: true)
+        let sourceFrames = sourceEvidence.map {
+            SwingFrameSample(
+                sourceFrameIndex: $0.sourceFrameIndex,
+                time: $0.time,
+                pose: $0.pose,
+                objectEvidence: $0.objectEvidence
+            )
+        }
+        let resolvedEvidence = SwingFeatureExtractor.extract(frames: sourceFrames)
+        guard let resolvedSide = resolvedEvidence.first?.leadArm,
+              resolvedSide != .unknown else {
+            preconditionFailure("Fixture must resolve one immutable lead arm")
+        }
+        let resolvedTimeline = SwingEvidenceTimeline.build(from: resolvedEvidence)
+        let resolvedImpact = ImpactCorridorResolver.candidates(in: resolvedTimeline).min {
+            abs($0.sourceFrameIndex - 300) < abs($1.sourceFrameIndex - 300)
+        }!
+        let resolvedCandidates = BidirectionalStageCandidateResolver.candidates(
+            timeline: resolvedTimeline,
+            impact: resolvedImpact
+        )
+        let p5Frame = resolvedCandidates.candidates(
+            for: .leadArmParallelDownswing
+        ).first!.sourceFrameIndex
+        let p7Frame = resolvedCandidates.candidates(for: .followThrough).first!.sourceFrameIndex
+
+        let occludedFrames = sourceFrames.map { frame -> SwingFrameSample in
+            guard frame.sourceFrameIndex == p5Frame, let pose = frame.pose else { return frame }
+            return SwingFrameSample(
+                sourceFrameIndex: frame.sourceFrameIndex,
+                time: frame.time,
+                pose: poseWithMissingElbow(pose, side: resolvedSide),
+                objectEvidence: frame.objectEvidence
+            )
+        }
+        let occludedTimeline = SwingEvidenceTimeline.build(
+            from: SwingFeatureExtractor.extract(frames: occludedFrames)
+        )
+        let occludedIndex = occludedTimeline.firstIndex {
+            $0.frame.sourceFrameIndex == p5Frame
+        }!
+        precondition(occludedTimeline[occludedIndex].frame.leadArmAngle != nil)
+        precondition(occludedTimeline[occludedIndex].qualityFlags.contains(.missingLeadArm))
+        let occludedImpact = ImpactCorridorResolver.candidates(in: occludedTimeline).min {
+            abs($0.sourceFrameIndex - 300) < abs($1.sourceFrameIndex - 300)
+        }!
+        let occludedP5 = BidirectionalStageCandidateResolver.candidates(
+            timeline: occludedTimeline,
+            impact: occludedImpact
+        ).candidates(for: .leadArmParallelDownswing).first {
+            $0.sourceFrameIndex == p5Frame
+        }!
+        precondition(!occludedP5.requirementsSatisfied)
+        precondition(occludedP5.maximumStatus == .lowConfidence)
+
+        let swappedFrames = sourceFrames.map { frame -> SwingFrameSample in
+            guard frame.sourceFrameIndex == p7Frame, let pose = frame.pose else { return frame }
+            return SwingFrameSample(
+                sourceFrameIndex: frame.sourceFrameIndex,
+                time: frame.time,
+                pose: poseWithSwappedLabels(pose),
+                objectEvidence: frame.objectEvidence
+            )
+        }
+        let swappedTimeline = SwingEvidenceTimeline.build(
+            from: SwingFeatureExtractor.extract(frames: swappedFrames)
+        )
+        let swappedImpact = ImpactCorridorResolver.candidates(in: swappedTimeline).min {
+            abs($0.sourceFrameIndex - 300) < abs($1.sourceFrameIndex - 300)
+        }!
+        let swappedP7 = BidirectionalStageCandidateResolver.candidates(
+            timeline: swappedTimeline,
+            impact: swappedImpact
+        ).candidates(for: .followThrough).first {
+            $0.sourceFrameIndex == p7Frame
+        }!
+        precondition(!swappedP7.requirementsSatisfied)
+        precondition(swappedP7.maximumStatus == .lowConfidence)
+
+        let ambiguousFrames = sourceFrames.map { frame -> SwingFrameSample in
+            guard let pose = frame.pose else { return frame }
+            return SwingFrameSample(
+                sourceFrameIndex: frame.sourceFrameIndex,
+                time: frame.time,
+                pose: symmetricArmPose(pose),
+                objectEvidence: .empty
+            )
+        }
+        let ambiguousTimeline = SwingEvidenceTimeline.build(
+            from: SwingFeatureExtractor.extract(frames: ambiguousFrames)
+        )
+        precondition(ambiguousTimeline.allSatisfy { $0.frame.leadArm == .unknown })
+        let ambiguousResult = solve(timeline: ambiguousTimeline)
+        for stage in [
+            SwingStage.leadArmParallelBackswing,
+            .leadArmParallelDownswing,
+            .followThrough
+        ] {
+            precondition(detection(stage, in: ambiguousResult).status != .confirmed)
+        }
+    }
+
+    private static func poseWithMissingElbow(
+        _ pose: SwingPoseSample,
+        side: LeadArmSide
+    ) -> SwingPoseSample {
+        SwingPoseSample(
+            time: pose.time,
+            leftWrist: pose.leftWrist,
+            rightWrist: pose.rightWrist,
+            leftElbow: side == .left ? nil : pose.leftElbow,
+            rightElbow: side == .right ? nil : pose.rightElbow,
+            leftShoulder: pose.leftShoulder,
+            rightShoulder: pose.rightShoulder,
+            leftHip: pose.leftHip,
+            rightHip: pose.rightHip,
+            head: pose.head,
+            spineAngle: pose.spineAngle,
+            aggregateConfidence: pose.aggregateConfidence,
+            sourceFrameIndex: pose.sourceFrameIndex,
+            leftKnee: pose.leftKnee,
+            rightKnee: pose.rightKnee,
+            leftAnkle: pose.leftAnkle,
+            rightAnkle: pose.rightAnkle
+        )
+    }
+
+    private static func poseWithSwappedLabels(_ pose: SwingPoseSample) -> SwingPoseSample {
+        SwingPoseSample(
+            time: pose.time,
+            leftWrist: pose.rightWrist,
+            rightWrist: pose.leftWrist,
+            leftElbow: pose.rightElbow,
+            rightElbow: pose.leftElbow,
+            leftShoulder: pose.rightShoulder,
+            rightShoulder: pose.leftShoulder,
+            leftHip: pose.rightHip,
+            rightHip: pose.leftHip,
+            head: pose.head,
+            spineAngle: pose.spineAngle,
+            aggregateConfidence: pose.aggregateConfidence,
+            sourceFrameIndex: pose.sourceFrameIndex,
+            leftKnee: pose.rightKnee,
+            rightKnee: pose.leftKnee,
+            leftAnkle: pose.rightAnkle,
+            rightAnkle: pose.leftAnkle
+        )
+    }
+
+    private static func symmetricArmPose(_ pose: SwingPoseSample) -> SwingPoseSample {
+        let axis: CGFloat = 0.515
+        func mirror(_ point: CGPoint?) -> CGPoint? {
+            point.map { CGPoint(x: axis * 2 - $0.x, y: $0.y) }
+        }
+        return SwingPoseSample(
+            time: pose.time,
+            leftWrist: pose.leftWrist,
+            rightWrist: mirror(pose.leftWrist),
+            leftElbow: pose.leftElbow,
+            rightElbow: mirror(pose.leftElbow),
+            leftShoulder: pose.leftShoulder,
+            rightShoulder: mirror(pose.leftShoulder),
+            leftHip: pose.leftHip,
+            rightHip: mirror(pose.leftHip),
+            head: pose.head,
+            spineAngle: pose.spineAngle,
+            aggregateConfidence: pose.aggregateConfidence,
+            sourceFrameIndex: pose.sourceFrameIndex,
+            leftKnee: pose.leftKnee,
+            rightKnee: mirror(pose.leftKnee),
+            leftAnkle: pose.leftAnkle,
+            rightAnkle: mirror(pose.leftAnkle)
+        )
+    }
+
     private static func verifyOccludedFollowThroughRemainsLowConfidence() {
         let timeline = SwingEvidenceTimeline.build(from: fixture(
             includeImpactObjects: true,
@@ -281,10 +459,6 @@ struct BidirectionalStageSolverSmoke {
     }
 
     private static func verifyStageAwareTransitionEvidenceScalesAcrossTempo() {
-        precondition(
-            StageTransitionEvidence.maximumScore == 0.06,
-            "Temporal shape may only break close evidence ties"
-        )
         for fps in [30, 60, 120] {
             let fast = candidatePath(
                 frameOffsets: [0, 4, 10, 16, 20, 24, 32, 40],
@@ -298,22 +472,13 @@ struct BidirectionalStageSolverSmoke {
                 frameOffsets: [0, 12, 24, 36, 48, 60, 72, 84],
                 fps: fps
             )
-            let fastScore = StageTransitionEvidence.score(fast)
-            let slowScore = StageTransitionEvidence.score(slowTakeaway)
-            let uniformScore = StageTransitionEvidence.score(uniform)
             precondition(
-                abs(fastScore - slowScore) < 0.000_001,
-                "A long P1-P2 and short P2-P3 interval must not be penalized at \(fps) FPS"
+                StagePathTieBreakEvidence.score(fast) == StagePathTieBreakEvidence.score(slowTakeaway),
+                "Observed-evidence ties must not be broken by stage percentage at \(fps) FPS"
             )
             precondition(
-                [fastScore, slowScore, uniformScore].allSatisfy {
-                    (0...StageTransitionEvidence.maximumScore).contains($0)
-                },
-                "Stage transition evidence must remain globally bounded at \(fps) FPS"
-            )
-            precondition(
-                uniformScore - slowScore <= 0.03,
-                "Uniform timestamps must not override stronger observed events at \(fps) FPS"
+                StagePathTieBreakEvidence.score(uniform) == StagePathTieBreakEvidence.score(slowTakeaway),
+                "Tempo variants must not receive fixed phase-position rewards at \(fps) FPS"
             )
         }
     }
@@ -582,6 +747,7 @@ struct BidirectionalStageSolverSmoke {
                 sourceFrameIndex: sourceFrameIndex,
                 time: time,
                 pose: pose,
+                rawPose: pose,
                 objectEvidence: object,
                 leadArm: .left,
                 leadArmAngle: leadArmAngle(sourceFrameIndex: sourceFrameIndex),
@@ -747,14 +913,16 @@ struct BidirectionalStageSolverSmoke {
             let sourceFrameIndex = startSourceFrame + localIndex
             let time = startTime + Double(localIndex) * 0.05
             let hand = CGPoint(x: 0.50, y: 0.50)
+            let pose = completePose(
+                time: time,
+                sourceFrameIndex: sourceFrameIndex,
+                hand: hand
+            )
             let frame = SwingFrameEvidence(
                 sourceFrameIndex: sourceFrameIndex,
                 time: time,
-                pose: completePose(
-                    time: time,
-                    sourceFrameIndex: sourceFrameIndex,
-                    hand: hand
-                ),
+                pose: pose,
+                rawPose: pose,
                 objectEvidence: .empty,
                 leadArm: .left,
                 leadArmAngle: 0,

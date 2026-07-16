@@ -88,6 +88,45 @@ struct VideoAnalysisMediaPipelineSmoke {
             preconditionFailure("The fine-frame cache must reject growth beyond its frame budget")
         }
 
+        let decodeLedger = SourceFrameDecodeLedger()
+        precondition(decodeLedger.registerDecode(sourceFrameIndex: 100, pass: .coarse))
+        precondition(decodeLedger.registerDecode(sourceFrameIndex: 101, pass: .coarse))
+        precondition(
+            !decodeLedger.registerDecode(sourceFrameIndex: 100, pass: .fine),
+            "A source frame decoded in coarse analysis cannot be decoded again in fine analysis"
+        )
+        precondition(decodeLedger.registerDecode(sourceFrameIndex: 102, pass: .fine))
+        precondition(decodeLedger.totalDecodeCount == 3)
+        precondition(decodeLedger.decodeCount(for: .coarse) == 2)
+        precondition(decodeLedger.decodeCount(for: .fine) == 1)
+        precondition(decodeLedger.maximumDecodeCountPerSourceFrame == 1)
+
+        guard let prepared = FineFrameImageCache.prepareContourImage(sourceImage) else {
+            preconditionFailure("Coarse contour preparation failed")
+        }
+        let adoptionCache = FineFrameImageCache(maximumEntryCount: 1)
+        precondition(adoptionCache.storePrepared(sourceFrameIndex: 100, image: prepared))
+        precondition(adoptionCache.contourImage(sourceFrameIndex: 100) != nil)
+        precondition(!adoptionCache.storePrepared(sourceFrameIndex: 101, image: prepared))
+
+        let shiftingCache = FineFrameImageCache(maximumEntryCount: 241)
+        let shiftingLedger = SourceFrameDecodeLedger()
+        for shift in 0...3 {
+            let lower = 300 + shift * 15
+            let retained = Set(lower...(lower + 240))
+            shiftingCache.retainSourceFrames(retained)
+            for frame in retained where shiftingCache.contourImage(sourceFrameIndex: frame) == nil {
+                precondition(shiftingLedger.registerDecode(sourceFrameIndex: frame, pass: .fine))
+                precondition(shiftingCache.storePrepared(sourceFrameIndex: frame, image: prepared))
+            }
+            precondition(shiftingCache.count == 241)
+        }
+        precondition(shiftingLedger.maximumDecodeCountPerSourceFrame == 1)
+        precondition(
+            shiftingLedger.totalDecodeCount == 286,
+            "Three monotonic half-second shifts must add only 45 new 30-FPS frames"
+        )
+
         let golferAtCore = pose(centerX: 0.32, scale: 0.56, confidence: 0.99)
         let coarseBackgroundGolfer = pose(centerX: 0.72, scale: 0.30, confidence: 0.70)
         let backgroundGolfer = pose(centerX: 0.72, scale: 0.50, confidence: 0.99)
