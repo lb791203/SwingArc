@@ -13,6 +13,7 @@ struct SwingTemporalEvidenceSmoke {
         verifyHorizontalImpactRemainsDownswingPhase()
         verifyTopPlateauEndsAtLastNearStationaryFrame()
         verifyHorizontalFollowThroughFinishBoundary()
+        verifyFinishBoundaryToleratesFutureVisionNoise()
         verifySupportingTemporalEvidence()
     }
 
@@ -132,7 +133,7 @@ struct SwingTemporalEvidenceSmoke {
     }
 
     private static func verifyHorizontalTakeawayBoundary() {
-        for fps in [30, 120] {
+        for fps in [30, 60, 120] {
             let times = (0...Int(2.0 * Double(fps))).map { Double($0) / Double(fps) }
             let fixture = times.enumerated().map { ordinal, time -> SwingFrameEvidence in
                 let elapsed = max(0, time - 1.0)
@@ -156,9 +157,18 @@ struct SwingTemporalEvidenceSmoke {
                 )
             }
             let timeline = SwingEvidenceTimeline.build(from: fixture)
+            let expected = times.last { $0 < 1.0 }!
+            let address = timeline.last(where: \.isAddressBoundary)?.frame
             precondition(
-                timeline.last(where: \.isAddressBoundary)?.frame.time == 1.0,
-                "A direction-agnostic slow takeaway must retain its last stable address at \(fps) FPS"
+                address?.time == expected,
+                "P1 must be the last stable frame before horizontal takeaway at \(fps) FPS"
+            )
+            precondition(
+                hypot(
+                    Double(address?.handVelocity.x ?? .infinity),
+                    Double(address?.handVelocity.y ?? .infinity)
+                ) < 0.08,
+                "P1 itself must remain quiet at \(fps) FPS"
             )
         }
     }
@@ -204,7 +214,7 @@ struct SwingTemporalEvidenceSmoke {
     }
 
     private static func verifyHorizontalFollowThroughFinishBoundary() {
-        for fps in [30, 120] {
+        for fps in [30, 60, 120] {
             let times = (0...Int(5.0 * Double(fps))).map { Double($0) / Double(fps) }
             let fixture = times.enumerated().map { ordinal, time -> SwingFrameEvidence in
                 let velocityX: CGFloat
@@ -259,10 +269,85 @@ struct SwingTemporalEvidenceSmoke {
                 )
             }
             let timeline = SwingEvidenceTimeline.build(from: fixture)
-            let expected = times.last { $0 <= 4.07 }!
+            let expected = times.first { $0 > 4.07 }!
+            let finish = timeline.first(where: \.isFinishPlateauStart)?.frame
             precondition(
-                timeline.first(where: \.isFinishPlateauStart)?.frame.time == expected,
-                "Horizontal follow-through must settle after the final motion burst at \(fps) FPS"
+                finish?.time == expected,
+                "P8 must be the first frame that is itself stable after the final motion burst at \(fps) FPS"
+            )
+            precondition(
+                hypot(
+                    Double(finish?.handVelocity.x ?? .infinity),
+                    Double(finish?.handVelocity.y ?? .infinity)
+                ) <= 0.18
+                    && (finish?.headSpeed ?? .infinity) <= SwingEvidenceTimeline.bodyStabilityThreshold
+                    && (finish?.hipSpeed ?? .infinity) <= SwingEvidenceTimeline.bodyStabilityThreshold,
+                "P8 must satisfy the measured stability thresholds at \(fps) FPS"
+            )
+        }
+    }
+
+    private static func verifyFinishBoundaryToleratesFutureVisionNoise() {
+        for fps in [30, 60, 120] {
+            let times = (0...Int(5.0 * Double(fps))).map { Double($0) / Double(fps) }
+            let firstStableTime = times.first { $0 > 3.90 }!
+            let noiseTime = times.first { $0 >= firstStableTime + 0.10 }!
+            let fixture = times.enumerated().map { ordinal, time -> SwingFrameEvidence in
+                let velocityY: CGFloat
+                let velocityX: CGFloat
+                let handX: CGFloat
+                let bodySpeed: Double
+                if time <= 1.0 {
+                    velocityY = 0
+                    velocityX = 0
+                    handX = 0.55
+                    bodySpeed = 0.01
+                } else if time < 2.30 {
+                    velocityY = -0.35
+                    velocityX = 0
+                    handX = 0.55
+                    bodySpeed = 0.03
+                } else if time <= 2.50 {
+                    velocityY = 0
+                    velocityX = 0
+                    handX = 0.55
+                    bodySpeed = 0.01
+                } else if time < 3.30 {
+                    velocityY = 0.55
+                    velocityX = 0
+                    handX = 0.55
+                    bodySpeed = 0.03
+                } else if time <= 3.90 {
+                    velocityY = 0
+                    velocityX = -0.40
+                    handX = 0.65 - CGFloat(time - 3.30) * 0.20
+                    bodySpeed = 0.03
+                } else if abs(time - noiseTime) < 0.000_001 {
+                    velocityY = 0
+                    velocityX = 0.30
+                    handX = 0.52
+                    bodySpeed = 0.12
+                } else {
+                    velocityY = 0
+                    velocityX = 0
+                    handX = 0.52
+                    bodySpeed = 0.01
+                }
+                return evidence(
+                    sourceFrameIndex: fps * 60_000 + ordinal,
+                    time: time,
+                    velocityX: velocityX,
+                    velocityY: velocityY,
+                    headSpeed: bodySpeed,
+                    hipSpeed: bodySpeed,
+                    handCenter: CGPoint(x: handX, y: 0.45)
+                )
+            }
+            let finish = SwingEvidenceTimeline.build(from: fixture)
+                .first(where: \.isFinishPlateauStart)?.frame
+            precondition(
+                finish?.time == firstStableTime,
+                "One later Vision-noise frame must not move the first stable P8 boundary at \(fps) FPS"
             )
         }
     }
@@ -301,7 +386,10 @@ struct SwingTemporalEvidenceSmoke {
             }
             let timeline = SwingEvidenceTimeline.build(from: fixture)
             let middleBackswing = timeline.first { abs($0.frame.time - 2.0) < 0.000_001 }
-            precondition(timeline.first(where: \.isAddressBoundary)?.frame.time == 1.0)
+            precondition(
+                timeline.first(where: \.isAddressBoundary)?.frame.time
+                    == times.last { $0 < 1.0 }!
+            )
             precondition(timeline.first(where: \.isTopPlateauEnd)?.frame.time == 2.5)
             precondition(
                 middleBackswing?.sustainedBackswing == true,
@@ -372,6 +460,9 @@ struct SwingTemporalEvidenceSmoke {
                 let address = timeline.last(where: \.isAddressBoundary)?.frame
                 let top = timeline.first(where: \.isTopPlateauEnd)?.frame
                 let finish = timeline.first(where: \.isFinishPlateauStart)?.frame
+                let expectedFinishTime = noise == .finish
+                    ? evidence.first { $0.time > 4.25 }!.time
+                    : 4.25
 
                 precondition(
                     address?.time == 1.00,
@@ -382,7 +473,7 @@ struct SwingTemporalEvidenceSmoke {
                     "\(fps) FPS \(noise) noise moved top to \(String(describing: top?.time))"
                 )
                 precondition(
-                    finish?.time == 4.25,
+                    finish?.time == expectedFinishTime,
                     "\(fps) FPS \(noise) noise moved finish to \(String(describing: finish?.time))"
                 )
 

@@ -365,7 +365,11 @@ final class SwingObjectDetector {
 
     var stableBall: BallEvidence? { ballTracker.stableBall }
 
-    func detect(in cgImage: CGImage, pose: PoseEstimationResult?) -> SwingObjectEvidence {
+    func detect(
+        in cgImage: CGImage,
+        pose: PoseEstimationResult?,
+        sourceFrameIndex: Int
+    ) -> SwingObjectEvidence {
         let request = VNDetectContoursRequest()
         request.contrastAdjustment = 1.3
         request.detectsDarkOnLight = true
@@ -378,7 +382,7 @@ final class SwingObjectDetector {
         let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
         guard (try? handler.perform([request])) != nil,
               let observation = request.results?.first else {
-            let update = ballTracker.update(nil)
+            let update = ballTracker.update(nil, sourceFrameIndex: sourceFrameIndex)
             return SwingObjectEvidence(
                 shaft: nil,
                 ball: nil,
@@ -390,7 +394,10 @@ final class SwingObjectDetector {
         let contours = flattenedContours(observation.topLevelContours)
         let handCenter = pose.flatMap(Self.handCenter)
         let ballCandidate = bestBallCandidate(in: contours, pose: pose, visionRegion: visionRegion)
-        let update = ballTracker.update(ballCandidate)
+        let update = ballTracker.update(
+            ballCandidate,
+            sourceFrameIndex: sourceFrameIndex
+        )
         let shaft = bestShaftCandidate(
             in: contours,
             handCenter: handCenter,
@@ -915,7 +922,8 @@ final class SwingVideoAnalysisEngine: Sendable {
             let detected: SwingObjectEvidence = autoreleasepool {
                 objectDetector.detect(
                     in: image,
-                    pose: rawPosesByFrame[reference.sourceFrameIndex]
+                    pose: rawPosesByFrame[reference.sourceFrameIndex],
+                    sourceFrameIndex: reference.sourceFrameIndex
                 )
             }
             objectEvidenceByFrame[reference.sourceFrameIndex] = detected

@@ -129,6 +129,7 @@ struct BallPositionTracker: Equatable {
     private var candidateCenter: CGPoint?
     private var hitCount = 0
     private var missCount = 0
+    private var previousSourceFrameIndex: Int?
 
     init(requiredHits: Int = 3, maximumMisses: Int = 2, seed: BallEvidence? = nil) {
         self.requiredHits = max(1, requiredHits)
@@ -138,7 +139,19 @@ struct BallPositionTracker: Equatable {
         hitCount = seed == nil ? 0 : self.requiredHits
     }
 
-    mutating func update(_ observation: BallEvidence?) -> BallTrackUpdate {
+    mutating func update(
+        _ observation: BallEvidence?,
+        sourceFrameIndex: Int
+    ) -> BallTrackUpdate {
+        let isContiguous = previousSourceFrameIndex.map {
+            sourceFrameIndex == $0 + 1
+        } ?? true
+        previousSourceFrameIndex = sourceFrameIndex
+        if !isContiguous {
+            // Sparse P1/P2/P7 candidate neighborhoods are not a continuous
+            // disappearance sequence and must not share one miss streak.
+            missCount = 0
+        }
         guard let observation else {
             missCount += 1
             let changed = stableBall != nil && missCount > maximumMisses ? 1.0 : 0
@@ -342,19 +355,22 @@ enum SwingEvidenceTimeline {
                 evidence: evidence
             )
         }
-        let addressIndex = evidence.indices.first { index in
+        let directionalAddressIndex = evidence.indices.first { index in
             stablePast[index]
-                && (
-                    rawDirections[index] == .stable
-                        && sustainedDirectionBegins(
-                            after: index,
-                            direction: .backswing,
-                            rawDirections: rawDirections,
-                            evidence: evidence
-                        )
-                    || takeawayMotionOnset(at: index, evidence: evidence)
+                && rawDirections[index] == .stable
+                && sustainedDirectionBegins(
+                    after: index,
+                    direction: .backswing,
+                    rawDirections: rawDirections,
+                    evidence: evidence
                 )
         }
+        let motionOnsetAddressIndex = evidence.indices.dropFirst().first {
+            takeawayMotionOnset(at: $0, evidence: evidence)
+        }.map { $0 - 1 }
+        let addressIndex = [directionalAddressIndex, motionOnsetAddressIndex]
+            .compactMap { $0 }
+            .min()
         let topTransitionIndex = evidence.indices.first { index in
             guard index > (addressIndex ?? -1) else { return false }
             return rawDirections[index] == .stable
@@ -372,6 +388,12 @@ enum SwingEvidenceTimeline {
         let finishIndex = evidence.indices.first { index in
             guard index > (topIndex ?? addressIndex ?? -1),
                   pastDirections[index] == .backswing
+                    || directionPrecedes(
+                        index,
+                        direction: .backswing,
+                        rawDirections: rawDirections,
+                        evidence: evidence
+                    )
                     || horizontalFollowThroughPrecedes(at: index, evidence: evidence) else {
                 return false
             }
@@ -597,6 +619,7 @@ enum SwingEvidenceTimeline {
         rawDirections: [SwingMotionDirection?],
         evidence: [SwingFrameEvidence]
     ) -> Bool {
+        guard frameStability(evidence[index]) == true else { return false }
         let indices = timedIndices(startingAt: index, duration: stableWindow, evidence: evidence)
         guard stabilityVote(indices: indices, duration: stableWindow, evidence: evidence) else {
             return false
@@ -636,6 +659,24 @@ enum SwingEvidenceTimeline {
               let last = evidence[index].handCenter else { return false }
         return SwingGeometry.distance(first, last)
             >= followThroughConfirmationDisplacement
+    }
+
+    private static func directionPrecedes(
+        _ index: Int,
+        direction: SwingMotionDirection,
+        rawDirections: [SwingMotionDirection?],
+        evidence: [SwingFrameEvidence]
+    ) -> Bool {
+        let preceding = Array(
+            timedIndices(endingAt: index, duration: directionWindow, evidence: evidence)
+                .dropLast()
+        )
+        let observed = preceding.compactMap { rawDirections[$0] }
+        let matchingCount = observed.filter { $0 == direction }.count
+        let opposingCount = observed.filter {
+            $0 != .stable && $0 != direction
+        }.count
+        return matchingCount >= 2 && opposingCount <= 1
     }
 
     private static func frameStability(_ frame: SwingFrameEvidence) -> Bool? {
@@ -1088,6 +1129,122 @@ struct StageCandidateSet: Equatable {
     }
 }
 
+enum TakeawayStageEvidence {
+    static func handPositionScore(hand: CGPoint?, hip: CGPoint?) -> Double {
+        guard let hand, let hip else { return 0 }
+        let lateralOffset = abs(Double(hand.x - hip.x))
+        let verticalOffset = abs(Double(hand.y - hip.y))
+        let lateralProgress = ramp(lateralOffset, minimum: 0.07, maximum: 0.12)
+        // The hand center is typically slightly above the hip center at P2.
+        // Keep enough vertical tolerance for camera/perspective variance while
+        // still rejecting hands that have already climbed toward P3.
+        let hipHeightAlignment = clamp(1 - verticalOffset / 0.12)
+        return min(lateralProgress, hipHeightAlignment)
+    }
+
+    private static func ramp(_ value: Double, minimum: Double, maximum: Double) -> Double {
+        guard value.isFinite, maximum > minimum else { return 0 }
+        return clamp((value - minimum) / (maximum - minimum))
+    }
+
+    private static func clamp(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(1, max(0, value))
+    }
+}
+
+enum StageTransitionEvidence {
+    static let maximumScore = 0.06
+    private static let perStageMaximum = maximumScore / 2
+    private static let targetAnchorPosition = 0.55
+    private static let anchorPositionTolerance = 0.25
+
+    static func score(_ path: [StageCandidate]) -> Double {
+        guard path.count == SwingStage.allCases.count else { return 0 }
+        let downswingParallel = anchorPositionScore(
+            candidate: path[4],
+            start: path[3],
+            end: path[5]
+        )
+        let followThroughParallel = anchorPositionScore(
+            candidate: path[6],
+            start: path[5],
+            end: path[7]
+        )
+        return min(
+            maximumScore,
+            (downswingParallel + followThroughParallel) * perStageMaximum
+        )
+    }
+
+    private static func anchorPositionScore(
+        candidate: StageCandidate,
+        start: StageCandidate,
+        end: StageCandidate
+    ) -> Double {
+        let duration = end.time - start.time
+        guard duration > 0 else { return 0 }
+        let position = (candidate.time - start.time) / duration
+        guard (0...1).contains(position) else { return 0 }
+        return max(
+            0,
+            1 - abs(position - targetAnchorPosition) / anchorPositionTolerance
+        )
+    }
+}
+
+enum ParallelStageEvidence {
+    static func downswingScore(
+        armHorizontal: Double,
+        armExtension: Double,
+        downward: Double,
+        hipOpen: Double,
+        coverage: Double
+    ) -> Double {
+        let jointAgreement = min(armHorizontal, armExtension)
+        return clamp(
+            jointAgreement * 0.55
+                + armHorizontal * 0.15
+                + downward * 0.15
+                + hipOpen * 0.07
+                + coverage * 0.08
+        )
+    }
+
+    static func followThroughScore(
+        parallelEvidence: Double,
+        postImpactRise: Double,
+        hipTurn: Double,
+        chestTurn: Double,
+        hasContinuedTurn: Bool,
+        coverage: Double
+    ) -> Double {
+        // P7 is a narrow horizontal band, not a single noisy angle minimum.
+        // Velocity only contributes after it clears the same requirement used
+        // to confirm the stage; tiny optical-flow noise cannot win the frame.
+        let horizontalBand = ramp(parallelEvidence, minimum: 0.55, maximum: 0.75)
+        let qualifiedRise = postImpactRise >= 0.35 ? postImpactRise : 0
+        return clamp(
+            horizontalBand * 0.34
+                + qualifiedRise * 0.13
+                + hipTurn * 0.13
+                + chestTurn * 0.15
+                + (hasContinuedTurn ? 0.15 : 0)
+                + coverage * 0.10
+        )
+    }
+
+    private static func ramp(_ value: Double, minimum: Double, maximum: Double) -> Double {
+        guard value.isFinite, maximum > minimum else { return 0 }
+        return clamp((value - minimum) / (maximum - minimum))
+    }
+
+    private static func clamp(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(1, max(0, value))
+    }
+}
+
 enum ImpactCorridorResolver {
     /// Body-only candidates seed the sparse object pass. Front-view swings can
     /// have little projected hip rotation, so provisional low-confidence
@@ -1285,12 +1442,12 @@ enum BidirectionalStageCandidateResolver {
                     && armExtended >= 0.55
                     && downward >= 0.35
                     && abs(frame.hipAngle ?? 0) >= 8
-                let score = clamp(
-                    armHorizontal * 0.38
-                        + armExtended * 0.18
-                        + downward * 0.24
-                        + hipOpen * 0.12
-                        + frame.poseCoverage * 0.08
+                let score = ParallelStageEvidence.downswingScore(
+                    armHorizontal: armHorizontal,
+                    armExtension: armExtended,
+                    downward: downward,
+                    hipOpen: hipOpen,
+                    coverage: frame.poseCoverage
                 )
                 guard score >= 0.32 else { return nil }
                 return candidate(
@@ -1411,7 +1568,11 @@ enum BidirectionalStageCandidateResolver {
                 }
                 if let shaftHorizontal, shaftHorizontal < 0.20 { return nil }
                 let handsBelowShoulders = handsBelowShouldersScore(frame)
-                guard shaftHorizontal != nil || handsBelowShoulders == 1 else { return nil }
+                let handPosition = TakeawayStageEvidence.handPositionScore(
+                    hand: frame.handCenter,
+                    hip: frame.hipCenter
+                )
+                guard shaftHorizontal != nil || handPosition >= 0.20 else { return nil }
                 let backswingSpeed = ramp(
                     -Double(frame.handVelocity.y),
                     minimum: 0.12,
@@ -1422,16 +1583,18 @@ enum BidirectionalStageCandidateResolver {
                 let score: Double
                 if let shaftHorizontal {
                     score = clamp(
-                        shaftHorizontal * 0.46
-                            + handsBelowShoulders * 0.20
-                            + backswingSpeed * 0.18
-                            + frame.poseCoverage * 0.16
+                        shaftHorizontal * 0.35
+                            + handsBelowShoulders * 0.10
+                            + backswingSpeed * 0.10
+                            + handPosition * 0.30
+                            + frame.poseCoverage * 0.15
                     )
                 } else {
                     score = clamp(
-                        handsBelowShoulders * 0.23
-                            + backswingSpeed * 0.25
-                            + frame.poseCoverage * 0.17
+                        handsBelowShoulders * 0.15
+                            + backswingSpeed * 0.15
+                            + handPosition * 0.50
+                            + frame.poseCoverage * 0.20
                     )
                 }
                 return candidate(
@@ -1542,13 +1705,13 @@ enum BidirectionalStageCandidateResolver {
                     && continuedChestTurn
                 let hipTurnScore = ramp(hipContinuation, minimum: 0, maximum: 10)
                 let chestTurnScore = ramp(chestContinuation, minimum: 0, maximum: 12)
-                let score = clamp(
-                    parallelEvidence * 0.34
-                        + postImpactRise * 0.23
-                        + hipTurnScore * 0.13
-                        + chestTurnScore * 0.10
-                        + (continuedHipTurn && continuedChestTurn ? 0.10 : 0)
-                        + frame.poseCoverage * 0.10
+                let score = ParallelStageEvidence.followThroughScore(
+                    parallelEvidence: parallelEvidence,
+                    postImpactRise: postImpactRise,
+                    hipTurn: hipTurnScore,
+                    chestTurn: chestTurnScore,
+                    hasContinuedTurn: continuedHipTurn && continuedChestTurn,
+                    coverage: frame.poseCoverage
                 )
                 guard score >= 0.32 else { return nil }
                 return candidate(
@@ -1796,10 +1959,10 @@ enum ConstrainedSwingPathSolver {
                     path: path,
                     timeline: timeline
                 )
-                let cadenceScore = cadenceConsistencyScore(path)
+                let stageTransitionScore = StageTransitionEvidence.score(path)
                 let scored = ScoredPath(
                     candidates: path,
-                    total: evidenceScore + transitionScore + cadenceScore
+                    total: evidenceScore + transitionScore + stageTransitionScore
                         - missingPenalty
                 )
                 if isBetter(scored, than: best) {
@@ -2005,15 +2168,6 @@ enum ConstrainedSwingPathSolver {
             + followThrough * 0.20
             + topPlateau * 0.10
             + finishPlateau * 0.15
-    }
-
-    private static func cadenceConsistencyScore(_ path: [StageCandidate]) -> Double {
-        let gaps = zip(path, path.dropFirst()).map { max(0, $1.time - $0.time) }
-        return zip(gaps, gaps.dropFirst()).reduce(0.0) { score, pair in
-            let larger = max(pair.0, pair.1)
-            guard larger > 0 else { return score }
-            return score + min(pair.0, pair.1) / larger * 0.18
-        }
     }
 
     private static func durationWeightedSupport(

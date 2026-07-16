@@ -51,5 +51,52 @@ struct P1P8AcceptanceEvaluationSmoke {
         precondition(failures.count == 1)
         precondition(failures[0].stage == "P4")
         precondition(failures[0].absoluteFrameError == 2)
+
+        try verifyManifestValidation(manifestURL: manifestURL)
+    }
+
+    private static func verifyManifestValidation(manifestURL: URL) throws {
+        let validData = try Data(contentsOf: manifestURL)
+        let valid = try JSONDecoder().decode(GroundTruthManifest.self, from: validData)
+        try GroundTruthManifestValidator.validate(
+            valid,
+            videoName: "IMG_4500.mov",
+            sourceFrameRate: 30.009,
+            duration: 25.279
+        )
+
+        try expectRejected(validData) { $0["video"] = "different.mov" }
+        try expectRejected(validData) { $0["sourceFrameRate"] = 29.0 }
+        try expectRejected(validData) { $0["duration"] = 24.0 }
+        try expectRejected(validData) { $0["annotationPasses"] = 1 }
+        try expectRejected(validData) { $0["maximumAcceptedFrameError"] = 2 }
+        try expectRejected(validData) { json in
+            var stages = json["stages"] as! [[String: Any]]
+            stages[7]["stage"] = "P7"
+            json["stages"] = stages
+        }
+    }
+
+    private static func expectRejected(
+        _ validData: Data,
+        mutation: (inout [String: Any]) -> Void
+    ) throws {
+        var json = try JSONSerialization.jsonObject(with: validData) as! [String: Any]
+        mutation(&json)
+        let manifest = try JSONDecoder().decode(
+            GroundTruthManifest.self,
+            from: JSONSerialization.data(withJSONObject: json)
+        )
+        do {
+            try GroundTruthManifestValidator.validate(
+                manifest,
+                videoName: "IMG_4500.mov",
+                sourceFrameRate: 30.0,
+                duration: 25.23
+            )
+            preconditionFailure("Malformed manifest must be rejected")
+        } catch is GroundTruthManifestValidationError {
+            // Expected.
+        }
     }
 }

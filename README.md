@@ -83,7 +83,7 @@ SwingArc 是一款专为 iOS 设备开发的**原生高尔夫挥杆分析与画�
 
 Automatic stages always reference observed source frames. Accepted complete fixed-camera clips must place every P1–P8 stage within ±1 source frame of a frozen two-pass manual annotation. Missing required evidence is reported as low confidence, unresolved, or a specific clip failure; the app never fills a stage from a fixed timestamp or video percentage.
 
-当前已验证基准 `/Users/liangbo/Desktop/IMG_4500.mov`：P1–P8 实际帧为 `375, 414, 432, 453, 465, 480, 495, 512`，相对冻结人工帧的绝对误差为 `0, 0, 1, 0, 1, 1, 1, 1`，本机分析耗时约 14.47 秒。可重复运行：
+当前已验证基准 `/Users/liangbo/Desktop/IMG_4500.mov`：P1–P8 实际帧为 `374, 413, 432, 453, 466, 480, 495, 513`，相对冻结人工帧的绝对误差为 `1, 1, 1, 0, 0, 1, 1, 0`，本机分析耗时约 14.48 秒。可重复运行：
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \

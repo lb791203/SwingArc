@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import AVFoundation
 
 struct RealVideoReport: Encodable {
     let video: String
@@ -24,6 +25,21 @@ struct RealVideoP1P8Acceptance {
             GroundTruthManifest.self,
             from: Data(contentsOf: manifestURL)
         )
+        let asset = AVURLAsset(url: videoURL)
+        let assetFrameRate = Double(
+            asset.tracks(withMediaType: .video).first?.nominalFrameRate ?? 0
+        )
+        do {
+            try GroundTruthManifestValidator.validate(
+                manifest,
+                videoName: videoURL.lastPathComponent,
+                sourceFrameRate: assetFrameRate,
+                duration: asset.duration.seconds
+            )
+        } catch {
+            fputs("manifest rejected: \(error)\n", stderr)
+            exit(EXIT_FAILURE)
+        }
         let gate = AnalysisRunGate()
         let runID = gate.begin()
         let outcome = SwingVideoAnalysisEngine().analyze(

@@ -132,7 +132,9 @@ struct BidirectionalStageSolverSmoke {
         verifyCounterRotatingFollowThroughCannotConfirm()
         verifyChestContinuationIsRequired()
         verifyDeclaredImpactAnchorCannotDiverge()
-        verifyBalancedCadenceRejectsLateFalseTakeaway()
+        verifyStageAwareTransitionEvidenceScalesAcrossTempo()
+        verifyTakeawayPositionEvidenceRejectsAddressAndLateHighHands()
+        verifyParallelStageScoresRequireJointAgreement()
     }
 
     private static func verifyMissingTakeawayShaftKeepsPath() {
@@ -231,40 +233,136 @@ struct BidirectionalStageSolverSmoke {
         precondition(result.unresolvedStages == Set(SwingStage.allCases))
     }
 
-    private static func verifyBalancedCadenceRejectsLateFalseTakeaway() {
-        let fixture = transitionQualityFixture()
-        var candidates = fixture.strong.candidatesByStage
-        guard let balanced = candidates[.takeaway]?.first,
-              let lateIndex = fixture.timeline.firstIndex(where: {
-                  $0.frame.sourceFrameIndex == balanced.sourceFrameIndex + 1
-              }) else {
-            preconditionFailure("cadence fixture is incomplete")
+    private static func verifyStageAwareTransitionEvidenceScalesAcrossTempo() {
+        precondition(
+            StageTransitionEvidence.maximumScore == 0.06,
+            "Temporal shape may only break close evidence ties"
+        )
+        for fps in [30, 60, 120] {
+            let fast = candidatePath(
+                frameOffsets: [0, 4, 10, 16, 20, 24, 32, 40],
+                fps: fps
+            )
+            let slowTakeaway = candidatePath(
+                frameOffsets: [0, 45, 51, 60, 64, 68, 76, 84],
+                fps: fps
+            )
+            let uniform = candidatePath(
+                frameOffsets: [0, 12, 24, 36, 48, 60, 72, 84],
+                fps: fps
+            )
+            let fastScore = StageTransitionEvidence.score(fast)
+            let slowScore = StageTransitionEvidence.score(slowTakeaway)
+            let uniformScore = StageTransitionEvidence.score(uniform)
+            precondition(
+                abs(fastScore - slowScore) < 0.000_001,
+                "A long P1-P2 and short P2-P3 interval must not be penalized at \(fps) FPS"
+            )
+            precondition(
+                [fastScore, slowScore, uniformScore].allSatisfy {
+                    (0...StageTransitionEvidence.maximumScore).contains($0)
+                },
+                "Stage transition evidence must remain globally bounded at \(fps) FPS"
+            )
+            precondition(
+                uniformScore - slowScore <= 0.03,
+                "Uniform timestamps must not override stronger observed events at \(fps) FPS"
+            )
         }
-        let lateFrame = fixture.timeline[lateIndex].frame
-        let late = StageCandidate(
-            stage: .takeaway,
-            evidenceIndex: lateIndex,
-            sourceFrameIndex: lateFrame.sourceFrameIndex,
-            time: lateFrame.time,
-            score: balanced.score + 0.15,
-            requirementsSatisfied: balanced.requirementsSatisfied,
-            maximumStatus: balanced.maximumStatus,
-            hasClubEvidence: true,
-            hasBallEvidence: balanced.hasBallEvidence
+    }
+
+    private static func verifyTakeawayPositionEvidenceRejectsAddressAndLateHighHands() {
+        let hip = CGPoint(x: 0.50, y: 0.56)
+        let trueP2 = TakeawayStageEvidence.handPositionScore(
+            hand: CGPoint(x: 0.365, y: 0.55),
+            hip: hip
         )
-        candidates[.takeaway] = [late, balanced]
-        let candidateSet = StageCandidateSet(
-            impact: fixture.strong.impact,
-            candidatesByStage: candidates
+        let addressLike = TakeawayStageEvidence.handPositionScore(
+            hand: CGPoint(x: 0.495, y: 0.57),
+            hip: hip
         )
-        let result = ConstrainedSwingPathSolver.solve(
-            candidateSets: [candidateSet],
-            timeline: fixture.timeline
+        let lateHighHands = TakeawayStageEvidence.handPositionScore(
+            hand: CGPoint(x: 0.34, y: 0.50),
+            hip: hip
+        )
+        let firstHipHeightEntry = TakeawayStageEvidence.handPositionScore(
+            hand: CGPoint(x: 0.3656, y: 0.5471),
+            hip: CGPoint(x: 0.4923, y: 0.5594)
+        )
+        let laterHigherHands = TakeawayStageEvidence.handPositionScore(
+            hand: CGPoint(x: 0.3611, y: 0.5424),
+            hip: CGPoint(x: 0.4927, y: 0.5604)
+        )
+        precondition(trueP2 > addressLike)
+        precondition(
+            trueP2 > lateHighHands,
+            "P2 hand position near hip height must outrank a later isolated shaft contour"
         )
         precondition(
-            detection(.takeaway, in: result).sourceFrameIndex == balanced.sourceFrameIndex,
-            "A one-frame gap into P3 must not beat a balanced P1-P2-P3 cadence solely on a weak shaft score"
+            firstHipHeightEntry > laterHigherHands,
+            "P2 body fallback must prefer the first entry into the hip-height lateral band"
         )
+    }
+
+    private static func verifyParallelStageScoresRequireJointAgreement() {
+        let unextendedExactAngle = ParallelStageEvidence.downswingScore(
+            armHorizontal: 0.97,
+            armExtension: 0,
+            downward: 0,
+            hipOpen: 0,
+            coverage: 1
+        )
+        let extendedHorizontalBand = ParallelStageEvidence.downswingScore(
+            armHorizontal: 0.65,
+            armExtension: 0.40,
+            downward: 0.07,
+            hipOpen: 0,
+            coverage: 1
+        )
+        precondition(extendedHorizontalBand > unextendedExactAngle)
+        precondition(extendedHorizontalBand >= 0.32)
+
+        let earlyExactFollowThrough = ParallelStageEvidence.followThroughScore(
+            parallelEvidence: 0.98,
+            postImpactRise: 0.05,
+            hipTurn: 0.18,
+            chestTurn: 1,
+            hasContinuedTurn: true,
+            coverage: 1
+        )
+        let laterParallelBand = ParallelStageEvidence.followThroughScore(
+            parallelEvidence: 0.95,
+            postImpactRise: 0,
+            hipTurn: 0.20,
+            chestTurn: 1,
+            hasContinuedTurn: true,
+            coverage: 1
+        )
+        precondition(
+            laterParallelBand > earlyExactFollowThrough,
+            "Sub-threshold velocity noise must not beat continued body rotation inside the P7 parallel band"
+        )
+    }
+
+    private static func candidatePath(
+        frameOffsets: [Int],
+        fps: Int
+    ) -> [StageCandidate] {
+        precondition(frameOffsets.count == SwingStage.allCases.count)
+        return zip(SwingStage.allCases, frameOffsets).enumerated().map {
+            evidenceIndex, pair in
+            StageCandidate(
+                stage: pair.0,
+                evidenceIndex: evidenceIndex,
+                sourceFrameIndex: fps * 1_000 + pair.1,
+                time: Double(pair.1) / Double(fps),
+                score: 0.80,
+                requirementsSatisfied: true,
+                maximumStatus: .confirmed,
+                hasClubEvidence: false,
+                hasBallEvidence: false
+            )
+        }
     }
 
     private static func solve(timeline: [SwingTemporalFrame]) -> SwingAnalysisResult {
