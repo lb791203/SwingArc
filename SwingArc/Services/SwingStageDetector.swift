@@ -141,7 +141,7 @@ struct BallPositionTracker: Equatable {
     mutating func update(_ observation: BallEvidence?) -> BallTrackUpdate {
         guard let observation else {
             missCount += 1
-            let changed = stableBall == nil ? 0 : 1.0
+            let changed = stableBall != nil && missCount > maximumMisses ? 1.0 : 0
             if missCount > maximumMisses {
                 // Once the address ball has been stable for several frames it
                 // becomes the fixed reference for this swing window. Its
@@ -300,6 +300,12 @@ enum SwingEvidenceTimeline {
     static let bodyStabilityThreshold = 0.08
 
     private static let handStabilityThreshold = 0.18
+    private static let takeawayOnsetSpeedThreshold = 0.08
+    private static let takeawayConfirmationDisplacement = 0.05
+    private static let takeawayConfirmationWindow = 0.75
+    private static let maximumAddressHandHipDistance = 0.14
+    private static let followThroughConfirmationDisplacement = 0.04
+    private static let topPlateauHandSpeedThreshold = 0.01
     private static let minimumWindowCoverage = 0.80
     private static let stableBallDistanceThreshold = 0.025
     private static let labelSwapAxisTolerance = 12.0
@@ -337,16 +343,19 @@ enum SwingEvidenceTimeline {
             )
         }
         let addressIndex = evidence.indices.first { index in
-            return stablePast[index]
-                && rawDirections[index] == .stable
-                && sustainedDirectionBegins(
-                    after: index,
-                    direction: .backswing,
-                    rawDirections: rawDirections,
-                    evidence: evidence
+            stablePast[index]
+                && (
+                    rawDirections[index] == .stable
+                        && sustainedDirectionBegins(
+                            after: index,
+                            direction: .backswing,
+                            rawDirections: rawDirections,
+                            evidence: evidence
+                        )
+                    || takeawayMotionOnset(at: index, evidence: evidence)
                 )
         }
-        let topIndex = evidence.indices.first { index in
+        let topTransitionIndex = evidence.indices.first { index in
             guard index > (addressIndex ?? -1) else { return false }
             return rawDirections[index] == .stable
                 && pastDirections[index] != .downswing
@@ -357,9 +366,15 @@ enum SwingEvidenceTimeline {
                     evidence: evidence
                 )
         }
+        let topIndex = topTransitionIndex.map {
+            lastNearStationaryTopFrame(endingAt: $0, evidence: evidence) ?? $0
+        }
         let finishIndex = evidence.indices.first { index in
             guard index > (topIndex ?? addressIndex ?? -1),
-                  pastDirections[index] == .backswing else { return false }
+                  pastDirections[index] == .backswing
+                    || horizontalFollowThroughPrecedes(at: index, evidence: evidence) else {
+                return false
+            }
             return sustainedStabilityBegins(
                 at: index,
                 pastDirection: .backswing,
@@ -367,9 +382,24 @@ enum SwingEvidenceTimeline {
                 evidence: evidence
             )
         }
+        let followThroughIndex = evidence.indices.first { index in
+            index > (topIndex ?? -1) && futureDirections[index] == .backswing
+        }
 
         return evidence.indices.map { index in
             let surrounding = uniqueSorted(pastWindows[index] + futureWindows[index])
+            let isBackswingPhase: Bool
+            if let addressIndex, let topIndex {
+                isBackswingPhase = index >= addressIndex && index < topIndex
+            } else {
+                isBackswingPhase = false
+            }
+            let isDownswingPhase: Bool
+            if let topIndex, let followThroughIndex {
+                isDownswingPhase = index >= topIndex && index < followThroughIndex
+            } else {
+                isDownswingPhase = false
+            }
             return SwingTemporalFrame(
                 frame: evidence[index],
                 direction: directionVote(
@@ -377,8 +407,8 @@ enum SwingEvidenceTimeline {
                     duration: directionWindow,
                     evidence: evidence
                 ),
-                sustainedBackswing: futureDirections[index] == .backswing,
-                sustainedDownswing: futureDirections[index] == .downswing,
+                sustainedBackswing: futureDirections[index] == .backswing || isBackswingPhase,
+                sustainedDownswing: futureDirections[index] == .downswing || isDownswingPhase,
                 sustainedFollowThrough: futureDirections[index] == .backswing,
                 isAddressBoundary: index == addressIndex,
                 isTopPlateauEnd: index == topIndex,
@@ -482,6 +512,85 @@ enum SwingEvidenceTimeline {
         return false
     }
 
+    private static func takeawayMotionOnset(
+        at index: Int,
+        evidence: [SwingFrameEvidence]
+    ) -> Bool {
+        guard index > evidence.startIndex,
+              frameStability(evidence[index]) == true,
+              let start = evidence[index].handCenter,
+              let hip = evidence[index].hipCenter,
+              SwingGeometry.distance(start, hip) <= maximumAddressHandHipDistance,
+              hasQuietAddressHistory(endingBefore: index, evidence: evidence) else {
+            return false
+        }
+        let currentSpeed = hypot(
+            Double(evidence[index].handVelocity.x),
+            Double(evidence[index].handVelocity.y)
+        )
+        let previousSpeed = hypot(
+            Double(evidence[index - 1].handVelocity.x),
+            Double(evidence[index - 1].handVelocity.y)
+        )
+        guard currentSpeed >= takeawayOnsetSpeedThreshold,
+              previousSpeed < takeawayOnsetSpeedThreshold else { return false }
+
+        let confirmationIndices = timedIndices(
+            startingAt: index,
+            duration: takeawayConfirmationWindow,
+            evidence: evidence
+        )
+        guard windowSpans(
+            confirmationIndices,
+            duration: takeawayConfirmationWindow,
+            evidence: evidence
+        ) else { return false }
+        return confirmationIndices.contains { futureIndex in
+            guard let future = evidence[futureIndex].handCenter else { return false }
+            return hypot(Double(future.x - start.x), Double(future.y - start.y))
+                >= takeawayConfirmationDisplacement
+        }
+    }
+
+    private static func lastNearStationaryTopFrame(
+        endingAt transitionIndex: Int,
+        evidence: [SwingFrameEvidence]
+    ) -> Int? {
+        timedIndices(
+            endingAt: transitionIndex,
+            duration: stableWindow,
+            evidence: evidence
+        ).last { index in
+            let velocity = evidence[index].handVelocity
+            return velocity.x.isFinite
+                && velocity.y.isFinite
+                && hypot(Double(velocity.x), Double(velocity.y))
+                    <= topPlateauHandSpeedThreshold
+        }
+    }
+
+    private static func hasQuietAddressHistory(
+        endingBefore index: Int,
+        evidence: [SwingFrameEvidence]
+    ) -> Bool {
+        let history = Array(
+            timedIndices(
+                endingAt: index,
+                duration: stableWindow,
+                evidence: evidence
+            ).dropLast()
+        )
+        guard windowSpans(history, duration: stableWindow, evidence: evidence) else {
+            return false
+        }
+        let quietCount = history.filter { historyIndex in
+            let velocity = evidence[historyIndex].handVelocity
+            return hypot(Double(velocity.x), Double(velocity.y))
+                < takeawayOnsetSpeedThreshold
+        }.count
+        return Double(quietCount) / Double(history.count) > stableVoteRatio
+    }
+
     private static func sustainedStabilityBegins(
         at index: Int,
         pastDirection: SwingMotionDirection,
@@ -493,6 +602,16 @@ enum SwingEvidenceTimeline {
             return false
         }
 
+        var consecutiveUnstable = 0
+        for candidateIndex in indices {
+            if frameStability(evidence[candidateIndex]) == true {
+                consecutiveUnstable = 0
+            } else {
+                consecutiveUnstable += 1
+                if consecutiveUnstable > 1 { return false }
+            }
+        }
+
         var skippedOutlier = false
         for futureIndex in indices {
             if frameStability(evidence[futureIndex]) == true { return true }
@@ -501,6 +620,22 @@ enum SwingEvidenceTimeline {
             skippedOutlier = true
         }
         return false
+    }
+
+    private static func horizontalFollowThroughPrecedes(
+        at index: Int,
+        evidence: [SwingFrameEvidence]
+    ) -> Bool {
+        let preceding = timedIndices(
+            endingAt: index,
+            duration: stableWindow,
+            evidence: evidence
+        )
+        guard windowSpans(preceding, duration: stableWindow, evidence: evidence),
+              let first = preceding.first.flatMap({ evidence[$0].handCenter }),
+              let last = evidence[index].handCenter else { return false }
+        return SwingGeometry.distance(first, last)
+            >= followThroughConfirmationDisplacement
     }
 
     private static func frameStability(_ frame: SwingFrameEvidence) -> Bool? {
@@ -954,7 +1089,10 @@ struct StageCandidateSet: Equatable {
 }
 
 enum ImpactCorridorResolver {
-    private static let minimumCandidateScore = 0.38
+    /// Body-only candidates seed the sparse object pass. Front-view swings can
+    /// have little projected hip rotation, so provisional low-confidence
+    /// frames must survive until shaft and ball evidence can disambiguate P6.
+    private static let minimumCandidateScore = 0.30
     private static let maximumCandidateCount = 5
 
     static func candidates(in timeline: [SwingTemporalFrame]) -> [StageCandidate] {
@@ -969,8 +1107,7 @@ enum ImpactCorridorResolver {
             if downswingStarted && temporalFrame.sustainedFollowThrough {
                 followThroughStarted = true
             }
-            guard !followThroughStarted,
-                  temporalFrame.sustainedDownswing else { continue }
+            guard downswingStarted, !followThroughStarted else { continue }
 
             let frame = temporalFrame.frame
             let handNearHip = distance(frame.handCenter, frame.hipCenter).map {
@@ -998,14 +1135,14 @@ enum ImpactCorridorResolver {
             let shaftBallAlignment = shaftBallAlignment(frame.objectEvidence)
             let ballLocalChange = clamp(frame.objectEvidence.ballLocalChange)
             let score = clamp(
-                handNearHip * 0.16
-                    + downwardSpeed * 0.15
-                    + localAcceleration * 0.09
-                    + hipOpen * 0.10
+                handNearHip * 0.28
+                    + downwardSpeed * 0.08
+                    + localAcceleration * 0.04
+                    + hipOpen * 0.08
                     + shaftBallAlignment * 0.22
                     + ballLocalChange * 0.11
-                    + clamp(temporalFrame.shaftAngleContinuity) * 0.07
-                    + clamp(frame.poseCoverage) * 0.10
+                    + clamp(temporalFrame.shaftAngleContinuity) * 0.06
+                    + clamp(frame.poseCoverage) * 0.13
             )
             guard score >= minimumCandidateScore else { continue }
 
@@ -1659,9 +1796,11 @@ enum ConstrainedSwingPathSolver {
                     path: path,
                     timeline: timeline
                 )
+                let cadenceScore = cadenceConsistencyScore(path)
                 let scored = ScoredPath(
                     candidates: path,
-                    total: evidenceScore + transitionScore - missingPenalty
+                    total: evidenceScore + transitionScore + cadenceScore
+                        - missingPenalty
                 )
                 if isBetter(scored, than: best) {
                     secondBest = best
@@ -1866,6 +2005,15 @@ enum ConstrainedSwingPathSolver {
             + followThrough * 0.20
             + topPlateau * 0.10
             + finishPlateau * 0.15
+    }
+
+    private static func cadenceConsistencyScore(_ path: [StageCandidate]) -> Double {
+        let gaps = zip(path, path.dropFirst()).map { max(0, $1.time - $0.time) }
+        return zip(gaps, gaps.dropFirst()).reduce(0.0) { score, pair in
+            let larger = max(pair.0, pair.1)
+            guard larger > 0 else { return score }
+            return score + min(pair.0, pair.1) / larger * 0.18
+        }
     }
 
     private static func durationWeightedSupport(
@@ -2694,7 +2842,7 @@ enum SwingCoreLocator {
         let poseCoverage = Double(samples.filter { $0.pose != nil }.count) / Double(samples.count)
         guard poseCoverage >= 0.5 else { return .failed(.insufficientPoseEvidence) }
 
-        let hands = samples.map { $0.pose.flatMap(handCenter) }
+        let hands = samples.map { $0.pose.flatMap(handCenterRelativeToHip) }
         let shoulderAxes = samples.map { $0.pose.flatMap { lineAngle($0.leftShoulder, $0.rightShoulder) } }
         let hipAxes = samples.map { $0.pose.flatMap { lineAngle($0.leftHip, $0.rightHip) } }
         let smoothedHands = hands.indices.map {
@@ -2789,6 +2937,14 @@ enum SwingCoreLocator {
             return CGPoint(x: (left.x + right.x) / 2, y: (left.y + right.y) / 2)
         }
         return sample.leftWrist ?? sample.rightWrist
+    }
+
+    private static func handCenterRelativeToHip(_ sample: SwingPoseSample) -> CGPoint? {
+        guard let hand = handCenter(sample) else { return nil }
+        guard let hip = SwingGeometry.center(sample.leftHip, sample.rightHip) else {
+            return hand
+        }
+        return CGPoint(x: hand.x - hip.x, y: hand.y - hip.y)
     }
 
     private static func lineAngle(_ first: CGPoint?, _ second: CGPoint?) -> Double? {
@@ -2955,6 +3111,34 @@ enum SparseObjectSamplingPlan {
             return first.candidate.sourceFrameIndex < second.candidate.sourceFrameIndex
         }
         var selectedIndices = Set<Int>()
+
+        // Impact contours are the most time-sensitive object evidence, so keep
+        // their complete three-frame neighborhoods whenever the fixed budget
+        // permits it.
+        for entry in prioritized where entry.candidate.stage == .impact {
+            let additions = entry.indices.subtracting(selectedIndices)
+            guard selectedIndices.count + additions.count <= maximumFrameCount else {
+                continue
+            }
+            selectedIndices.formUnion(entry.indices)
+        }
+
+        // Dense, overlapping high-score neighborhoods can otherwise consume the
+        // whole budget before a temporally distinct alternative is sampled. Keep
+        // the centers of up to three plausible alternatives per non-impact stage;
+        // the normal priority pass below fills their neighboring frames when
+        // space remains.
+        for stage in [SwingStage.address, .takeaway, .followThrough] {
+            for center in diverseCandidateCenters(
+                for: stage,
+                from: neighborhoods,
+                references: sortedReferences,
+                excluding: selectedIndices
+            ) where selectedIndices.count < maximumFrameCount {
+                selectedIndices.insert(center)
+            }
+        }
+
         for entry in prioritized {
             let additions = entry.indices.subtracting(selectedIndices)
             guard selectedIndices.count + additions.count <= maximumFrameCount else {
@@ -2965,6 +3149,49 @@ enum SparseObjectSamplingPlan {
         return selectedIndices
             .sorted()
             .map { sortedReferences[$0] }
+    }
+
+    private static func diverseCandidateCenters(
+        for stage: SwingStage,
+        from neighborhoods: [(candidate: StageCandidate, indices: Set<Int>)],
+        references: [FineFrameReference],
+        excluding excludedIndices: Set<Int>
+    ) -> [Int] {
+        let entries = neighborhoods
+            .filter { $0.candidate.stage == stage }
+            .sorted {
+                if $0.candidate.score != $1.candidate.score {
+                    return $0.candidate.score > $1.candidate.score
+                }
+                if $0.candidate.time != $1.candidate.time {
+                    return $0.candidate.time < $1.candidate.time
+                }
+                return $0.candidate.sourceFrameIndex < $1.candidate.sourceFrameIndex
+            }
+        guard let topScore = entries.first?.candidate.score else { return [] }
+
+        var centers: [Int] = []
+        for entry in entries {
+            guard let center = entry.indices.min(by: {
+                let firstDistance = abs(references[$0].time - entry.candidate.time)
+                let secondDistance = abs(references[$1].time - entry.candidate.time)
+                if firstDistance != secondDistance { return firstDistance < secondDistance }
+                return references[$0].sourceFrameIndex < references[$1].sourceFrameIndex
+            }) else { continue }
+            guard excludedIndices.allSatisfy({
+                abs($0 - center) > neighborRadius * 2
+            }) else { continue }
+            guard centers.allSatisfy({ abs($0 - center) > neighborRadius * 2 }) else {
+                continue
+            }
+            if centers.count >= 2,
+               entry.candidate.score < topScore * 0.75 {
+                break
+            }
+            centers.append(center)
+            if centers.count == 3 { break }
+        }
+        return centers
     }
 
     /// Compatibility bridge for the current player pipeline. Task 6 will pass

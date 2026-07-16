@@ -6,7 +6,44 @@ struct SwingTemporalEvidenceSmoke {
         verifyFrameRateInvariantBoundaries()
         verifyBoundaryAdjacentNoiseDoesNotMoveBoundaries()
         verifyBoundaryAdjacentWrongDirectionDoesNotMoveBoundaries()
+        verifyHorizontalTakeawayBoundary()
+        verifyHighHandsDoNotCreateAddressBoundary()
+        verifyPartialTakeawayDoesNotCreateAddressBoundary()
+        verifyHorizontalBackswingPhase()
+        verifyHorizontalImpactRemainsDownswingPhase()
+        verifyTopPlateauEndsAtLastNearStationaryFrame()
+        verifyHorizontalFollowThroughFinishBoundary()
         verifySupportingTemporalEvidence()
+    }
+
+    private static func verifyTopPlateauEndsAtLastNearStationaryFrame() {
+        let fps = 30
+        let fixture = (0...100).map { ordinal -> SwingFrameEvidence in
+            let velocityY: CGFloat
+            switch ordinal {
+            case ...30:
+                velocityY = 0
+            case 31...69:
+                velocityY = -0.30
+            case 70...73:
+                velocityY = 0
+            case 74...76:
+                velocityY = 0.03
+            default:
+                velocityY = 0.45
+            }
+            return evidence(
+                sourceFrameIndex: 92_000 + ordinal,
+                time: Double(ordinal) / Double(fps),
+                velocityY: velocityY,
+                handCenter: CGPoint(x: 0.40, y: ordinal < 70 ? 0.58 : 0.34)
+            )
+        }
+        precondition(
+            SwingEvidenceTimeline.build(from: fixture)
+                .first(where: \.isTopPlateauEnd)?.frame.sourceFrameIndex == 92_073,
+            "P4 must be the last near-stationary top frame, not the end of harmless pre-downswing drift"
+        )
     }
 
     private enum BoundaryNoise: CaseIterable {
@@ -92,6 +129,238 @@ struct SwingTemporalEvidenceSmoke {
             SwingEvidenceTimeline.build(from: [incomplete]).adaptiveBoundaryEvidence
                 == AdaptiveBoundaryEvidence(hasAddressBoundary: false, hasFinishBoundary: false)
         )
+    }
+
+    private static func verifyHorizontalTakeawayBoundary() {
+        for fps in [30, 120] {
+            let times = (0...Int(2.0 * Double(fps))).map { Double($0) / Double(fps) }
+            let fixture = times.enumerated().map { ordinal, time -> SwingFrameEvidence in
+                let elapsed = max(0, time - 1.0)
+                let x: CGFloat = time < 1.0
+                    ? 0.55
+                    : 0.55 - CGFloat(min(0.12, elapsed * 0.09))
+                let velocityX: CGFloat
+                if abs(time - 1.0) < 0.000_001 {
+                    velocityX = -0.10
+                } else if time > 1.0 {
+                    velocityX = ordinal.isMultiple(of: 4) ? -0.03 : -0.07
+                } else {
+                    velocityX = 0
+                }
+                return evidence(
+                    sourceFrameIndex: fps * 20_000 + ordinal,
+                    time: time,
+                    velocityX: velocityX,
+                    velocityY: 0,
+                    handCenter: CGPoint(x: x, y: 0.58)
+                )
+            }
+            let timeline = SwingEvidenceTimeline.build(from: fixture)
+            precondition(
+                timeline.last(where: \.isAddressBoundary)?.frame.time == 1.0,
+                "A direction-agnostic slow takeaway must retain its last stable address at \(fps) FPS"
+            )
+        }
+    }
+
+    private static func verifyHighHandsDoNotCreateAddressBoundary() {
+        let fps = 30
+        let fixture = (0...30).map { ordinal -> SwingFrameEvidence in
+            let time = Double(ordinal) / Double(fps)
+            let velocityX: CGFloat = ordinal == 8 ? 0.10 : (ordinal > 8 ? 0.07 : 0)
+            return evidence(
+                sourceFrameIndex: 90_000 + ordinal,
+                time: time,
+                velocityX: velocityX,
+                velocityY: 0,
+                handCenter: CGPoint(x: 0.32 + CGFloat(ordinal) * 0.003, y: 0.35)
+            )
+        }
+        precondition(
+            SwingEvidenceTimeline.build(from: fixture).allSatisfy { !$0.isAddressBoundary },
+            "A high-hands motion pulse near the top must not become an address boundary"
+        )
+    }
+
+    private static func verifyPartialTakeawayDoesNotCreateAddressBoundary() {
+        let fps = 30
+        let fixture = (0...30).map { ordinal -> SwingFrameEvidence in
+            let velocityX: CGFloat = ordinal.isMultiple(of: 3) ? -0.12 : -0.07
+            return evidence(
+                sourceFrameIndex: 91_000 + ordinal,
+                time: Double(ordinal) / Double(fps),
+                velocityX: velocityX,
+                velocityY: 0,
+                handCenter: CGPoint(
+                    x: 0.55 - CGFloat(ordinal) * 0.003,
+                    y: 0.58
+                )
+            )
+        }
+        precondition(
+            SwingEvidenceTimeline.build(from: fixture).allSatisfy { !$0.isAddressBoundary },
+            "A window that starts during takeaway must expand left instead of inventing P1"
+        )
+    }
+
+    private static func verifyHorizontalFollowThroughFinishBoundary() {
+        for fps in [30, 120] {
+            let times = (0...Int(5.0 * Double(fps))).map { Double($0) / Double(fps) }
+            let fixture = times.enumerated().map { ordinal, time -> SwingFrameEvidence in
+                let velocityX: CGFloat
+                let velocityY: CGFloat
+                let handX: CGFloat
+                let bodySpeed: Double
+                if time <= 1.0 {
+                    velocityX = 0
+                    velocityY = 0
+                    handX = 0.55
+                    bodySpeed = 0.01
+                } else if time < 2.30 {
+                    velocityX = 0
+                    velocityY = -0.14
+                    handX = 0.55
+                    bodySpeed = 0.03
+                } else if time <= 2.50 {
+                    velocityX = 0
+                    velocityY = 0
+                    handX = 0.55
+                    bodySpeed = 0.02
+                } else if time <= 3.30 {
+                    velocityX = 0
+                    velocityY = 0.55
+                    handX = 0.55
+                    bodySpeed = 0.04
+                } else if time < 4.00 {
+                    velocityX = -0.40
+                    velocityY = 0
+                    handX = 0.65 - CGFloat(time - 3.30) * 0.20
+                    bodySpeed = 0.04
+                } else if time <= 4.07 {
+                    let pulse = time > 4.00
+                    velocityX = pulse ? -0.35 : 0
+                    velocityY = 0
+                    handX = 0.51 - CGFloat(max(0, time - 4.00)) * 0.30
+                    bodySpeed = pulse ? 0.12 : 0.01
+                } else {
+                    velocityX = 0
+                    velocityY = 0
+                    handX = 0.49
+                    bodySpeed = 0.01
+                }
+                return evidence(
+                    sourceFrameIndex: fps * 30_000 + ordinal,
+                    time: time,
+                    velocityX: velocityX,
+                    velocityY: velocityY,
+                    headSpeed: bodySpeed,
+                    hipSpeed: bodySpeed,
+                    handCenter: CGPoint(x: handX, y: 0.45)
+                )
+            }
+            let timeline = SwingEvidenceTimeline.build(from: fixture)
+            let expected = times.last { $0 <= 4.07 }!
+            precondition(
+                timeline.first(where: \.isFinishPlateauStart)?.frame.time == expected,
+                "Horizontal follow-through must settle after the final motion burst at \(fps) FPS"
+            )
+        }
+    }
+
+    private static func verifyHorizontalBackswingPhase() {
+        for fps in [30, 120] {
+            let times = (0...Int(3.5 * Double(fps))).map { Double($0) / Double(fps) }
+            let fixture = times.enumerated().map { ordinal, time -> SwingFrameEvidence in
+                let velocityX: CGFloat
+                let velocityY: CGFloat
+                let handX: CGFloat
+                if time < 1.0 {
+                    velocityX = 0
+                    velocityY = 0
+                    handX = 0.55
+                } else if time < 2.50 {
+                    velocityX = -0.10
+                    velocityY = 0
+                    handX = 0.55 - CGFloat(time - 1.0) * 0.10
+                } else if time == 2.50 {
+                    velocityX = 0
+                    velocityY = 0
+                    handX = 0.40
+                } else {
+                    velocityX = 0
+                    velocityY = 0.55
+                    handX = 0.40
+                }
+                return evidence(
+                    sourceFrameIndex: fps * 40_000 + ordinal,
+                    time: time,
+                    velocityX: velocityX,
+                    velocityY: velocityY,
+                    handCenter: CGPoint(x: handX, y: 0.58)
+                )
+            }
+            let timeline = SwingEvidenceTimeline.build(from: fixture)
+            let middleBackswing = timeline.first { abs($0.frame.time - 2.0) < 0.000_001 }
+            precondition(timeline.first(where: \.isAddressBoundary)?.frame.time == 1.0)
+            precondition(timeline.first(where: \.isTopPlateauEnd)?.frame.time == 2.5)
+            precondition(
+                middleBackswing?.sustainedBackswing == true,
+                "Horizontal takeaway must remain in the backswing phase at \(fps) FPS"
+            )
+        }
+    }
+
+    private static func verifyHorizontalImpactRemainsDownswingPhase() {
+        for fps in [30, 120] {
+            let times = (0...Int(4.5 * Double(fps))).map { Double($0) / Double(fps) }
+            let fixture = times.enumerated().map { ordinal, time -> SwingFrameEvidence in
+                let velocityX: CGFloat
+                let velocityY: CGFloat
+                let handX: CGFloat
+                if time <= 1.0 {
+                    velocityX = 0
+                    velocityY = 0
+                    handX = 0.55
+                } else if time < 2.30 {
+                    velocityX = -0.10
+                    velocityY = -0.14
+                    handX = 0.55 - CGFloat(time - 1.0) * 0.08
+                } else if time <= 2.50 {
+                    velocityX = 0
+                    velocityY = 0
+                    handX = 0.45
+                } else if time < 3.00 {
+                    velocityX = 0
+                    velocityY = 0.55
+                    handX = 0.45
+                } else if time < 3.35 {
+                    velocityX = 0.60
+                    velocityY = 0
+                    handX = 0.45 + CGFloat(time - 3.00) * 0.20
+                } else if time < 3.90 {
+                    velocityX = 0
+                    velocityY = -0.48
+                    handX = 0.52
+                } else {
+                    velocityX = 0
+                    velocityY = 0
+                    handX = 0.52
+                }
+                return evidence(
+                    sourceFrameIndex: fps * 50_000 + ordinal,
+                    time: time,
+                    velocityX: velocityX,
+                    velocityY: velocityY,
+                    handCenter: CGPoint(x: handX, y: 0.50)
+                )
+            }
+            let timeline = SwingEvidenceTimeline.build(from: fixture)
+            let horizontalImpact = timeline.first { abs($0.frame.time - 3.20) < 0.000_001 }
+            precondition(
+                horizontalImpact?.sustainedDownswing == true,
+                "Through-impact horizontal rotation must remain in the downswing phase at \(fps) FPS"
+            )
+        }
     }
 
     private static func verifyBoundaryAdjacentNoiseDoesNotMoveBoundaries() {
@@ -229,6 +498,7 @@ struct SwingTemporalEvidenceSmoke {
     private static func evidence(
         sourceFrameIndex: Int,
         time: Double,
+        velocityX: CGFloat = 0,
         velocityY: CGFloat,
         headSpeed: Double = 0.01,
         hipSpeed: Double = 0.01,
@@ -263,7 +533,7 @@ struct SwingTemporalEvidenceSmoke {
             hipAngle: 0,
             handCenter: handCenter,
             hipCenter: pose.flatMap { SwingGeometry.center($0.leftHip, $0.rightHip) },
-            handVelocity: CGPoint(x: 0, y: velocityY),
+            handVelocity: CGPoint(x: velocityX, y: velocityY),
             handAcceleration: .zero,
             headSpeed: headSpeed,
             hipSpeed: hipSpeed,

@@ -72,6 +72,80 @@ struct ImpactCorridorResolverSmoke {
         let bestFive = ImpactCorridorResolver.candidates(in: crowdedTimeline)
         precondition(bestFive.count == 5)
         precondition(bestFive.map(\.sourceFrameIndex) == [602, 603, 604, 605, 606])
+
+        let horizontalImpact = [
+            temporalFrame(sourceFrameIndex: 700),
+            temporalFrame(
+                sourceFrameIndex: 701,
+                sustainedDownswing: false,
+                sustainedFollowThrough: false,
+                direction: .stable
+            ),
+            temporalFrame(
+                sourceFrameIndex: 702,
+                sustainedDownswing: false,
+                sustainedFollowThrough: true,
+                direction: .backswing
+            )
+        ]
+        precondition(
+            ImpactCorridorResolver.candidates(in: horizontalImpact)
+                .contains { $0.sourceFrameIndex == 701 },
+            "The impact corridor must remain open while hand motion rotates through horizontal"
+        )
+
+        let frontViewHorizontalImpact = [
+            temporalFrame(sourceFrameIndex: 710),
+            temporalFrame(
+                sourceFrameIndex: 711,
+                sustainedDownswing: false,
+                sustainedFollowThrough: false,
+                direction: .stable,
+                hipAngle: 0,
+                handVelocity: CGPoint(x: 1.0, y: 0),
+                handAcceleration: CGPoint(x: 4.0, y: 0)
+            ),
+            temporalFrame(
+                sourceFrameIndex: 712,
+                sustainedDownswing: false,
+                sustainedFollowThrough: true,
+                direction: .backswing
+            )
+        ]
+        let provisional = ImpactCorridorResolver.candidates(in: frontViewHorizontalImpact)
+            .first { $0.sourceFrameIndex == 711 }
+        precondition(
+            provisional?.maximumStatus == .lowConfidence,
+            "A front-view horizontal body candidate must survive for sparse object extraction"
+        )
+
+        let bodyOnlyCorridor = [
+            temporalFrame(
+                sourceFrameIndex: 720,
+                hipAngle: 0,
+                handVelocity: CGPoint(x: 0.35, y: 0.55),
+                handAcceleration: CGPoint(x: 4.0, y: 0),
+                handCenter: CGPoint(x: 0.50, y: 0.50)
+            ),
+            temporalFrame(
+                sourceFrameIndex: 721,
+                hipAngle: 0,
+                handVelocity: CGPoint(x: 0.90, y: 0),
+                handAcceleration: CGPoint(x: 2.5, y: 0),
+                handCenter: CGPoint(x: 0.50, y: 0.615)
+            ),
+            temporalFrame(
+                sourceFrameIndex: 722,
+                sustainedDownswing: false,
+                sustainedFollowThrough: true,
+                direction: .backswing
+            )
+        ]
+        let bodyOnlyCandidates = ImpactCorridorResolver.candidates(in: bodyOnlyCorridor)
+        precondition(
+            bodyOnlyCandidates.max(by: { $0.score < $1.score })?.sourceFrameIndex == 721,
+            "Without object evidence, hand-to-hip proximity must outrank an earlier acceleration spike"
+        )
     }
 
     private static func verifyBuiltTimelineDoesNotCloseCorridorDuringBackswing() {
@@ -168,10 +242,14 @@ struct ImpactCorridorResolverSmoke {
         sustainedDownswing: Bool = true,
         sustainedFollowThrough: Bool = false,
         direction: SwingMotionDirection? = nil,
-        shaftAngleContinuity: Double = 0
+        shaftAngleContinuity: Double = 0,
+        hipAngle: Double = 32,
+        handVelocity: CGPoint = CGPoint(x: 0, y: 1.50),
+        handAcceleration: CGPoint = CGPoint(x: 0, y: 4),
+        handCenter: CGPoint = CGPoint(x: 0.50, y: 0.61)
     ) -> SwingTemporalFrame {
         let time = Double(sourceFrameIndex) / 30
-        let hand = CGPoint(x: 0.50, y: 0.61)
+        let hand = handCenter
         let pose = completePose(time: time, sourceFrameIndex: sourceFrameIndex, hand: hand)
         let frame = SwingFrameEvidence(
             sourceFrameIndex: sourceFrameIndex,
@@ -189,11 +267,11 @@ struct ImpactCorridorResolverSmoke {
             leadArmAngle: 30,
             leadArmExtension: 175,
             shoulderAngle: 12,
-            hipAngle: 32,
+            hipAngle: hipAngle,
             handCenter: hand,
             hipCenter: CGPoint(x: 0.50, y: 0.62),
-            handVelocity: CGPoint(x: 0, y: 1.50),
-            handAcceleration: CGPoint(x: 0, y: 4),
+            handVelocity: handVelocity,
+            handAcceleration: handAcceleration,
             headSpeed: 0.02,
             hipSpeed: 0.03,
             poseCoverage: 1

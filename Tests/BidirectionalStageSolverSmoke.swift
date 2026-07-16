@@ -132,6 +132,7 @@ struct BidirectionalStageSolverSmoke {
         verifyCounterRotatingFollowThroughCannotConfirm()
         verifyChestContinuationIsRequired()
         verifyDeclaredImpactAnchorCannotDiverge()
+        verifyBalancedCadenceRejectsLateFalseTakeaway()
     }
 
     private static func verifyMissingTakeawayShaftKeepsPath() {
@@ -228,6 +229,42 @@ struct BidirectionalStageSolverSmoke {
             timeline: timeline
         )
         precondition(result.unresolvedStages == Set(SwingStage.allCases))
+    }
+
+    private static func verifyBalancedCadenceRejectsLateFalseTakeaway() {
+        let fixture = transitionQualityFixture()
+        var candidates = fixture.strong.candidatesByStage
+        guard let balanced = candidates[.takeaway]?.first,
+              let lateIndex = fixture.timeline.firstIndex(where: {
+                  $0.frame.sourceFrameIndex == balanced.sourceFrameIndex + 1
+              }) else {
+            preconditionFailure("cadence fixture is incomplete")
+        }
+        let lateFrame = fixture.timeline[lateIndex].frame
+        let late = StageCandidate(
+            stage: .takeaway,
+            evidenceIndex: lateIndex,
+            sourceFrameIndex: lateFrame.sourceFrameIndex,
+            time: lateFrame.time,
+            score: balanced.score + 0.15,
+            requirementsSatisfied: balanced.requirementsSatisfied,
+            maximumStatus: balanced.maximumStatus,
+            hasClubEvidence: true,
+            hasBallEvidence: balanced.hasBallEvidence
+        )
+        candidates[.takeaway] = [late, balanced]
+        let candidateSet = StageCandidateSet(
+            impact: fixture.strong.impact,
+            candidatesByStage: candidates
+        )
+        let result = ConstrainedSwingPathSolver.solve(
+            candidateSets: [candidateSet],
+            timeline: fixture.timeline
+        )
+        precondition(
+            detection(.takeaway, in: result).sourceFrameIndex == balanced.sourceFrameIndex,
+            "A one-frame gap into P3 must not beat a balanced P1-P2-P3 cadence solely on a weak shaft score"
+        )
     }
 
     private static func solve(timeline: [SwingTemporalFrame]) -> SwingAnalysisResult {

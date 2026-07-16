@@ -539,6 +539,27 @@ enum SourceFrameMatchValidation: Equatable {
     case failed(AnalysisFailure)
 }
 
+enum SourceFrameRequestTimePolicy {
+    static func time(
+        sourceFrameIndex: Int,
+        sourceFrameRate: Double
+    ) -> CMTime {
+        let roundedFrameRate = sourceFrameRate.rounded()
+        if abs(sourceFrameRate - roundedFrameRate) < 1e-9,
+           roundedFrameRate > 0,
+           roundedFrameRate <= Double(Int32.max) {
+            return CMTime(
+                value: CMTimeValue(sourceFrameIndex),
+                timescale: CMTimeScale(roundedFrameRate)
+            )
+        }
+        return CMTime(
+            seconds: Double(sourceFrameIndex) / sourceFrameRate,
+            preferredTimescale: 60_000
+        )
+    }
+}
+
 enum SourceFrameMatchPolicy {
     /// A decoded timestamp identifies the requested source frame only inside
     /// its open half-frame interval. The exact half-frame boundary is rejected
@@ -716,9 +737,11 @@ final class SwingVideoAnalysisEngine: Sendable {
                 maximumSourceFrameIndex,
                 max(0, Int((seconds * nominalFrameRate).rounded()))
             )
-            let requestedSeconds = Double(requestedSourceFrameIndex) / nominalFrameRate
             let sample: CoarseSwingSample? = autoreleasepool {
-                let requestedTime = CMTime(seconds: requestedSeconds, preferredTimescale: 60_000)
+                let requestedTime = SourceFrameRequestTimePolicy.time(
+                    sourceFrameIndex: requestedSourceFrameIndex,
+                    sourceFrameRate: nominalFrameRate
+                )
                 var actualTime = CMTime.invalid
                 guard let image = try? generator.copyCGImage(
                     at: requestedTime,
@@ -770,7 +793,6 @@ final class SwingVideoAnalysisEngine: Sendable {
         guard trackedPoseDetector.lockIdentityAnchor(near: core.peakTime) else {
             return activeFailure(.noStableGolfer, runID: runID, gate: gate)
         }
-
         var window = AdaptiveSwingWindowPlanner.initialWindow(core: core, duration: duration)
         var samplesByFrame: [Int: SwingFrameSample] = [:]
         var rawPosesByFrame: [Int: PoseEstimationResult] = [:]
@@ -943,13 +965,14 @@ final class SwingVideoAnalysisEngine: Sendable {
         }
 
         publish(.solving, progress: 0.95, runID: runID, gate: gate, handler: progress)
+        let candidateSets = impactCandidates.map {
+            BidirectionalStageCandidateResolver.candidates(
+                timeline: finalTimeline,
+                impact: $0
+            )
+        }
         let result = ConstrainedSwingPathSolver.solve(
-            candidateSets: impactCandidates.map {
-                BidirectionalStageCandidateResolver.candidates(
-                    timeline: finalTimeline,
-                    impact: $0
-                )
-            },
+            candidateSets: candidateSets,
             timeline: finalTimeline
         )
         guard gate.isActive(runID) else { return .cancelled }
@@ -977,7 +1000,10 @@ final class SwingVideoAnalysisEngine: Sendable {
             var observedTime: Double?
             var observedSourceFrameIndex: Int?
             let load = frameImageCache.load(sourceFrameIndex: reference.sourceFrameIndex) {
-                let requestedTime = CMTime(seconds: reference.time, preferredTimescale: 60_000)
+                let requestedTime = SourceFrameRequestTimePolicy.time(
+                    sourceFrameIndex: reference.sourceFrameIndex,
+                    sourceFrameRate: sourceFrameRate
+                )
                 var actualTime = CMTime.invalid
                 guard let image = try? generator.copyCGImage(
                     at: requestedTime,
@@ -1078,4 +1104,5 @@ final class SwingVideoAnalysisEngine: Sendable {
         guard gate.isActive(runID) else { return }
         handler(SwingAnalysisProgressUpdate(phase: phase, progress: progress))
     }
+
 }

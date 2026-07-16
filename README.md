@@ -71,7 +71,9 @@ SwingArc 是一款专为 iOS 设备开发的**原生高尔夫挥杆分析与画�
 
 ## P1–P8 多关节定位验收
 
-当前首版只验收正面或近正面固定机位。分析先以 8 FPS 粗扫整段视频定位唯一挥杆窗口，再以视频真实帧率（最高 120 FPS）精扫该窗口；低帧率视频不插帧。精扫帧融合多关节、双手相对髋部的位置、前导臂角度、杆身方向和球位邻近度，再通过严格时序求解一次性选择 P1–P8。
+当前首版面向 30–120 FPS、正面或近正面固定机位。生产流程为：8 FPS 姿态粗扫定位唯一挥杆核心 → 向前/向后自适应扩展边界 → 按源视频真实帧率提取未缓存帧 → 在候选邻域稀疏提取杆身与球位证据 → 以冲击走廊为锚点双向生成 P1–P8 候选 → 通过方向、关节、手相对髋部位置与相邻阶段节奏联合求解。整个自适应窗口最多 8 秒；超出后明确返回失败，不继续无边界扫描。
+
+所有自动阶段必须对应实际提取到的源视频帧。分析不插帧、不按视频百分比补点，也不把固定时间偏移当作阶段。缺少地址、顶点、冲击走廊或收杆边界时会返回对应失败；剪掉挥杆首尾的素材返回不完整挥杆错误。P6 没有有效杆身/球位变化证据时最高只能是“低置信度”，不能显示为“已确认”。
 
 在真实 iPhone 上重新构建后，使用正面或近正面挥杆视频逐项验证：正常稳定挥杆、上杆顶点短暂停顿、单侧手腕遮挡、快挥、慢挥、无人体视频、包含两次挥杆的视频，以及手动校正 P4 后重新分析并保存/重开项目。
 
@@ -80,6 +82,28 @@ SwingArc 是一款专为 iOS 设备开发的**原生高尔夫挥杆分析与画�
 ### P1–P8 accuracy contract
 
 Automatic stages always reference observed source frames. Accepted complete fixed-camera clips must place every P1–P8 stage within ±1 source frame of a frozen two-pass manual annotation. Missing required evidence is reported as low confidence, unresolved, or a specific clip failure; the app never fills a stage from a fixed timestamp or video percentage.
+
+当前已验证基准 `/Users/liangbo/Desktop/IMG_4500.mov`：P1–P8 实际帧为 `375, 414, 432, 453, 465, 480, 495, 512`，相对冻结人工帧的绝对误差为 `0, 0, 1, 0, 1, 1, 1, 1`，本机分析耗时约 14.47 秒。可重复运行：
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+xcrun swiftc -parse-as-library \
+  -framework AVFoundation -framework Vision -framework ImageIO \
+  -framework SwiftUI -framework CoreVideo \
+  SwingArc/Models/DrawingModels.swift \
+  SwingArc/Models/WorkspaceModels.swift \
+  SwingArc/Services/VisionPoseDetector.swift \
+  SwingArc/Services/SwingStageDetector.swift \
+  Tests/P1P8AcceptanceSupport.swift \
+  Tests/RealVideoP1P8Acceptance.swift \
+  -o /tmp/real-video-p1p8
+
+/tmp/real-video-p1p8 \
+  /Users/liangbo/Desktop/IMG_4500.mov \
+  Tests/Fixtures/IMG_4500-ground-truth.json
+```
+
+五视频泛化验收必须再提供 `clip-30fps.mov`、`clip-60fps.mov`、`clip-120fps.mov`、`clip-slow-takeaway.mov` 的独立双人标注清单，并逐个运行同一命令；另需用缺少准备段和球位遮挡素材验证明确降级。当前这些素材尚未位于 `/Users/liangbo/Desktop/SwingArc-Acceptance`，因此不能宣称跨视频验收完成。
 
 ## Studio Focus 通用界面
 

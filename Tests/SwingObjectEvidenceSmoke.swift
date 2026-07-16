@@ -35,11 +35,18 @@ struct SwingObjectEvidenceSmoke {
 
         let firstMiss = tracker.update(nil)
         precondition(firstMiss.stableBall != nil)
-        precondition(firstMiss.localChange == 1)
-        let lockedCenter = firstMiss.stableBall?.center
-        precondition(tracker.update(nil).stableBall != nil)
         precondition(
-            tracker.update(nil).stableBall?.center == lockedCenter,
+            firstMiss.localChange == 0,
+            "One contour miss must not become impact evidence"
+        )
+        let lockedCenter = firstMiss.stableBall?.center
+        let secondMiss = tracker.update(nil)
+        precondition(secondMiss.stableBall != nil)
+        precondition(secondMiss.localChange == 0)
+        let sustainedLoss = tracker.update(nil)
+        precondition(sustainedLoss.localChange == 1)
+        precondition(
+            sustainedLoss.stableBall?.center == lockedCenter,
             "The address ball location must remain locked after the ball leaves at impact"
         )
     }

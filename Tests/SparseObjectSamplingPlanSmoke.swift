@@ -56,6 +56,34 @@ struct SparseObjectSamplingPlanSmoke {
         precondition(Set(overBudget.map(\.sourceFrameIndex)).isSuperset(of: [79, 80, 81]))
         precondition(!overBudget.contains { $0.sourceFrameIndex == 150 })
 
+        let denseProductionLikeCandidates = [
+            candidate(.address, sourceFrameIndex: 375, score: 0.93),
+            candidate(.takeaway, sourceFrameIndex: 425, score: 0.52),
+            candidate(.takeaway, sourceFrameIndex: 420, score: 0.42),
+            candidate(.takeaway, sourceFrameIndex: 423, score: 0.41),
+            candidate(.takeaway, sourceFrameIndex: 414, score: 0.40),
+            candidate(.takeaway, sourceFrameIndex: 375, score: 0.40),
+            candidate(.takeaway, sourceFrameIndex: 376, score: 0.40),
+            candidate(.impact, sourceFrameIndex: 472, score: 0.34),
+            candidate(.impact, sourceFrameIndex: 477, score: 0.33),
+            candidate(.impact, sourceFrameIndex: 478, score: 0.34),
+            candidate(.impact, sourceFrameIndex: 483, score: 0.33),
+            candidate(.impact, sourceFrameIndex: 485, score: 0.31),
+            candidate(.followThrough, sourceFrameIndex: 494, score: 0.76),
+            candidate(.followThrough, sourceFrameIndex: 495, score: 0.74),
+            candidate(.followThrough, sourceFrameIndex: 493, score: 0.67),
+            candidate(.followThrough, sourceFrameIndex: 492, score: 0.65),
+            candidate(.followThrough, sourceFrameIndex: 489, score: 0.40)
+        ]
+        let denseProductionLike = SparseObjectSamplingPlan.frames(
+            from: references,
+            candidates: denseProductionLikeCandidates
+        )
+        precondition(
+            denseProductionLike.contains { $0.sourceFrameIndex == 414 },
+            "A dense impact neighborhood must not starve the third P2 candidate center"
+        )
+
         let fallback = SparseObjectSamplingPlan.frames(from: references, candidates: [])
         precondition(fallback.count == 12)
         precondition(fallback.map(\.sourceFrameIndex) == fallback.map(\.sourceFrameIndex).sorted())

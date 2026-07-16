@@ -1,9 +1,27 @@
 import Foundation
 import CoreGraphics
+import CoreMedia
 
 @main
 struct VideoAnalysisMediaPipelineSmoke {
     static func main() {
+        let integerRateRequest = SourceFrameRequestTimePolicy.time(
+            sourceFrameIndex: 131,
+            sourceFrameRate: 30
+        )
+        precondition(
+            integerRateRequest == CMTime(value: 131, timescale: 30),
+            "Integer frame-rate requests must preserve the exact frame rational"
+        )
+        let fractionalRateRequest = SourceFrameRequestTimePolicy.time(
+            sourceFrameIndex: 240,
+            sourceFrameRate: 119.88
+        )
+        precondition(
+            abs(fractionalRateRequest.seconds - 240.0 / 119.88) < 1.0 / 60_000.0,
+            "Fractional rates must use a high-resolution request time"
+        )
+
         let sourceFrameRate = 60.0
         precondition(
             SourceFrameMatchPolicy.validate(

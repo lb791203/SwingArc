@@ -42,6 +42,36 @@ struct SwingCoreLocatorSmoke {
                 == .failed(.noSwingMotion),
             "Swapping left/right labels on fixed axes must not create fake rotation"
         )
+
+        let swingThenWalk = stride(from: 0.0, through: 20.0, by: 0.125).map { time in
+            let inSwing = time >= 8.0 && time <= 9.25
+            let phase = inSwing ? (time - 8.0) / 1.25 : 0
+            let wristY: CGFloat = inSwing
+                ? (phase <= 0.5 ? 0.78 - phase : 0.28 + (phase - 0.5))
+                : 0.78
+            let shoulderTurn: CGFloat = inSwing ? sin(phase * .pi) * 0.08 : 0
+            let translation: CGFloat = time >= 13.0 && time <= 18.0
+                ? CGFloat((time - 13.0) * 0.60)
+                : (time > 18.0 ? 3.0 : 0)
+            return CoarseSwingSample(
+                time: time,
+                pose: translatedPose(
+                    time: time,
+                    wristY: wristY,
+                    shoulderTurn: shoulderTurn,
+                    translationX: translation
+                )
+            )
+        }
+        switch SwingCoreLocator.locate(samples: swingThenWalk) {
+        case let .located(core):
+            precondition(
+                core.peakTime >= 8.0 && core.peakTime <= 9.25,
+                "Whole-body translation after the swing must not replace the swing core"
+            )
+        case let .failed(reason):
+            preconditionFailure("Expected swing core before walking, got \(reason)")
+        }
     }
 
     private static func coarseFixture(bursts: [Double]) -> [CoarseSwingSample] {
@@ -100,6 +130,32 @@ struct SwingCoreLocatorSmoke {
             head: CGPoint(x: 0.50, y: 0.16),
             spineAngle: 0,
             aggregateConfidence: 0.95
+        )
+    }
+
+    private static func translatedPose(
+        time: Double,
+        wristY: CGFloat,
+        shoulderTurn: CGFloat,
+        translationX: CGFloat
+    ) -> SwingPoseSample {
+        let original = pose(time: time, wristY: wristY, shoulderTurn: shoulderTurn)
+        func shifted(_ point: CGPoint?) -> CGPoint? {
+            point.map { CGPoint(x: $0.x + translationX, y: $0.y) }
+        }
+        return SwingPoseSample(
+            time: time,
+            leftWrist: shifted(original.leftWrist),
+            rightWrist: shifted(original.rightWrist),
+            leftElbow: shifted(original.leftElbow),
+            rightElbow: shifted(original.rightElbow),
+            leftShoulder: shifted(original.leftShoulder),
+            rightShoulder: shifted(original.rightShoulder),
+            leftHip: shifted(original.leftHip),
+            rightHip: shifted(original.rightHip),
+            head: shifted(original.head),
+            spineAngle: original.spineAngle,
+            aggregateConfidence: original.aggregateConfidence
         )
     }
 }
