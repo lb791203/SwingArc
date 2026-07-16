@@ -81,7 +81,7 @@ struct ContentView: View {
         .onChange(of: showHeadStability) { _, _ in persistCurrentProject() }
         .onChange(of: showSpineAngle) { _, _ in persistCurrentProject() }
         .onChange(of: showGrid) { _, _ in persistCurrentProject() }
-        .sheet(isPresented: $showCameraView) {
+        .fullScreenCover(isPresented: $showCameraView) {
             CameraView { recordedURL in
                 showCameraView = false
                 loadVideoFromURL(persistVideoIfNeeded(recordedURL))

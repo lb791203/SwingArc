@@ -17,6 +17,9 @@ struct DrawingOverlay: View {
     
     @State private var currentPoints: [CGPoint] = []
     @State private var selectedControlPoint: SelectedControlPoint? = nil
+    @State private var selectedElementId: UUID? = nil
+    @State private var selectedElementOrigin: DrawingElement? = nil
+    @State private var elementDragStartPoint: CGPoint? = nil
     
     // 触碰与微调状态
     @State private var touchLocation: CGPoint = .zero
@@ -29,11 +32,12 @@ struct DrawingOverlay: View {
     
     var body: some View {
         GeometryReader { geometry in
-            let rect = playbackManager.videoRect
-            
-            // 只有当实际视频渲染框有效时，才启用 Canvas
-            if rect.width > 0 && rect.height > 0 {
-                ZStack {
+            let rect = DrawingCanvasGeometry.interactionRect(
+                videoRect: playbackManager.videoRect,
+                canvasSize: geometry.size
+            )
+
+            ZStack {
                     // 1. 手势检测层 (使用 contentShape 确保透明层也能 100% 捕获触摸手势)
                     Color.clear
                         .contentShape(Rectangle())
@@ -95,7 +99,10 @@ struct DrawingOverlay: View {
                         
                         // 3. 绘制微调向量放大镜
                         if isInteractionEnabled && isDragging,
-                           activeTool == .select || activeTool == .angle || activeTool == .line {
+                           DrawingMagnifierPolicy.shouldShow(
+                                for: activeTool,
+                                isAdjustingControlPoint: selectedControlPoint != nil
+                           ) {
                             drawVectorMagnifier(context: context, rect: rect, size: size)
                         }
                     }
@@ -115,7 +122,6 @@ struct DrawingOverlay: View {
                             .position(x: xPos, y: yPos - (pose.headRadius ?? 0.06) * rect.height - 15)
                             .allowsHitTesting(false) // 同样允许触摸穿透
                     }
-                }
             }
         }
     }
@@ -348,8 +354,7 @@ struct DrawingOverlay: View {
     private func drawControlHandles(context: GraphicsContext, rect: CGRect) {
         for element in drawings {
             if element.shouldShow(at: playbackManager.currentTime) {
-                // 圆形只画圆心和边，手绘不加把手，直线和量角器两端/三点加把手
-                guard element.tool != .freehand else { continue }
+                guard DrawingInteractionPolicy.allowsPointEditing(for: element.tool) else { continue }
                 
                 for (_, pt) in element.points.enumerated() {
                     let screenPos = CGPoint(
@@ -591,10 +596,11 @@ struct DrawingOverlay: View {
         
         if activeTool == .select {
             // 选择并拖拽已有的手动划线端点
-            if selectedControlPoint == nil {
+            if selectedControlPoint == nil && selectedElementId == nil {
                 // 查找最近的控制端点
                 var closestDist: CGFloat = 30.0 // 30像素触碰阈值
                 for element in drawings {
+                    guard DrawingInteractionPolicy.allowsPointEditing(for: element.tool) else { continue }
                     if DrawingDisplayPolicy.shouldShow(
                         element,
                         at: playbackManager.currentTime,
@@ -609,6 +615,22 @@ struct DrawingOverlay: View {
                                 selectedControlPoint = SelectedControlPoint(elementId: element.id, pointIndex: idx)
                             }
                         }
+                    }
+                }
+
+                // 没有点中端点时，点住线身或圆弧可整体移动标注。
+                if selectedControlPoint == nil {
+                    let hitTolerance = max(0.02, 18 / min(rect.width, rect.height))
+                    if let element = drawings.reversed().first(where: {
+                        DrawingDisplayPolicy.shouldShow(
+                            $0,
+                            at: playbackManager.currentTime,
+                            isKeyframeMode: isKeyframeMode
+                        ) && DrawingInteractionPolicy.isHit($0, at: normPoint, tolerance: hitTolerance)
+                    }) {
+                        selectedElementId = element.id
+                        selectedElementOrigin = element
+                        elementDragStartPoint = normPoint
                     }
                 }
             }
@@ -629,6 +651,14 @@ struct DrawingOverlay: View {
                     }
                 }
                 drawings[index].points[control.pointIndex] = finalPoint
+            } else if let elementId = selectedElementId,
+                      let origin = selectedElementOrigin,
+                      let startPoint = elementDragStartPoint,
+                      let index = drawings.firstIndex(where: { $0.id == elementId }) {
+                drawings[index] = DrawingInteractionPolicy.translated(
+                    origin,
+                    by: CGPoint(x: normPoint.x - startPoint.x, y: normPoint.y - startPoint.y)
+                )
             }
             
         } else {
@@ -670,6 +700,9 @@ struct DrawingOverlay: View {
         
         if activeTool == .select {
             selectedControlPoint = nil
+            selectedElementId = nil
+            selectedElementOrigin = nil
+            elementDragStartPoint = nil
         } else {
             guard !currentPoints.isEmpty else { return }
             

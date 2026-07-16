@@ -53,7 +53,10 @@ struct CameraView: View {
                         .padding(.horizontal, 10)
                         .background(Color.black.opacity(0.6))
                         .cornerRadius(6)
-                        .position(x: geo.size.width * 0.5, y: geo.size.height * 0.83)
+                        .position(
+                            x: geo.size.width * 0.5,
+                            y: CameraCaptureLayout.instructionVerticalPosition(containerHeight: geo.size.height)
+                        )
                 }
             }
             .ignoresSafeArea()

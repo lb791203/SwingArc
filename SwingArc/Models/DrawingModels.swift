@@ -214,12 +214,85 @@ enum DrawingDisplayPolicy {
     }
 }
 
+/// Geometry shared by the drawing canvas and its interaction tests.
+enum DrawingInteractionPolicy {
+    static func allowsPointEditing(for tool: DrawingTool) -> Bool {
+        tool == .line || tool == .arrow
+    }
+
+    static func translated(_ element: DrawingElement, by requestedOffset: CGPoint) -> DrawingElement {
+        guard !element.points.isEmpty else { return element }
+
+        let minimumX = element.points.map(\.x).min() ?? 0
+        let maximumX = element.points.map(\.x).max() ?? 1
+        let minimumY = element.points.map(\.y).min() ?? 0
+        let maximumY = element.points.map(\.y).max() ?? 1
+        let offset = CGPoint(
+            x: min(max(requestedOffset.x, -minimumX), 1 - maximumX),
+            y: min(max(requestedOffset.y, -minimumY), 1 - maximumY)
+        )
+
+        var translated = element
+        translated.points = element.points.map {
+            CGPoint(x: $0.x + offset.x, y: $0.y + offset.y)
+        }
+        return translated
+    }
+
+    static func isHit(_ element: DrawingElement, at point: CGPoint, tolerance: CGFloat) -> Bool {
+        guard element.points.count >= 2 else { return false }
+
+        switch element.tool {
+        case .line, .arrow:
+            return distance(from: point, toSegmentFrom: element.points[0], to: element.points[1]) <= tolerance
+        case .circle:
+            let center = element.points[0]
+            let radius = hypot(element.points[1].x - center.x, element.points[1].y - center.y)
+            return hypot(point.x - center.x, point.y - center.y) <= radius + tolerance
+        case .angle, .freehand:
+            return zip(element.points, element.points.dropFirst()).contains {
+                distance(from: point, toSegmentFrom: $0, to: $1) <= tolerance
+            }
+        case .select:
+            return false
+        }
+    }
+
+    private static func distance(from point: CGPoint, toSegmentFrom start: CGPoint, to end: CGPoint) -> CGFloat {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let lengthSquared = dx * dx + dy * dy
+        guard lengthSquared > 0 else { return hypot(point.x - start.x, point.y - start.y) }
+        let projection = min(1, max(0, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared))
+        return hypot(point.x - (start.x + projection * dx), point.y - (start.y + projection * dy))
+    }
+}
+
+enum DrawingCanvasGeometry {
+    static func interactionRect(videoRect: CGRect, canvasSize: CGSize) -> CGRect {
+        guard videoRect.width > 0, videoRect.height > 0 else {
+            return CGRect(origin: .zero, size: canvasSize)
+        }
+        return videoRect
+    }
+}
+
+enum DrawingMagnifierPolicy {
+    static func shouldShow(for tool: DrawingTool, isAdjustingControlPoint: Bool) -> Bool {
+        tool == .select && isAdjustingControlPoint
+    }
+}
+
 enum VideoZoomPolicy {
     static let minimumScale: CGFloat = 1
     static let maximumScale: CGFloat = 4
 
     static func clampedScale(_ scale: CGFloat) -> CGFloat {
         min(max(scale, minimumScale), maximumScale)
+    }
+
+    static func adjustedScale(_ scale: CGFloat, multiplier: CGFloat) -> CGFloat {
+        clampedScale(scale * multiplier)
     }
 }
 

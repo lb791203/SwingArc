@@ -23,6 +23,12 @@ enum WorkspaceAccessoryPolicy {
     static let stageAdjustmentPlacement: StageAdjustmentPlacement = .inline
 }
 
+enum CameraCaptureLayout {
+    static func instructionVerticalPosition(containerHeight: CGFloat) -> CGFloat {
+        min(containerHeight * 0.72, containerHeight - 180)
+    }
+}
+
 enum DrawingUndoIntent: Equatable {
     case undoLast
     case confirmClearAll

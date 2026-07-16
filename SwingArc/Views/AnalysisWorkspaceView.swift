@@ -324,18 +324,6 @@ struct VideoCanvasView: View {
                     )
                 }
                 .scaleEffect(scale)
-                .simultaneousGesture(
-                    MagnificationGesture()
-                        .updating($gestureScale) { value, state, _ in
-                            if interactionMode == .idle {
-                                state = value
-                            }
-                        }
-                        .onEnded { value in
-                            guard interactionMode == .idle else { return }
-                            committedScale = VideoZoomPolicy.clampedScale(committedScale * value)
-                        }
-                )
                 .onTapGesture(count: 2) {
                     resetZoom()
                 }
@@ -345,32 +333,27 @@ struct VideoCanvasView: View {
                     .foregroundStyle(.white)
             }
 
-            if scale > 1.01 {
-                VStack {
-                    HStack {
-                        Spacer()
-                        Button(action: resetZoom) {
-                            Label("复位", systemImage: "arrow.counterclockwise")
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 10)
-                                .frame(minHeight: 44)
-                                .background(.ultraThinMaterial, in: Capsule())
-                        }
-                        .foregroundStyle(.white)
-                        .accessibilityLabel("复位视频缩放")
-                    }
-                    Spacer()
-                }
-                .padding(10)
-            }
         }
         .clipped()
         .contentShape(Rectangle())
+        .simultaneousGesture(magnificationGesture, including: .all)
     }
 
     private func resetZoom() {
         withAnimation(.easeInOut(duration: 0.2)) {
             committedScale = 1
         }
+    }
+
+    private var magnificationGesture: some Gesture {
+        MagnificationGesture()
+            .updating($gestureScale) { value, state, _ in
+                guard interactionMode == .idle else { return }
+                state = value
+            }
+            .onEnded { value in
+                guard interactionMode == .idle else { return }
+                committedScale = VideoZoomPolicy.adjustedScale(committedScale, multiplier: value)
+            }
     }
 }

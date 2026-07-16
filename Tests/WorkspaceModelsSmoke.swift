@@ -35,6 +35,7 @@ struct WorkspaceModelsSmoke {
         precondition(!playback.shouldPausePlayback)
 
         precondition(WorkspaceAccessoryPolicy.drawingRailMaximumWidth == 56)
+        precondition(CameraCaptureLayout.instructionVerticalPosition(containerHeight: 844) <= 664)
         precondition(WorkspaceAccessoryPolicy.stageAdjustmentPlacement == .inline)
 
         precondition(DrawingRailPolicy.undoIntent(isLongPress: false) == .undoLast)
