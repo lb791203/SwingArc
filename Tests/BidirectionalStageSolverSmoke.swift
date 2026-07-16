@@ -2,6 +2,12 @@ import Foundation
 
 @main
 struct BidirectionalStageSolverSmoke {
+    private enum FollowThroughExtensionProfile {
+        case extended
+        case bentExact
+        case occluded
+    }
+
     static func main() {
         if let scenario = CommandLine.arguments.dropFirst().first {
             switch scenario {
@@ -131,9 +137,12 @@ struct BidirectionalStageSolverSmoke {
         verifyObservedTransitionQualityRanksPaths()
         verifyCounterRotatingFollowThroughCannotConfirm()
         verifyChestContinuationIsRequired()
+        verifyFollowThroughRequiresLeadArmExtension()
+        verifyOccludedFollowThroughRemainsLowConfidence()
         verifyDeclaredImpactAnchorCannotDiverge()
         verifyStageAwareTransitionEvidenceScalesAcrossTempo()
-        verifyTakeawayPositionEvidenceRejectsAddressAndLateHighHands()
+        verifyTakeawayPositionEvidenceIsBodyScaleInvariant()
+        verifyTakeawayResolverIsTempoInvariant()
         verifyParallelStageScoresRequireJointAgreement()
     }
 
@@ -213,6 +222,44 @@ struct BidirectionalStageSolverSmoke {
         precondition(p7.allSatisfy { !$0.requirementsSatisfied })
     }
 
+    private static func verifyFollowThroughRequiresLeadArmExtension() {
+        let timeline = SwingEvidenceTimeline.build(from: fixture(
+            includeImpactObjects: true,
+            followThroughExtensionProfile: .bentExact
+        ))
+        let centered = candidateSet(impactFrame: 300, timeline: timeline)
+        let candidates = centered.candidates(for: .followThrough)
+        let exactButBent = candidates.first { $0.sourceFrameIndex == 324 }!
+        let slightlyOffButExtended = candidates.first { $0.sourceFrameIndex == 325 }!
+        precondition(!exactButBent.requirementsSatisfied)
+        precondition(exactButBent.maximumStatus == .lowConfidence)
+        precondition(slightlyOffButExtended.requirementsSatisfied)
+        precondition(slightlyOffButExtended.score > exactButBent.score)
+
+        let result = ConstrainedSwingPathSolver.solve(
+            candidateSets: [centered],
+            timeline: timeline
+        )
+        let followThrough = detection(.followThrough, in: result)
+        precondition(followThrough.sourceFrameIndex == 325)
+        precondition(followThrough.status == .confirmed)
+    }
+
+    private static func verifyOccludedFollowThroughRemainsLowConfidence() {
+        let timeline = SwingEvidenceTimeline.build(from: fixture(
+            includeImpactObjects: true,
+            followThroughExtensionProfile: .occluded
+        ))
+        let centered = candidateSet(impactFrame: 300, timeline: timeline)
+        let p7 = centered.candidates(for: .followThrough).filter {
+            (323...325).contains($0.sourceFrameIndex)
+        }
+        precondition(!p7.isEmpty)
+        precondition(p7.allSatisfy {
+            !$0.requirementsSatisfied && $0.maximumStatus == .lowConfidence
+        })
+    }
+
     private static func verifyDeclaredImpactAnchorCannotDiverge() {
         let timeline = SwingEvidenceTimeline.build(from: fixture(includeImpactObjects: true))
         let impactCandidates = ImpactCorridorResolver.candidates(in: timeline)
@@ -271,37 +318,113 @@ struct BidirectionalStageSolverSmoke {
         }
     }
 
-    private static func verifyTakeawayPositionEvidenceRejectsAddressAndLateHighHands() {
-        let hip = CGPoint(x: 0.50, y: 0.56)
-        let trueP2 = TakeawayStageEvidence.handPositionScore(
-            hand: CGPoint(x: 0.365, y: 0.55),
-            hip: hip
+    private static func verifyTakeawayPositionEvidenceIsBodyScaleInvariant() {
+        let basePose = completePose(
+            time: 0,
+            sourceFrameIndex: 0,
+            hand: CGPoint(x: 0.38, y: 0.60)
         )
-        let addressLike = TakeawayStageEvidence.handPositionScore(
-            hand: CGPoint(x: 0.495, y: 0.57),
-            hip: hip
-        )
-        let lateHighHands = TakeawayStageEvidence.handPositionScore(
-            hand: CGPoint(x: 0.34, y: 0.50),
-            hip: hip
-        )
-        let firstHipHeightEntry = TakeawayStageEvidence.handPositionScore(
-            hand: CGPoint(x: 0.3656, y: 0.5471),
-            hip: CGPoint(x: 0.4923, y: 0.5594)
-        )
-        let laterHigherHands = TakeawayStageEvidence.handPositionScore(
-            hand: CGPoint(x: 0.3611, y: 0.5424),
-            hip: CGPoint(x: 0.4927, y: 0.5604)
-        )
-        precondition(trueP2 > addressLike)
+        let baseHip = SwingGeometry.center(basePose.leftHip, basePose.rightHip)!
+        let baseScale = StableBodyScaleEvidence.estimate(from: [basePose, basePose])!
+        let shoulderCenter = SwingGeometry.center(
+            basePose.leftShoulder,
+            basePose.rightShoulder
+        )!
         precondition(
-            trueP2 > lateHighHands,
-            "P2 hand position near hip height must outrank a later isolated shaft contour"
+            abs(baseScale - SwingGeometry.distance(shoulderCenter, baseHip)) < 0.000_001,
+            "Torso length must remain the stable scale when projected shoulder/hip widths narrow"
         )
-        precondition(
-            firstHipHeightEntry > laterHigherHands,
-            "P2 body fallback must prefer the first entry into the hip-height lateral band"
+        let baseHand = CGPoint(
+            x: baseHip.x - CGFloat(baseScale * 1.45),
+            y: shoulderCenter.y + CGFloat(baseScale * 0.72)
         )
+        let baseScore = TakeawayStageEvidence.stageScore(
+            hand: baseHand,
+            hip: baseHip,
+            shoulder: shoulderCenter,
+            bodyScale: baseScale,
+            leadArmAngle: 35,
+            leadArmExtension: 165,
+            shoulderTurn: 14
+        )
+
+        let scenarios: [(scale: CGFloat, translation: CGPoint, mirrored: Bool)] = [
+            (0.45, CGPoint(x: 0.60, y: 0.12), false),
+            (1.00, CGPoint(x: -0.10, y: 0.08), true),
+            (1.60, CGPoint(x: 0.20, y: -0.16), false),
+            (1.25, CGPoint(x: 1.10, y: 0.04), true)
+        ]
+        for scenario in scenarios {
+            let pose = transformedPose(
+                basePose,
+                scale: scenario.scale,
+                translation: scenario.translation,
+                mirrored: scenario.mirrored
+            )
+            let hand = transformedPoint(
+                baseHand,
+                scale: scenario.scale,
+                translation: scenario.translation,
+                mirrored: scenario.mirrored
+            )
+            let hip = SwingGeometry.center(pose.leftHip, pose.rightHip)!
+            let shoulder = SwingGeometry.center(pose.leftShoulder, pose.rightShoulder)!
+            let bodyScale = StableBodyScaleEvidence.estimate(from: [pose, pose])!
+            let score = TakeawayStageEvidence.stageScore(
+                hand: hand,
+                hip: hip,
+                shoulder: shoulder,
+                bodyScale: bodyScale,
+                leadArmAngle: 35,
+                leadArmExtension: 165,
+                shoulderTurn: scenario.mirrored ? -14 : 14
+            )
+            precondition(abs(score - baseScore) < 0.000_001)
+            precondition(
+                abs(bodyScale / baseScale - Double(scenario.scale)) < 0.000_001
+            )
+        }
+
+        let addressLike = TakeawayStageEvidence.stageScore(
+            hand: CGPoint(
+                x: baseHip.x - CGFloat(baseScale * 0.55),
+                y: shoulderCenter.y + CGFloat(baseScale * 1.05)
+            ),
+            hip: baseHip,
+            shoulder: shoulderCenter,
+            bodyScale: baseScale,
+            leadArmAngle: 80,
+            leadArmExtension: 168,
+            shoulderTurn: 1
+        )
+        let lateP3Like = TakeawayStageEvidence.stageScore(
+            hand: CGPoint(
+                x: baseHip.x - CGFloat(baseScale * 1.80),
+                y: shoulderCenter.y + CGFloat(baseScale * 0.25)
+            ),
+            hip: baseHip,
+            shoulder: shoulderCenter,
+            bodyScale: baseScale,
+            leadArmAngle: 13,
+            leadArmExtension: 164,
+            shoulderTurn: 22
+        )
+        precondition(baseScore > addressLike)
+        precondition(baseScore > lateP3Like)
+    }
+
+    private static func verifyTakeawayResolverIsTempoInvariant() {
+        for timeScale in [0.60, 1.0, 1.60] {
+            let timeline = SwingEvidenceTimeline.build(from: fixture(
+                includeImpactObjects: true,
+                timeScale: timeScale
+            ))
+            let centered = candidateSet(impactFrame: 300, timeline: timeline)
+            precondition(
+                centered.candidates(for: .takeaway).first?.sourceFrameIndex == 168,
+                "P2 evidence ranking changed at \(timeScale)x time scale"
+            )
+        }
     }
 
     private static func verifyParallelStageScoresRequireJointAgreement() {
@@ -324,6 +447,7 @@ struct BidirectionalStageSolverSmoke {
 
         let earlyExactFollowThrough = ParallelStageEvidence.followThroughScore(
             parallelEvidence: 0.98,
+            armExtension: 0,
             postImpactRise: 0.05,
             hipTurn: 0.18,
             chestTurn: 1,
@@ -332,6 +456,7 @@ struct BidirectionalStageSolverSmoke {
         )
         let laterParallelBand = ParallelStageEvidence.followThroughScore(
             parallelEvidence: 0.95,
+            armExtension: 0.90,
             postImpactRise: 0,
             hipTurn: 0.20,
             chestTurn: 1,
@@ -391,10 +516,12 @@ struct BidirectionalStageSolverSmoke {
         includeImpactObjects: Bool,
         includeTakeawayShaft: Bool = true,
         counterRotateAtFollowThrough: Bool = false,
-        reverseChestAtFollowThrough: Bool = false
+        reverseChestAtFollowThrough: Bool = false,
+        followThroughExtensionProfile: FollowThroughExtensionProfile = .extended,
+        timeScale: Double = 1
     ) -> [SwingFrameEvidence] {
         (60...420).map { sourceFrameIndex in
-            let time = Double(sourceFrameIndex) / 120
+            let time = Double(sourceFrameIndex) / 120 * timeScale
             let velocityY: CGFloat
             switch sourceFrameIndex {
             case ...120, 237...240, 360...399:
@@ -421,11 +548,36 @@ struct BidirectionalStageSolverSmoke {
                 sourceFrameIndex: sourceFrameIndex,
                 hand: hand
             )
-            let object = objectEvidence(
+            let baseObject = objectEvidence(
                 sourceFrameIndex: sourceFrameIndex,
                 includeImpactObjects: includeImpactObjects,
                 includeTakeawayShaft: includeTakeawayShaft
             )
+            let object: SwingObjectEvidence
+            if sourceFrameIndex == 324,
+               followThroughExtensionProfile != .extended {
+                object = SwingObjectEvidence(
+                    shaft: ClubShaftEvidence(
+                        start: CGPoint(x: 0.55, y: 0.50),
+                        end: CGPoint(x: 0.75, y: 0.50),
+                        confidence: 0.95
+                    ),
+                    ball: baseObject.ball,
+                    stableBall: baseObject.stableBall,
+                    ballLocalChange: baseObject.ballLocalChange
+                )
+            } else {
+                object = baseObject
+            }
+            let leadArmExtension: Double?
+            switch followThroughExtensionProfile {
+            case .extended:
+                leadArmExtension = 176
+            case .bentExact:
+                leadArmExtension = sourceFrameIndex == 324 ? 125 : 176
+            case .occluded:
+                leadArmExtension = (323...325).contains(sourceFrameIndex) ? nil : 176
+            }
             return SwingFrameEvidence(
                 sourceFrameIndex: sourceFrameIndex,
                 time: time,
@@ -433,7 +585,7 @@ struct BidirectionalStageSolverSmoke {
                 objectEvidence: object,
                 leadArm: .left,
                 leadArmAngle: leadArmAngle(sourceFrameIndex: sourceFrameIndex),
-                leadArmExtension: 176,
+                leadArmExtension: leadArmExtension,
                 shoulderAngle: shoulderAngle,
                 hipAngle: hipAngle,
                 handCenter: hand,
@@ -674,6 +826,55 @@ struct BidirectionalStageSolverSmoke {
             rightKnee: CGPoint(x: 0.57, y: 0.78),
             leftAnkle: CGPoint(x: 0.46, y: 0.94),
             rightAnkle: CGPoint(x: 0.57, y: 0.94)
+        )
+    }
+
+    private static func transformedPose(
+        _ pose: SwingPoseSample,
+        scale: CGFloat,
+        translation: CGPoint,
+        mirrored: Bool
+    ) -> SwingPoseSample {
+        func point(_ value: CGPoint?) -> CGPoint? {
+            value.map {
+                transformedPoint(
+                    $0,
+                    scale: scale,
+                    translation: translation,
+                    mirrored: mirrored
+                )
+            }
+        }
+        return SwingPoseSample(
+            time: pose.time,
+            leftWrist: point(pose.leftWrist),
+            rightWrist: point(pose.rightWrist),
+            leftElbow: point(pose.leftElbow),
+            rightElbow: point(pose.rightElbow),
+            leftShoulder: point(pose.leftShoulder),
+            rightShoulder: point(pose.rightShoulder),
+            leftHip: point(pose.leftHip),
+            rightHip: point(pose.rightHip),
+            head: point(pose.head),
+            spineAngle: pose.spineAngle,
+            aggregateConfidence: pose.aggregateConfidence,
+            sourceFrameIndex: pose.sourceFrameIndex,
+            leftKnee: point(pose.leftKnee),
+            rightKnee: point(pose.rightKnee),
+            leftAnkle: point(pose.leftAnkle),
+            rightAnkle: point(pose.rightAnkle)
+        )
+    }
+
+    private static func transformedPoint(
+        _ point: CGPoint,
+        scale: CGFloat,
+        translation: CGPoint,
+        mirrored: Bool
+    ) -> CGPoint {
+        CGPoint(
+            x: translation.x + (mirrored ? -point.x : point.x) * scale,
+            y: translation.y + point.y * scale
         )
     }
 

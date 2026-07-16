@@ -1129,22 +1129,91 @@ struct StageCandidateSet: Equatable {
     }
 }
 
+enum StableBodyScaleEvidence {
+    static func estimate(from poses: [SwingPoseSample]) -> Double? {
+        median(poses.compactMap(scale))
+    }
+
+    private static func scale(_ pose: SwingPoseSample) -> Double? {
+        let shoulderWidth = SwingGeometry.distance(pose.leftShoulder, pose.rightShoulder)
+        let hipWidth = SwingGeometry.distance(pose.leftHip, pose.rightHip)
+        let torsoLength = SwingGeometry.distance(
+            SwingGeometry.center(pose.leftShoulder, pose.rightShoulder),
+            SwingGeometry.center(pose.leftHip, pose.rightHip)
+        )
+        if torsoLength.isFinite, torsoLength > 0.001 {
+            return torsoLength
+        }
+        return median([shoulderWidth, hipWidth].filter {
+            $0.isFinite && $0 > 0.001
+        })
+    }
+
+    private static func median(_ values: [Double]) -> Double? {
+        guard !values.isEmpty else { return nil }
+        let sorted = values.sorted()
+        let middle = sorted.count / 2
+        if sorted.count.isMultiple(of: 2) {
+            return (sorted[middle - 1] + sorted[middle]) / 2
+        }
+        return sorted[middle]
+    }
+}
+
 enum TakeawayStageEvidence {
-    static func handPositionScore(hand: CGPoint?, hip: CGPoint?) -> Double {
-        guard let hand, let hip else { return 0 }
-        let lateralOffset = abs(Double(hand.x - hip.x))
-        let verticalOffset = abs(Double(hand.y - hip.y))
-        let lateralProgress = ramp(lateralOffset, minimum: 0.07, maximum: 0.12)
-        // The hand center is typically slightly above the hip center at P2.
-        // Keep enough vertical tolerance for camera/perspective variance while
-        // still rejecting hands that have already climbed toward P3.
-        let hipHeightAlignment = clamp(1 - verticalOffset / 0.12)
-        return min(lateralProgress, hipHeightAlignment)
+    static func stageScore(
+        hand: CGPoint?,
+        hip: CGPoint?,
+        shoulder: CGPoint?,
+        bodyScale: Double?,
+        leadArmAngle: Double?,
+        leadArmExtension: Double?,
+        shoulderTurn: Double?
+    ) -> Double {
+        guard let hand, let hip, let shoulder, let bodyScale,
+              bodyScale.isFinite, bodyScale > 0.001 else { return 0 }
+        let lateralOffset = abs(Double(hand.x - hip.x)) / bodyScale
+        let shoulderRelativeHeight = Double(hand.y - shoulder.y) / bodyScale
+        let lateralProgress = ramp(
+            lateralOffset,
+            minimum: 0.60,
+            maximum: 1.30
+        )
+        let handHeight = closeness(
+            shoulderRelativeHeight,
+            target: 0.70,
+            tolerance: 0.55
+        )
+        let armDirection = leadArmAngle.map {
+            closeness(abs($0), target: 35, tolerance: 35)
+        } ?? 0
+        let turnProgress = shoulderTurn.map {
+            ramp(abs($0), minimum: 3, maximum: 15)
+        } ?? 0
+        let armExtension = leadArmExtension.map {
+            ramp($0, minimum: 145, maximum: 170)
+        } ?? 0
+
+        // P2 is an agreement among body-relative hand position, lead-arm
+        // direction/extension, and early shoulder rotation. No single normalized
+        // image coordinate can dominate the fallback decision.
+        return clamp(
+            lateralProgress * 0.15
+                + handHeight * 0.25
+                + armDirection * 0.30
+                + turnProgress * 0.20
+                + armExtension * 0.10
+        )
     }
 
     private static func ramp(_ value: Double, minimum: Double, maximum: Double) -> Double {
         guard value.isFinite, maximum > minimum else { return 0 }
         return clamp((value - minimum) / (maximum - minimum))
+    }
+
+    private static func closeness(_ value: Double, target: Double, tolerance: Double) -> Double {
+        guard value.isFinite, tolerance > 0 else { return 0 }
+        return clamp(1 - abs(value - target) / tolerance)
     }
 
     private static func clamp(_ value: Double) -> Double {
@@ -1213,6 +1282,7 @@ enum ParallelStageEvidence {
 
     static func followThroughScore(
         parallelEvidence: Double,
+        armExtension: Double?,
         postImpactRise: Double,
         hipTurn: Double,
         chestTurn: Double,
@@ -1223,13 +1293,16 @@ enum ParallelStageEvidence {
         // Velocity only contributes after it clears the same requirement used
         // to confirm the stage; tiny optical-flow noise cannot win the frame.
         let horizontalBand = ramp(parallelEvidence, minimum: 0.55, maximum: 0.75)
+        let geometryAgreement = armExtension.map {
+            min(horizontalBand, clamp($0))
+        } ?? horizontalBand * 0.65
         let qualifiedRise = postImpactRise >= 0.35 ? postImpactRise : 0
         return clamp(
-            horizontalBand * 0.34
-                + qualifiedRise * 0.13
-                + hipTurn * 0.13
-                + chestTurn * 0.15
-                + (hasContinuedTurn ? 0.15 : 0)
+            geometryAgreement * 0.45
+                + qualifiedRise * 0.10
+                + hipTurn * 0.12
+                + chestTurn * 0.13
+                + (hasContinuedTurn ? 0.10 : 0)
                 + coverage * 0.10
         )
     }
@@ -1554,6 +1627,9 @@ enum BidirectionalStageCandidateResolver {
     ) -> [StageCandidate] {
         guard let upperBound = laterCandidates.map(\.evidenceIndex).max(),
               upperBound > timeline.startIndex else { return [] }
+        let bodyScale = StableBodyScaleEvidence.estimate(
+            from: timeline.compactMap(\.frame.pose)
+        )
         return retainedCandidates(
             (timeline.startIndex..<upperBound).compactMap { index in
                 let temporal = timeline[index]
@@ -1568,11 +1644,19 @@ enum BidirectionalStageCandidateResolver {
                 }
                 if let shaftHorizontal, shaftHorizontal < 0.20 { return nil }
                 let handsBelowShoulders = handsBelowShouldersScore(frame)
-                let handPosition = TakeawayStageEvidence.handPositionScore(
+                let shoulderCenter = frame.pose.flatMap {
+                    SwingGeometry.center($0.leftShoulder, $0.rightShoulder)
+                }
+                let stageEvidence = TakeawayStageEvidence.stageScore(
                     hand: frame.handCenter,
-                    hip: frame.hipCenter
+                    hip: frame.hipCenter,
+                    shoulder: shoulderCenter,
+                    bodyScale: bodyScale,
+                    leadArmAngle: frame.leadArmAngle,
+                    leadArmExtension: frame.leadArmExtension,
+                    shoulderTurn: frame.shoulderAngle
                 )
-                guard shaftHorizontal != nil || handPosition >= 0.20 else { return nil }
+                guard shaftHorizontal != nil || stageEvidence >= 0.20 else { return nil }
                 let backswingSpeed = ramp(
                     -Double(frame.handVelocity.y),
                     minimum: 0.12,
@@ -1586,14 +1670,14 @@ enum BidirectionalStageCandidateResolver {
                         shaftHorizontal * 0.35
                             + handsBelowShoulders * 0.10
                             + backswingSpeed * 0.10
-                            + handPosition * 0.30
+                            + stageEvidence * 0.30
                             + frame.poseCoverage * 0.15
                     )
                 } else {
                     score = clamp(
                         handsBelowShoulders * 0.15
                             + backswingSpeed * 0.15
-                            + handPosition * 0.50
+                            + stageEvidence * 0.50
                             + frame.poseCoverage * 0.20
                     )
                 }
@@ -1682,6 +1766,9 @@ enum BidirectionalStageCandidateResolver {
                     ) * clamp($0.confidence)
                 } ?? 0
                 let parallelEvidence = max(armHorizontal, shaftHorizontal)
+                let armExtension = frame.leadArmExtension.map {
+                    ramp($0, minimum: 145, maximum: 175)
+                }
                 let postImpactRise = ramp(
                     -Double(frame.handVelocity.y),
                     minimum: 0.15,
@@ -1701,12 +1788,14 @@ enum BidirectionalStageCandidateResolver {
                 let continuedChestTurn = chestContinuation.map { $0 >= 0.5 } ?? false
                 let requirements = postImpactRise >= 0.35
                     && parallelEvidence >= 0.55
+                    && (armExtension ?? 0) >= 0.55
                     && continuedHipTurn
                     && continuedChestTurn
                 let hipTurnScore = ramp(hipContinuation, minimum: 0, maximum: 10)
                 let chestTurnScore = ramp(chestContinuation, minimum: 0, maximum: 12)
                 let score = ParallelStageEvidence.followThroughScore(
                     parallelEvidence: parallelEvidence,
+                    armExtension: armExtension,
                     postImpactRise: postImpactRise,
                     hipTurn: hipTurnScore,
                     chestTurn: chestTurnScore,
