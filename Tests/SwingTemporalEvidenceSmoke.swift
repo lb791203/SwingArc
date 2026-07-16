@@ -5,6 +5,7 @@ struct SwingTemporalEvidenceSmoke {
     static func main() {
         verifyFrameRateInvariantBoundaries()
         verifyBoundaryAdjacentNoiseDoesNotMoveBoundaries()
+        verifyBoundaryAdjacentWrongDirectionDoesNotMoveBoundaries()
         verifySupportingTemporalEvidence()
     }
 
@@ -12,6 +13,18 @@ struct SwingTemporalEvidenceSmoke {
         case address
         case top
         case finish
+    }
+
+    private enum WrongDirectionNoise: CaseIterable {
+        case address
+        case top
+
+        var velocityY: CGFloat {
+            switch self {
+            case .address: 0.14
+            case .top: -0.14
+            }
+        }
     }
 
     private static func verifyFrameRateInvariantBoundaries() {
@@ -112,9 +125,46 @@ struct SwingTemporalEvidenceSmoke {
         }
     }
 
+    private static func verifyBoundaryAdjacentWrongDirectionDoesNotMoveBoundaries() {
+        var failures: [String] = []
+
+        for fps in [30, 120] {
+            for noise in WrongDirectionNoise.allCases {
+                let evidence = temporalFixture(fps: fps, wrongDirectionNoise: noise)
+                let timeline = SwingEvidenceTimeline.build(from: evidence)
+                let address = timeline.last(where: \.isAddressBoundary)?.frame
+                let top = timeline.first(where: \.isTopPlateauEnd)?.frame
+                let finish = timeline.first(where: \.isFinishPlateauStart)?.frame
+                let boundaryTime = noise == .address ? 1.00 : 2.50
+                let noiseTime = evidence.first { $0.time > boundaryTime }?.time
+                let injectedFrame = evidence.first { $0.time == noiseTime }
+
+                precondition(injectedFrame?.handVelocity.y == noise.velocityY)
+
+                for (name, expectedTime, boundary) in [
+                    ("address", 1.00, address),
+                    ("top", 2.50, top),
+                    ("finish", 4.25, finish),
+                ] {
+                    guard boundary?.time == expectedTime else {
+                        failures.append(
+                            "\(fps) FPS \(noise.velocityY) after \(noise) moved \(name) to \(String(describing: boundary?.time))"
+                        )
+                        continue
+                    }
+                    let source = evidence.first { $0.time == expectedTime }
+                    precondition(boundary?.sourceFrameIndex == source?.sourceFrameIndex)
+                }
+            }
+        }
+
+        precondition(failures.isEmpty, failures.joined(separator: "\n"))
+    }
+
     private static func temporalFixture(
         fps: Int,
-        boundaryNoise: BoundaryNoise? = nil
+        boundaryNoise: BoundaryNoise? = nil,
+        wrongDirectionNoise: WrongDirectionNoise? = nil
     ) -> [SwingFrameEvidence] {
         let duration = 5.0
         let regularTimes = (0...Int(duration * Double(fps))).map { Double($0) / Double(fps) }
@@ -126,7 +176,13 @@ struct SwingTemporalEvidenceSmoke {
         return times.enumerated().map { ordinal, time in
             let velocityY: CGFloat
             let bodySpeed: Double
-            if boundaryNoise == .address, time == addressNoiseTime {
+            if wrongDirectionNoise == .address, time == addressNoiseTime {
+                velocityY = 0.14
+                bodySpeed = 0.03
+            } else if wrongDirectionNoise == .top, time == topNoiseTime {
+                velocityY = -0.14
+                bodySpeed = 0.04
+            } else if boundaryNoise == .address, time == addressNoiseTime {
                 velocityY = 0
                 bodySpeed = 0.20
             } else if boundaryNoise == .top, time == topNoiseTime {

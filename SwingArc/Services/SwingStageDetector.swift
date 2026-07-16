@@ -471,8 +471,12 @@ enum SwingEvidenceTimeline {
                     evidence: evidence
                 ) == direction
             }
+            let disagreesWithTarget = rawDirections[futureIndex].map {
+                $0 != .stable && $0 != direction
+            } ?? false
             guard !skippedOutlier,
-                  frameStability(evidence[futureIndex]) == false else { return false }
+                  frameStability(evidence[futureIndex]) == false
+                    || disagreesWithTarget else { return false }
             skippedOutlier = true
         }
         return false
