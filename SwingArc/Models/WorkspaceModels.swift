@@ -58,6 +58,7 @@ struct WorkspaceModeTransition: Equatable {
 
 enum AnalysisProgressPhase: Equatable {
     case preparing
+    case locating
     case extracting
     case solving
 }
@@ -69,6 +70,7 @@ struct AnalysisProgressPresentation: Equatable {
     var title: String {
         switch phase {
         case .preparing: return "准备视频"
+        case .locating: return "定位挥杆段"
         case .extracting: return "逐帧提取"
         case .solving: return "阶段求解"
         }
@@ -77,6 +79,7 @@ struct AnalysisProgressPresentation: Equatable {
     var detail: String {
         switch phase {
         case .preparing: return "正在读取视频信息"
+        case .locating: return "正在以 8 FPS 粗扫完整视频"
         case .extracting: return "正在提取人体关节证据"
         case .solving: return "正在按时间顺序定位 P1–P8"
         }

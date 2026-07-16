@@ -828,8 +828,23 @@ private struct StageDisplayDescriptor {
 
     func detailText(sourceFrameRate: Double) -> String {
         guard let marker else { return shortStatus }
-        let frame = Int((marker.time * max(sourceFrameRate, 1)).rounded())
-        return String(format: "%.3f 秒 · 第 %d 帧 · %@", marker.time, frame, shortStatus)
+        let frame = detection?.sourceFrameIndex
+            ?? Int((marker.time * max(sourceFrameRate, 1)).rounded())
+        var parts = [
+            String(format: "%.3f 秒", marker.time),
+            "第 \(frame) 帧",
+            shortStatus
+        ]
+        if let detection {
+            parts.append("置信度 \(Int((detection.confidence * 100).rounded()))%")
+            if stage == .takeaway || stage == .impact {
+                parts.append(detection.hasClubEvidence ? "有杆身" : "无杆身")
+            }
+            if stage == .impact {
+                parts.append(detection.hasBallEvidence ? "有球位" : "无球位")
+            }
+        }
+        return parts.joined(separator: " · ")
     }
 }
 

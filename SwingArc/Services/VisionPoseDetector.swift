@@ -34,7 +34,7 @@ struct PoseEstimationResult: Equatable {
 }
 
 extension SwingPoseSample {
-    init(time: Double, pose: PoseEstimationResult) {
+    init(time: Double, sourceFrameIndex: Int? = nil, pose: PoseEstimationResult) {
         self.init(
             time: time,
             leftWrist: pose.point(for: "leftWrist"),
@@ -47,7 +47,12 @@ extension SwingPoseSample {
             rightHip: pose.point(for: "rightHip"),
             head: pose.headCenter,
             spineAngle: pose.spineAngle,
-            aggregateConfidence: pose.aggregateConfidence
+            aggregateConfidence: pose.aggregateConfidence,
+            sourceFrameIndex: sourceFrameIndex,
+            leftKnee: pose.point(for: "leftKnee"),
+            rightKnee: pose.point(for: "rightKnee"),
+            leftAnkle: pose.point(for: "leftAnkle"),
+            rightAnkle: pose.point(for: "rightAnkle")
         )
     }
 }
@@ -188,18 +193,28 @@ class VisionPoseDetector {
     
     /// 在指定的 CGImage 上执行姿态检测 (用于视频帧后台扫描)
     func detectPose(in cgImage: CGImage, orientation: CGImagePropertyOrientation = .up) -> PoseEstimationResult? {
+        detectPoses(in: cgImage, orientation: orientation).first
+    }
+
+    /// Returns every visible person so the two-stage analyzer can keep one
+    /// golfer identity across the coarse and fine passes.
+    func detectPoses(in cgImage: CGImage, orientation: CGImagePropertyOrientation = .up) -> [PoseEstimationResult] {
         let requestHandler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation, options: [:])
-        
         do {
             try requestHandler.perform([poseRequest])
-            guard let results = poseRequest.results, let observation = results.first else {
-                return nil
-            }
-            
+            guard let observations = poseRequest.results else { return [] }
+            return observations.compactMap { try? poseResult(from: $0) }
+        } catch {
+            print("Vision pose detection error on CGImage: \(error)")
+            return []
+        }
+    }
+
+    private func poseResult(from observation: VNHumanBodyPoseObservation) throws -> PoseEstimationResult {
             let recognizedPoints = try observation.recognizedPoints(.all)
             var result = PoseEstimationResult()
             var joints: [String: JointKeypoint] = [:]
-            
+
             let landmarkMap: [String: VNHumanBodyPoseObservation.JointName] = [
                 "nose": .nose,
                 "neck": .neck,
@@ -216,7 +231,7 @@ class VisionPoseDetector {
                 "leftAnkle": .leftAnkle,
                 "rightAnkle": .rightAnkle
             ]
-            
+
             for (key, jointName) in landmarkMap {
                 if let recognizedPoint = recognizedPoints[jointName], recognizedPoint.confidence > 0.3 {
                     let normalizedPoint = CGPoint(
@@ -230,15 +245,221 @@ class VisionPoseDetector {
                     )
                 }
             }
-            
+
             result.keypoints = joints
             calculateSpineMetrics(in: &result)
             calculateHeadMetrics(in: &result)
-            
             return result
-        } catch {
-            print("Vision pose detection error on CGImage: \(error)")
+    }
+}
+
+final class PrimaryGolferTracker {
+    private var previousCenter: CGPoint?
+    private var consecutiveMisses = 0
+
+    func select(from candidates: [PoseEstimationResult], stableBall: CGPoint?) -> PoseEstimationResult? {
+        guard !candidates.isEmpty else {
+            consecutiveMisses += 1
+            if consecutiveMisses > 4 { previousCenter = nil }
             return nil
         }
+
+        let ranked = candidates.compactMap { pose -> (PoseEstimationResult, CGPoint, Double)? in
+            guard let center = bodyCenter(pose) else { return nil }
+            let scale = bodyScale(pose)
+            let centerPreference = 1 - min(1, abs(Double(center.x - 0.5)) / 0.5)
+            let continuity = previousCenter.map {
+                1 - min(1, SwingGeometry.distance(center, $0) / 0.35)
+            } ?? centerPreference
+            let ballPreference = stableBall.map {
+                1 - min(1, SwingGeometry.distance(center, $0) / 0.85)
+            } ?? centerPreference
+            let score = Double(pose.aggregateConfidence) * 0.30 +
+                min(1, scale / 0.65) * 0.25 +
+                continuity * 0.30 +
+                ballPreference * 0.10 +
+                centerPreference * 0.05
+            return (pose, center, score)
+        }.sorted { $0.2 > $1.2 }
+
+        guard let best = ranked.first else { return nil }
+        if previousCenter == nil,
+           ranked.count > 1,
+           ranked[1].2 >= best.2 * 0.97 {
+            consecutiveMisses += 1
+            return nil
+        }
+        previousCenter = best.1
+        consecutiveMisses = 0
+        return best.0
+    }
+
+    private func bodyCenter(_ pose: PoseEstimationResult) -> CGPoint? {
+        pose.hipMid ?? pose.shoulderMid ?? SwingGeometry.center(
+            pose.point(for: "leftHip"),
+            pose.point(for: "rightHip")
+        )
+    }
+
+    private func bodyScale(_ pose: PoseEstimationResult) -> Double {
+        let points = pose.keypoints.values.map(\.position)
+        guard let minimumX = points.map(\.x).min(),
+              let maximumX = points.map(\.x).max(),
+              let minimumY = points.map(\.y).min(),
+              let maximumY = points.map(\.y).max() else { return 0 }
+        return Double(max(maximumX - minimumX, maximumY - minimumY))
+    }
+}
+
+/// Replaceable, fully local first-pass detector for club-shaft and ball evidence.
+/// It deliberately exposes only normalized geometry to the stage solver so a
+/// future offline Core ML implementation can replace the contour backend.
+final class SwingObjectDetector {
+    private var ballTracker: BallPositionTracker
+
+    init(seedBall: BallEvidence? = nil) {
+        ballTracker = BallPositionTracker(seed: seedBall)
+    }
+
+    var stableBall: BallEvidence? { ballTracker.stableBall }
+
+    func detect(in cgImage: CGImage, pose: PoseEstimationResult?) -> SwingObjectEvidence {
+        let request = VNDetectContoursRequest()
+        request.contrastAdjustment = 1.3
+        request.detectsDarkOnLight = true
+        request.maximumImageDimension = 640
+
+        let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
+        guard (try? handler.perform([request])) != nil,
+              let observation = request.results?.first else {
+            let update = ballTracker.update(nil)
+            return SwingObjectEvidence(
+                shaft: nil,
+                ball: nil,
+                stableBall: update.stableBall?.center,
+                ballLocalChange: update.localChange
+            )
+        }
+
+        let contours = flattenedContours(observation.topLevelContours)
+        let handCenter = pose.flatMap(Self.handCenter)
+        let ballCandidate = bestBallCandidate(in: contours, pose: pose)
+        let update = ballTracker.update(ballCandidate)
+        let shaft = bestShaftCandidate(
+            in: contours,
+            handCenter: handCenter,
+            stableBall: update.stableBall?.center
+        )
+        return SwingObjectEvidence(
+            shaft: shaft,
+            ball: ballCandidate,
+            stableBall: update.stableBall?.center,
+            ballLocalChange: update.localChange
+        )
+    }
+
+    private func flattenedContours(_ contours: [VNContour]) -> [VNContour] {
+        contours.flatMap { [$0] + flattenedContours($0.childContours) }
+    }
+
+    private func bestBallCandidate(
+        in contours: [VNContour],
+        pose: PoseEstimationResult?
+    ) -> BallEvidence? {
+        let hipY = pose?.hipMid?.y ?? 0.55
+        return contours.compactMap { contour -> (BallEvidence, Double)? in
+            let points = normalizedPoints(contour)
+            guard points.count >= 5, let bounds = bounds(of: points) else { return nil }
+            let width = Double(bounds.width)
+            let height = Double(bounds.height)
+            let maximum = max(width, height)
+            let minimum = min(width, height)
+            guard minimum >= 0.004,
+                  maximum <= 0.055,
+                  bounds.midY >= hipY - 0.02 else { return nil }
+            let aspect = minimum / max(maximum, .leastNonzeroMagnitude)
+            guard aspect >= 0.62 else { return nil }
+            let center = CGPoint(x: bounds.midX, y: bounds.midY)
+            let radius = (width + height) / 4
+            let groundPreference = min(1, max(0, Double(center.y - hipY) / 0.35))
+            let score = aspect * 0.70 + groundPreference * 0.20 + min(1, Double(points.count) / 24) * 0.10
+            return (BallEvidence(center: center, radius: radius, confidence: score), score)
+        }.max { $0.1 < $1.1 }?.0
+    }
+
+    private func bestShaftCandidate(
+        in contours: [VNContour],
+        handCenter: CGPoint?,
+        stableBall: CGPoint?
+    ) -> ClubShaftEvidence? {
+        guard let handCenter else { return nil }
+        return contours.compactMap { contour -> (ClubShaftEvidence, Double)? in
+            let points = normalizedPoints(contour)
+            guard points.count >= 2,
+                  let pair = farthestPair(in: points) else { return nil }
+            let evidence = ClubShaftEvidence(start: pair.0, end: pair.1, confidence: 0)
+            guard evidence.length >= 0.08,
+                  evidence.isConnected(to: handCenter, tolerance: 0.13) else { return nil }
+
+            let pathLength = zip(points, points.dropFirst()).reduce(0.0) {
+                $0 + SwingGeometry.distance($1.0, $1.1)
+            }
+            let straightness = min(1, evidence.length / max(pathLength, evidence.length))
+            guard straightness >= 0.45 else { return nil }
+            let ballAlignment = stableBall.map {
+                max(0, 1 - evidence.distanceFromExtendedLine(to: $0) / 0.10)
+            } ?? 0.35
+            let score = min(1, evidence.length * 2.5) * 0.35 + straightness * 0.40 + ballAlignment * 0.25
+            return (
+                ClubShaftEvidence(start: pair.0, end: pair.1, confidence: score),
+                score
+            )
+        }.max { $0.1 < $1.1 }?.0
+    }
+
+    private func normalizedPoints(_ contour: VNContour) -> [CGPoint] {
+        contour.normalizedPoints.map {
+            CGPoint(x: CGFloat($0.x), y: 1 - CGFloat($0.y))
+        }
+    }
+
+    private func bounds(of points: [CGPoint]) -> CGRect? {
+        guard let first = points.first else { return nil }
+        var minimumX = first.x
+        var maximumX = first.x
+        var minimumY = first.y
+        var maximumY = first.y
+        for point in points.dropFirst() {
+            minimumX = min(minimumX, point.x)
+            maximumX = max(maximumX, point.x)
+            minimumY = min(minimumY, point.y)
+            maximumY = max(maximumY, point.y)
+        }
+        return CGRect(
+            x: minimumX,
+            y: minimumY,
+            width: maximumX - minimumX,
+            height: maximumY - minimumY
+        )
+    }
+
+    private func farthestPair(in points: [CGPoint]) -> (CGPoint, CGPoint)? {
+        guard points.count >= 2 else { return nil }
+        let step = max(1, points.count / 32)
+        let sampled = stride(from: 0, to: points.count, by: step).map { points[$0] }
+        var best: (CGPoint, CGPoint, Double)?
+        for firstIndex in sampled.indices {
+            for secondIndex in sampled.indices where secondIndex > firstIndex {
+                let distance = SwingGeometry.distance(sampled[firstIndex], sampled[secondIndex])
+                if best == nil || distance > best!.2 {
+                    best = (sampled[firstIndex], sampled[secondIndex], distance)
+                }
+            }
+        }
+        return best.map { ($0.0, $0.1) }
+    }
+
+    nonisolated private static func handCenter(_ pose: PoseEstimationResult) -> CGPoint? {
+        SwingGeometry.center(pose.point(for: "leftWrist"), pose.point(for: "rightWrist"))
     }
 }

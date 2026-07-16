@@ -1,7 +1,9 @@
 import Foundation
+import CoreGraphics
 
 struct SwingPoseSample: Equatable {
     let time: Double
+    let sourceFrameIndex: Int?
     let leftWrist: CGPoint?
     let rightWrist: CGPoint?
     let leftElbow: CGPoint?
@@ -10,6 +12,10 @@ struct SwingPoseSample: Equatable {
     let rightShoulder: CGPoint?
     let leftHip: CGPoint?
     let rightHip: CGPoint?
+    let leftKnee: CGPoint?
+    let rightKnee: CGPoint?
+    let leftAnkle: CGPoint?
+    let rightAnkle: CGPoint?
     let head: CGPoint?
     let spineAngle: Double?
     let aggregateConfidence: Float
@@ -27,7 +33,8 @@ struct SwingPoseSample: Equatable {
             rightHip: nil,
             head: nil,
             spineAngle: nil,
-            aggregateConfidence: 1
+            aggregateConfidence: 1,
+            sourceFrameIndex: nil
         )
     }
 
@@ -37,9 +44,13 @@ struct SwingPoseSample: Equatable {
         leftElbow: CGPoint?, rightElbow: CGPoint?,
         leftShoulder: CGPoint?, rightShoulder: CGPoint?,
         leftHip: CGPoint?, rightHip: CGPoint?,
-        head: CGPoint?, spineAngle: Double?, aggregateConfidence: Float
+        head: CGPoint?, spineAngle: Double?, aggregateConfidence: Float,
+        sourceFrameIndex: Int? = nil,
+        leftKnee: CGPoint? = nil, rightKnee: CGPoint? = nil,
+        leftAnkle: CGPoint? = nil, rightAnkle: CGPoint? = nil
     ) {
         self.time = time
+        self.sourceFrameIndex = sourceFrameIndex
         self.leftWrist = leftWrist
         self.rightWrist = rightWrist
         self.leftElbow = leftElbow
@@ -48,12 +59,337 @@ struct SwingPoseSample: Equatable {
         self.rightShoulder = rightShoulder
         self.leftHip = leftHip
         self.rightHip = rightHip
+        self.leftKnee = leftKnee
+        self.rightKnee = rightKnee
+        self.leftAnkle = leftAnkle
+        self.rightAnkle = rightAnkle
         self.head = head
         self.spineAngle = spineAngle
         self.aggregateConfidence = aggregateConfidence
     }
 
     var wristY: CGFloat { rightWrist?.y ?? leftWrist?.y ?? .nan }
+}
+
+enum LeadArmSide: String, Equatable {
+    case left
+    case right
+    case unknown
+}
+
+struct ClubShaftEvidence: Equatable {
+    let start: CGPoint
+    let end: CGPoint
+    let confidence: Double
+
+    var length: Double {
+        hypot(Double(end.x - start.x), Double(end.y - start.y))
+    }
+
+    var angle: Double {
+        SwingGeometry.lineAngle(from: start, to: end)
+    }
+
+    func isConnected(to point: CGPoint, tolerance: Double) -> Bool {
+        min(
+            hypot(Double(point.x - start.x), Double(point.y - start.y)),
+            hypot(Double(point.x - end.x), Double(point.y - end.y))
+        ) <= tolerance
+    }
+
+    func distanceFromExtendedLine(to point: CGPoint) -> Double {
+        let dx = Double(end.x - start.x)
+        let dy = Double(end.y - start.y)
+        let denominator = hypot(dx, dy)
+        guard denominator > .leastNonzeroMagnitude else {
+            return hypot(Double(point.x - start.x), Double(point.y - start.y))
+        }
+        let numerator = abs(
+            dy * Double(point.x - start.x) - dx * Double(point.y - start.y)
+        )
+        return numerator / denominator
+    }
+}
+
+struct BallEvidence: Equatable {
+    let center: CGPoint
+    let radius: Double
+    let confidence: Double
+}
+
+struct BallTrackUpdate: Equatable {
+    let stableBall: BallEvidence?
+    let localChange: Double
+}
+
+struct BallPositionTracker: Equatable {
+    private let requiredHits: Int
+    private let maximumMisses: Int
+    private(set) var stableBall: BallEvidence?
+    private var candidateCenter: CGPoint?
+    private var hitCount = 0
+    private var missCount = 0
+
+    init(requiredHits: Int = 3, maximumMisses: Int = 2, seed: BallEvidence? = nil) {
+        self.requiredHits = max(1, requiredHits)
+        self.maximumMisses = max(0, maximumMisses)
+        stableBall = seed
+        candidateCenter = seed?.center
+        hitCount = seed == nil ? 0 : self.requiredHits
+    }
+
+    mutating func update(_ observation: BallEvidence?) -> BallTrackUpdate {
+        guard let observation else {
+            missCount += 1
+            let changed = stableBall == nil ? 0 : 1.0
+            if missCount > maximumMisses {
+                // Once the address ball has been stable for several frames it
+                // becomes the fixed reference for this swing window. Its
+                // disappearance is impact evidence, not a reason to erase the
+                // location the shaft is measured against.
+                candidateCenter = stableBall?.center
+                hitCount = stableBall == nil ? 0 : requiredHits
+            }
+            return BallTrackUpdate(stableBall: stableBall, localChange: changed)
+        }
+
+        missCount = 0
+        if let candidateCenter {
+            let separation = hypot(
+                Double(observation.center.x - candidateCenter.x),
+                Double(observation.center.y - candidateCenter.y)
+            )
+            if separation <= 0.04 {
+                let weight = Double(max(1, hitCount))
+                self.candidateCenter = CGPoint(
+                    x: (candidateCenter.x * weight + observation.center.x) / (weight + 1),
+                    y: (candidateCenter.y * weight + observation.center.y) / (weight + 1)
+                )
+                hitCount += 1
+            } else {
+                self.candidateCenter = observation.center
+                hitCount = 1
+            }
+        } else {
+            candidateCenter = observation.center
+            hitCount = 1
+        }
+
+        if hitCount >= requiredHits, let candidateCenter {
+            stableBall = BallEvidence(
+                center: candidateCenter,
+                radius: observation.radius,
+                confidence: observation.confidence
+            )
+        }
+        return BallTrackUpdate(stableBall: stableBall, localChange: 0)
+    }
+}
+
+struct SwingObjectEvidence: Equatable {
+    let shaft: ClubShaftEvidence?
+    let ball: BallEvidence?
+    let stableBall: CGPoint?
+    let ballLocalChange: Double
+
+    static let empty = SwingObjectEvidence(
+        shaft: nil,
+        ball: nil,
+        stableBall: nil,
+        ballLocalChange: 0
+    )
+}
+
+struct SwingFrameSample: Equatable {
+    let sourceFrameIndex: Int
+    let time: Double
+    let pose: SwingPoseSample?
+    let objectEvidence: SwingObjectEvidence
+}
+
+struct SwingFrameEvidence: Equatable {
+    let sourceFrameIndex: Int
+    let time: Double
+    let pose: SwingPoseSample?
+    let objectEvidence: SwingObjectEvidence
+    let leadArm: LeadArmSide
+    let leadArmAngle: Double?
+    let leadArmExtension: Double?
+    let shoulderAngle: Double?
+    let hipAngle: Double?
+    let handCenter: CGPoint?
+    let hipCenter: CGPoint?
+    let handVelocity: CGPoint
+    let handAcceleration: CGPoint
+    let headSpeed: Double
+    let hipSpeed: Double
+    let poseCoverage: Double
+}
+
+enum SwingGeometry {
+    nonisolated static func lineAngle(from: CGPoint, to: CGPoint) -> Double {
+        atan2(Double(to.y - from.y), Double(to.x - from.x)) * 180 / .pi
+    }
+
+    nonisolated static func angleFromHorizontal(from: CGPoint, to: CGPoint) -> Double {
+        abs(lineAngle(from: from, to: to)).truncatingRemainder(dividingBy: 180)
+    }
+
+    nonisolated static func jointAngle(a: CGPoint, vertex: CGPoint, c: CGPoint) -> Double {
+        let first = CGVector(dx: a.x - vertex.x, dy: a.y - vertex.y)
+        let second = CGVector(dx: c.x - vertex.x, dy: c.y - vertex.y)
+        let magnitude = hypot(first.dx, first.dy) * hypot(second.dx, second.dy)
+        guard magnitude > .leastNonzeroMagnitude else { return 0 }
+        let cosine = min(1, max(-1, (first.dx * second.dx + first.dy * second.dy) / magnitude))
+        return acos(Double(cosine)) * 180 / .pi
+    }
+
+    nonisolated static func center(_ first: CGPoint?, _ second: CGPoint?) -> CGPoint? {
+        if let first, let second {
+            return CGPoint(x: (first.x + second.x) / 2, y: (first.y + second.y) / 2)
+        }
+        return first ?? second
+    }
+
+    nonisolated static func distance(_ first: CGPoint?, _ second: CGPoint?) -> Double {
+        guard let first, let second else { return 0 }
+        return hypot(Double(first.x - second.x), Double(first.y - second.y))
+    }
+}
+
+enum SwingFeatureExtractor {
+    static func extract(frames rawFrames: [SwingFrameSample]) -> [SwingFrameEvidence] {
+        let frames = rawFrames.sorted { $0.time < $1.time }
+        let leadArm = resolveLeadArm(frames: frames)
+        var previousHand: CGPoint?
+        var previousVelocity = CGPoint.zero
+        var previousHead: CGPoint?
+        var previousHip: CGPoint?
+        var previousTime: Double?
+
+        return frames.map { frame in
+            let pose = frame.pose
+            let hand = pose.flatMap { SwingGeometry.center($0.leftWrist, $0.rightWrist) }
+            let hip = pose.flatMap { SwingGeometry.center($0.leftHip, $0.rightHip) }
+            let elapsed = max(frame.time - (previousTime ?? frame.time), 0)
+            let velocity: CGPoint
+            let acceleration: CGPoint
+            let headSpeed: Double
+            let hipSpeed: Double
+            if elapsed > 0 {
+                velocity = CGPoint(
+                    x: ((hand?.x ?? previousHand?.x ?? 0) - (previousHand?.x ?? hand?.x ?? 0)) / elapsed,
+                    y: ((hand?.y ?? previousHand?.y ?? 0) - (previousHand?.y ?? hand?.y ?? 0)) / elapsed
+                )
+                acceleration = CGPoint(
+                    x: (velocity.x - previousVelocity.x) / elapsed,
+                    y: (velocity.y - previousVelocity.y) / elapsed
+                )
+                headSpeed = SwingGeometry.distance(pose?.head, previousHead) / elapsed
+                hipSpeed = SwingGeometry.distance(hip, previousHip) / elapsed
+            } else {
+                velocity = .zero
+                acceleration = .zero
+                headSpeed = 0
+                hipSpeed = 0
+            }
+
+            let armPoints = points(for: leadArm, pose: pose)
+            let shoulderAngle = lineAngle(pose?.leftShoulder, pose?.rightShoulder)
+            let hipAngle = lineAngle(pose?.leftHip, pose?.rightHip)
+            let coverage = pose.map(poseCoverage) ?? 0
+            let evidence = SwingFrameEvidence(
+                sourceFrameIndex: frame.sourceFrameIndex,
+                time: frame.time,
+                pose: pose,
+                objectEvidence: frame.objectEvidence,
+                leadArm: leadArm,
+                leadArmAngle: angleFromHorizontal(armPoints.shoulder, armPoints.wrist),
+                leadArmExtension: jointAngle(armPoints.shoulder, armPoints.elbow, armPoints.wrist),
+                shoulderAngle: shoulderAngle,
+                hipAngle: hipAngle,
+                handCenter: hand,
+                hipCenter: hip,
+                handVelocity: velocity,
+                handAcceleration: acceleration,
+                headSpeed: headSpeed,
+                hipSpeed: hipSpeed,
+                poseCoverage: coverage
+            )
+            previousHand = hand ?? previousHand
+            previousVelocity = velocity
+            previousHead = pose?.head ?? previousHead
+            previousHip = hip ?? previousHip
+            previousTime = frame.time
+            return evidence
+        }
+    }
+
+    private static func resolveLeadArm(frames: [SwingFrameSample]) -> LeadArmSide {
+        var leftScore = 0.0
+        var rightScore = 0.0
+        for frame in frames {
+            guard let pose = frame.pose else { continue }
+            leftScore += armScore(shoulder: pose.leftShoulder, elbow: pose.leftElbow, wrist: pose.leftWrist)
+            rightScore += armScore(shoulder: pose.rightShoulder, elbow: pose.rightElbow, wrist: pose.rightWrist)
+            if let ball = frame.objectEvidence.stableBall,
+               let hips = SwingGeometry.center(pose.leftHip, pose.rightHip) {
+                if ball.x < hips.x { leftScore += 2 } else { rightScore += 2 }
+            }
+        }
+        let separation = abs(leftScore - rightScore)
+        guard separation >= max(2, max(leftScore, rightScore) * 0.03) else { return .unknown }
+        return leftScore > rightScore ? .left : .right
+    }
+
+    private static func armScore(shoulder: CGPoint?, elbow: CGPoint?, wrist: CGPoint?) -> Double {
+        guard let shoulder, let elbow, let wrist else { return 0 }
+        let armExtension = SwingGeometry.jointAngle(a: shoulder, vertex: elbow, c: wrist)
+        let reach = SwingGeometry.distance(shoulder, wrist) * 100
+        return max(0, armExtension - 90) + reach
+    }
+
+    private static func points(
+        for side: LeadArmSide,
+        pose: SwingPoseSample?
+    ) -> (shoulder: CGPoint?, elbow: CGPoint?, wrist: CGPoint?) {
+        guard let pose else { return (nil, nil, nil) }
+        switch side {
+        case .left:
+            return (pose.leftShoulder, pose.leftElbow, pose.leftWrist)
+        case .right:
+            return (pose.rightShoulder, pose.rightElbow, pose.rightWrist)
+        case .unknown:
+            let leftComplete = pose.leftShoulder != nil && pose.leftElbow != nil && pose.leftWrist != nil
+            return leftComplete
+                ? (pose.leftShoulder, pose.leftElbow, pose.leftWrist)
+                : (pose.rightShoulder, pose.rightElbow, pose.rightWrist)
+        }
+    }
+
+    private static func lineAngle(_ first: CGPoint?, _ second: CGPoint?) -> Double? {
+        guard let first, let second else { return nil }
+        return SwingGeometry.lineAngle(from: first, to: second)
+    }
+
+    private static func angleFromHorizontal(_ first: CGPoint?, _ second: CGPoint?) -> Double? {
+        guard let first, let second else { return nil }
+        return SwingGeometry.angleFromHorizontal(from: first, to: second)
+    }
+
+    private static func jointAngle(_ first: CGPoint?, _ vertex: CGPoint?, _ third: CGPoint?) -> Double? {
+        guard let first, let vertex, let third else { return nil }
+        return SwingGeometry.jointAngle(a: first, vertex: vertex, c: third)
+    }
+
+    private static func poseCoverage(_ sample: SwingPoseSample) -> Double {
+        let joints: [CGPoint?] = [
+            sample.leftWrist, sample.rightWrist, sample.leftElbow, sample.rightElbow,
+            sample.leftShoulder, sample.rightShoulder, sample.leftHip, sample.rightHip,
+            sample.leftKnee, sample.rightKnee, sample.leftAnkle, sample.rightAnkle, sample.head
+        ]
+        return Double(joints.compactMap { $0 }.count) / Double(joints.count)
+    }
 }
 
 enum SwingStageDetectionStatus: String, Codable, Equatable {
@@ -65,8 +401,29 @@ enum SwingStageDetectionStatus: String, Codable, Equatable {
 struct SwingStageDetection: Equatable {
     let stage: SwingStage
     let time: Double?
+    let sourceFrameIndex: Int?
     let confidence: Double
     let status: SwingStageDetectionStatus
+    let hasClubEvidence: Bool
+    let hasBallEvidence: Bool
+
+    init(
+        stage: SwingStage,
+        time: Double?,
+        sourceFrameIndex: Int? = nil,
+        confidence: Double,
+        status: SwingStageDetectionStatus,
+        hasClubEvidence: Bool = false,
+        hasBallEvidence: Bool = false
+    ) {
+        self.stage = stage
+        self.time = time
+        self.sourceFrameIndex = sourceFrameIndex
+        self.confidence = confidence
+        self.status = status
+        self.hasClubEvidence = hasClubEvidence
+        self.hasBallEvidence = hasBallEvidence
+    }
 
     var marker: KeyframeMarker? {
         guard let time, status != .unresolved else { return nil }
@@ -94,6 +451,11 @@ enum AnalysisFailure: Equatable {
     case noVideo
     case invalidDuration
     case insufficientPoseEvidence
+    case noStableGolfer
+    case noSwingMotion
+    case ambiguousSwingWindows
+    case swingWindowTooLong
+    case frameExtractionFailed
 }
 
 enum SwingAnalysisState: Equatable {
@@ -133,9 +495,272 @@ struct AnalysisWorkspacePresentation: Equatable {
     }
 }
 
+enum OrderedStageSolver {
+    private static let minimumResolvedScore = 0.32
+    private static let confirmedConfidence = 0.72
+
+    static func solve(evidence rawEvidence: [SwingFrameEvidence]) -> SwingAnalysisResult {
+        let evidence = rawEvidence.sorted { $0.time < $1.time }
+        guard evidence.count >= SwingStage.allCases.count,
+              zip(evidence, evidence.dropFirst()).allSatisfy({ $0.time < $1.time }) else {
+            return unresolvedResult()
+        }
+
+        let stages = SwingStage.allCases
+        let scores = stages.map { stage in
+            evidence.indices.map { index in stageScore(stage, index: index, evidence: evidence) }
+        }
+        let negativeInfinity = -Double.greatestFiniteMagnitude
+        var totals = Array(
+            repeating: Array(repeating: negativeInfinity, count: evidence.count),
+            count: stages.count
+        )
+        var predecessors = Array(
+            repeating: Array(repeating: -1, count: evidence.count),
+            count: stages.count
+        )
+
+        for index in evidence.indices {
+            totals[0][index] = scores[0][index]
+        }
+        if stages.count > 1 {
+            for stageIndex in 1..<stages.count {
+                for frameIndex in evidence.indices where frameIndex >= stageIndex {
+                    var bestTotal = negativeInfinity
+                    var bestPrior = -1
+                    for priorIndex in stageIndex..<frameIndex {
+                        let priorTotal = totals[stageIndex - 1][priorIndex]
+                        guard priorTotal > negativeInfinity / 2 else { continue }
+                        let transition = transitionScore(
+                            from: evidence[priorIndex],
+                            to: evidence[frameIndex]
+                        )
+                        let total = priorTotal + transition + scores[stageIndex][frameIndex]
+                        if total > bestTotal {
+                            bestTotal = total
+                            bestPrior = priorIndex
+                        }
+                    }
+                    totals[stageIndex][frameIndex] = bestTotal
+                    predecessors[stageIndex][frameIndex] = bestPrior
+                }
+            }
+        }
+
+        guard let lastFrame = evidence.indices.max(by: {
+            totals[stages.count - 1][$0] < totals[stages.count - 1][$1]
+        }), totals[stages.count - 1][lastFrame] > negativeInfinity / 2 else {
+            return unresolvedResult()
+        }
+
+        var selected = Array(repeating: -1, count: stages.count)
+        var cursor = lastFrame
+        for stageIndex in stride(from: stages.count - 1, through: 0, by: -1) {
+            selected[stageIndex] = cursor
+            if stageIndex > 0 {
+                cursor = predecessors[stageIndex][cursor]
+                guard cursor >= 0 else { return unresolvedResult() }
+            }
+        }
+
+        let detections = stages.indices.map { stageIndex -> SwingStageDetection in
+            let stage = stages[stageIndex]
+            let frameIndex = selected[stageIndex]
+            let frame = evidence[frameIndex]
+            let rawScore = scores[stageIndex][frameIndex]
+            let legalStart = stageIndex == 0 ? 0 : selected[stageIndex - 1] + 1
+            let legalEnd = stageIndex == stages.count - 1 ? evidence.count : selected[stageIndex + 1]
+            let alternate = (legalStart..<legalEnd)
+                .filter { $0 != frameIndex }
+                .map { scores[stageIndex][$0] }
+                .max() ?? 0
+            let margin = max(0, rawScore - alternate)
+            var confidence = clamp(rawScore * 0.72 + frame.poseCoverage * 0.23 + min(0.05, margin))
+            var status: SwingStageDetectionStatus
+            if rawScore < minimumResolvedScore {
+                status = .unresolved
+                confidence = min(confidence, 0.44)
+            } else if confidence >= confirmedConfidence {
+                status = .confirmed
+            } else {
+                status = .lowConfidence
+            }
+
+            let hasClub = frame.objectEvidence.shaft != nil
+            let hasBall = frame.objectEvidence.stableBall != nil
+            if (stage == .takeaway && !hasClub) ||
+                (stage == .impact && !(hasClub && hasBall)) ||
+                ((stage == .leadArmParallelBackswing || stage == .leadArmParallelDownswing) && frame.leadArm == .unknown) {
+                if status == .confirmed { status = .lowConfidence }
+                confidence = min(confidence, 0.69)
+            }
+
+            return SwingStageDetection(
+                stage: stage,
+                time: status == .unresolved ? nil : frame.time,
+                sourceFrameIndex: status == .unresolved ? nil : frame.sourceFrameIndex,
+                confidence: confidence,
+                status: status,
+                hasClubEvidence: hasClub,
+                hasBallEvidence: hasBall
+            )
+        }
+
+        let markers = detections.compactMap(\.marker)
+        let unresolved = Set(detections.filter { $0.status == .unresolved }.map(\.stage))
+        return SwingAnalysisResult(
+            detectedMarkers: markers,
+            unresolvedStages: unresolved,
+            detections: detections
+        )
+    }
+
+    private static func stageScore(
+        _ stage: SwingStage,
+        index: Int,
+        evidence: [SwingFrameEvidence]
+    ) -> Double {
+        let frame = evidence[index]
+        let coverage = frame.poseCoverage
+        let handY = frame.handCenter?.y
+        let hipY = frame.hipCenter?.y
+        let shoulderY = SwingGeometry.center(frame.pose?.leftShoulder, frame.pose?.rightShoulder)?.y
+        let armHorizontal = closeness(frame.leadArmAngle, target: 0, tolerance: 18)
+        let armExtended = ramp(frame.leadArmExtension, minimum: 145, maximum: 175)
+        let upward = ramp(-Double(frame.handVelocity.y), minimum: 0.15, maximum: 1.0)
+        let downward = ramp(Double(frame.handVelocity.y), minimum: 0.15, maximum: 1.0)
+        let shoulderTurn = ramp(abs(frame.shoulderAngle ?? 0), minimum: 5, maximum: 28)
+        let hipTurn = ramp(abs(frame.hipAngle ?? 0), minimum: 8, maximum: 32)
+        let shaftHorizontal = frame.objectEvidence.shaft.map {
+            closeness(horizontalAngle($0.angle), target: 0, tolerance: 18) * $0.confidence
+        } ?? 0
+
+        switch stage {
+        case .address:
+            let stable = 1 - min(1, hypot(Double(frame.handVelocity.x), Double(frame.handVelocity.y)) / 0.30)
+            let bodyStable = 1 - min(1, (frame.headSpeed + frame.hipSpeed) / 0.16)
+            let lowHands = (handY != nil && hipY != nil && handY! >= hipY! + 0.04) ? 1.0 : 0.0
+            let nearBall = distance(frame.handCenter, frame.objectEvidence.stableBall).map {
+                1 - min(1, $0 / 0.38)
+            } ?? 0
+            return clamp(stable * 0.25 + bodyStable * 0.20 + lowHands * 0.25 + nearBall * 0.10 + coverage * 0.20)
+
+        case .takeaway:
+            let lowerTorso = (handY != nil && shoulderY != nil && handY! > shoulderY!) ? 1.0 : 0.0
+            return clamp(upward * 0.27 + shaftHorizontal * 0.33 + lowerTorso * 0.15 + coverage * 0.25)
+
+        case .leadArmParallelBackswing:
+            return clamp(armHorizontal * 0.34 + armExtended * 0.20 + upward * 0.23 + shoulderTurn * 0.13 + coverage * 0.10)
+
+        case .top:
+            let reversal: Double
+            if index + 1 < evidence.count {
+                let currentUp = frame.handVelocity.y < -0.10
+                let nextDown = evidence[index + 1].handVelocity.y > 0.10
+                reversal = currentUp && nextDown ? 1 : 0
+            } else {
+                reversal = 0
+            }
+            let highHands = (handY != nil && shoulderY != nil && handY! < shoulderY!) ? 1.0 : 0.0
+            return clamp(reversal * 0.38 + highHands * 0.22 + shoulderTurn * 0.22 + coverage * 0.18)
+
+        case .leadArmParallelDownswing:
+            return clamp(armHorizontal * 0.34 + armExtended * 0.18 + downward * 0.26 + hipTurn * 0.12 + coverage * 0.10)
+
+        case .impact:
+            let handNearHip = distance(frame.handCenter, frame.hipCenter).map {
+                1 - min(1, $0 / 0.24)
+            } ?? 0
+            let shaftBall = shaftBallScore(frame.objectEvidence)
+            let ballChange = min(1, frame.objectEvidence.ballLocalChange)
+            return clamp(handNearHip * 0.17 + downward * 0.16 + shaftBall * 0.32 + ballChange * 0.16 + coverage * 0.19)
+
+        case .followThrough:
+            return clamp(armHorizontal * 0.28 + upward * 0.27 + hipTurn * 0.17 + shaftHorizontal * 0.13 + coverage * 0.15)
+
+        case .finish:
+            let stable = isStableFinish(startingAt: index, evidence: evidence) ? 1.0 : 0.0
+            let highHands = (handY != nil && shoulderY != nil && handY! < shoulderY!) ? 1.0 : 0.0
+            return clamp(stable * 0.55 + highHands * 0.15 + max(shoulderTurn, hipTurn) * 0.15 + coverage * 0.15)
+        }
+    }
+
+    private static func isStableFinish(
+        startingAt index: Int,
+        evidence: [SwingFrameEvidence]
+    ) -> Bool {
+        let start = evidence[index]
+        guard start.headSpeed <= 0.08,
+              start.hipSpeed <= 0.08,
+              hypot(Double(start.handVelocity.x), Double(start.handVelocity.y)) <= 0.18 else { return false }
+        var reachedDuration = false
+        for candidate in evidence[index...] {
+            guard candidate.headSpeed <= 0.08,
+                  candidate.hipSpeed <= 0.08,
+                  hypot(Double(candidate.handVelocity.x), Double(candidate.handVelocity.y)) <= 0.18 else { break }
+            if candidate.time - start.time >= 0.25 {
+                reachedDuration = true
+                break
+            }
+        }
+        return reachedDuration
+    }
+
+    private static func shaftBallScore(_ object: SwingObjectEvidence) -> Double {
+        guard let shaft = object.shaft, let ball = object.stableBall else { return 0 }
+        let alignment = 1 - min(1, shaft.distanceFromExtendedLine(to: ball) / 0.08)
+        return clamp(alignment * shaft.confidence)
+    }
+
+    private static func transitionScore(from: SwingFrameEvidence, to: SwingFrameEvidence) -> Double {
+        let gap = to.time - from.time
+        guard gap > 0 else { return -1000 }
+        return -max(0, gap - 1.25) * 0.20
+    }
+
+    private static func horizontalAngle(_ angle: Double) -> Double {
+        let normalized = abs(angle).truncatingRemainder(dividingBy: 180)
+        return min(normalized, 180 - normalized)
+    }
+
+    private static func closeness(_ value: Double?, target: Double, tolerance: Double) -> Double {
+        guard let value else { return 0 }
+        return max(0, 1 - abs(value - target) / tolerance)
+    }
+
+    private static func ramp(_ value: Double?, minimum: Double, maximum: Double) -> Double {
+        guard let value, maximum > minimum else { return 0 }
+        return clamp((value - minimum) / (maximum - minimum))
+    }
+
+    private static func distance(_ first: CGPoint?, _ second: CGPoint?) -> Double? {
+        guard let first, let second else { return nil }
+        return SwingGeometry.distance(first, second)
+    }
+
+    private static func clamp(_ value: Double) -> Double {
+        min(1, max(0, value))
+    }
+
+    private static func unresolvedResult() -> SwingAnalysisResult {
+        let detections = SwingStage.allCases.map {
+            SwingStageDetection(stage: $0, time: nil, confidence: 0, status: .unresolved)
+        }
+        return SwingAnalysisResult(
+            detectedMarkers: [],
+            unresolvedStages: Set(SwingStage.allCases),
+            detections: detections
+        )
+    }
+}
+
 enum SwingStageDetector {
     private static let finishStabilityThreshold: CGFloat = 0.04
     private static let directionChangeThreshold: CGFloat = 0.015
+
+    static func detect(frames: [SwingFrameSample]) -> SwingAnalysisResult {
+        OrderedStageSolver.solve(evidence: SwingFeatureExtractor.extract(frames: frames))
+    }
 
     static func detect(samples rawSamples: [SwingPoseSample]) -> SwingAnalysisResult {
         let samples = rawSamples
@@ -374,7 +999,7 @@ enum SwingStageDetector {
 /// inside a much longer imported video.  Twelve samples per second gives the
 /// detector at least 9 observations for a typical 0.8–1.0 second swing.
 enum SwingAnalysisSamplingPlan {
-    static let samplesPerSecond = 12.0
+    static let samplesPerSecond = 8.0
 
     static func sampleTimes(duration: Double) -> [Double] {
         guard duration.isFinite, duration > 0 else { return [] }
@@ -383,5 +1008,190 @@ enum SwingAnalysisSamplingPlan {
         return (0...intervals).map { index in
             min(duration, Double(index) * interval)
         }
+    }
+}
+
+// MARK: - Two-stage scan planning
+
+struct CoarseSwingSample: Equatable {
+    let time: Double
+    let pose: SwingPoseSample?
+}
+
+struct SwingWindow: Equatable {
+    let startTime: Double
+    let endTime: Double
+
+    var duration: Double { max(0, endTime - startTime) }
+}
+
+enum SwingWindowFailure: Equatable {
+    case insufficientPoseEvidence
+    case noSwingMotion
+    case ambiguousCandidates
+    case windowTooLong
+}
+
+enum SwingWindowLocationResult: Equatable {
+    case located(SwingWindow)
+    case failed(SwingWindowFailure)
+}
+
+enum SwingWindowLocator {
+    static let samplesPerSecond = 8.0
+    private static let maximumWindowDuration = 6.0
+    private static let bridgeGapDuration = 0.5
+    private static let leadingPadding = 0.6
+    private static let trailingPadding = 1.0
+
+    static func sampleTimes(duration: Double) -> [Double] {
+        guard duration.isFinite, duration > 0 else { return [] }
+        let interval = 1.0 / samplesPerSecond
+        let count = max(1, Int(ceil(duration / interval)))
+        return (0...count).map { min(duration, Double($0) * interval) }
+    }
+
+    static func locate(samples rawSamples: [CoarseSwingSample]) -> SwingWindowLocationResult {
+        let samples = rawSamples
+            .filter { $0.time.isFinite }
+            .sorted { $0.time < $1.time }
+        guard samples.count >= 5 else { return .failed(.insufficientPoseEvidence) }
+
+        let poseCoverage = Double(samples.filter { $0.pose != nil }.count) / Double(samples.count)
+        guard poseCoverage >= 0.5 else { return .failed(.insufficientPoseEvidence) }
+
+        var energies = Array(repeating: 0.0, count: samples.count)
+        for index in 1..<samples.count {
+            guard let current = samples[index].pose,
+                  let previous = samples[index - 1].pose else { continue }
+            let elapsed = samples[index].time - samples[index - 1].time
+            guard elapsed > 0 else { continue }
+
+            let handMotion = normalizedDistance(
+                handCenter(current),
+                handCenter(previous)
+            ) / elapsed
+            let shoulderMotion = angularDistance(
+                lineAngle(current.leftShoulder, current.rightShoulder),
+                lineAngle(previous.leftShoulder, previous.rightShoulder)
+            ) / elapsed
+            let hipMotion = angularDistance(
+                lineAngle(current.leftHip, current.rightHip),
+                lineAngle(previous.leftHip, previous.rightHip)
+            ) / elapsed
+            energies[index] = handMotion + shoulderMotion * 0.20 + hipMotion * 0.15
+        }
+
+        let nonZero = energies.filter { $0 > 0.000_1 }.sorted()
+        guard !nonZero.isEmpty else { return .failed(.noSwingMotion) }
+        let median = nonZero[nonZero.count / 2]
+        let peak = nonZero.last ?? 0
+        let threshold = max(0.30, min(peak * 0.45, median * 2.2))
+        let activeIndices = energies.indices.filter { energies[$0] >= threshold }
+        guard !activeIndices.isEmpty else { return .failed(.noSwingMotion) }
+
+        let typicalInterval = medianInterval(samples.map(\.time))
+        let maximumIndexGap = max(1, Int(ceil(bridgeGapDuration / typicalInterval)))
+        var groups: [[Int]] = []
+        for index in activeIndices {
+            if let last = groups.indices.last,
+               let priorIndex = groups[last].last,
+               index - priorIndex <= maximumIndexGap {
+                groups[last].append(index)
+            } else {
+                groups.append([index])
+            }
+        }
+
+        let candidates = groups.compactMap { group -> (window: SwingWindow, score: Double)? in
+            guard let first = group.first, let last = group.last else { return nil }
+            let coreStartIndex = max(0, first - 1)
+            let coreStart = samples[coreStartIndex].time
+            let coreEnd = samples[last].time
+            let start = max(samples[0].time, coreStart - leadingPadding)
+            let end = min(samples[samples.count - 1].time, coreEnd + trailingPadding)
+            let window = SwingWindow(startTime: start, endTime: end)
+            let score = group.reduce(0.0) { $0 + energies[$1] }
+            return (window, score)
+        }.sorted { lhs, rhs in
+            lhs.score == rhs.score ? lhs.window.startTime < rhs.window.startTime : lhs.score > rhs.score
+        }
+
+        guard let best = candidates.first else { return .failed(.noSwingMotion) }
+        if candidates.count > 1, candidates[1].score >= best.score * 0.85 {
+            return .failed(.ambiguousCandidates)
+        }
+        guard best.window.duration <= maximumWindowDuration else {
+            return .failed(.windowTooLong)
+        }
+        return .located(best.window)
+    }
+
+    private static func handCenter(_ sample: SwingPoseSample) -> CGPoint? {
+        if let left = sample.leftWrist, let right = sample.rightWrist {
+            return CGPoint(x: (left.x + right.x) / 2, y: (left.y + right.y) / 2)
+        }
+        return sample.leftWrist ?? sample.rightWrist
+    }
+
+    private static func lineAngle(_ first: CGPoint?, _ second: CGPoint?) -> Double? {
+        guard let first, let second else { return nil }
+        return atan2(Double(second.y - first.y), Double(second.x - first.x))
+    }
+
+    private static func normalizedDistance(_ first: CGPoint?, _ second: CGPoint?) -> Double {
+        guard let first, let second else { return 0 }
+        return hypot(Double(first.x - second.x), Double(first.y - second.y))
+    }
+
+    private static func angularDistance(_ first: Double?, _ second: Double?) -> Double {
+        guard let first, let second else { return 0 }
+        let raw = abs(first - second).truncatingRemainder(dividingBy: .pi * 2)
+        return min(raw, .pi * 2 - raw)
+    }
+
+    private static func medianInterval(_ times: [Double]) -> Double {
+        let intervals = zip(times, times.dropFirst())
+            .map { $1 - $0 }
+            .filter { $0 > 0 }
+            .sorted()
+        return intervals.isEmpty ? 1.0 / samplesPerSecond : intervals[intervals.count / 2]
+    }
+}
+
+struct FineFrameReference: Equatable {
+    let sourceFrameIndex: Int
+    let time: Double
+}
+
+enum FineSwingSamplingPlan {
+    static let maximumSamplesPerSecond = 120.0
+
+    static func frames(
+        window: SwingWindow,
+        sourceFrameRate: Double,
+        duration: Double
+    ) -> [FineFrameReference] {
+        guard sourceFrameRate.isFinite,
+              sourceFrameRate > 0,
+              duration.isFinite,
+              duration > 0,
+              window.duration > 0 else { return [] }
+
+        let boundedStart = max(0, min(window.startTime, duration))
+        let boundedEnd = max(boundedStart, min(window.endTime, duration))
+        let firstFrame = Int(ceil(boundedStart * sourceFrameRate))
+        let lastFrame = Int(floor(boundedEnd * sourceFrameRate))
+        guard firstFrame <= lastFrame else { return [] }
+
+        let frameStride = max(1, Int(ceil(sourceFrameRate / maximumSamplesPerSecond)))
+        var references = stride(from: firstFrame, through: lastFrame, by: frameStride).map {
+            FineFrameReference(sourceFrameIndex: $0, time: Double($0) / sourceFrameRate)
+        }
+        if references.last?.sourceFrameIndex != lastFrame,
+           Double(lastFrame - (references.last?.sourceFrameIndex ?? firstFrame)) / sourceFrameRate >= 1.0 / maximumSamplesPerSecond {
+            references.append(FineFrameReference(sourceFrameIndex: lastFrame, time: Double(lastFrame) / sourceFrameRate))
+        }
+        return references
     }
 }

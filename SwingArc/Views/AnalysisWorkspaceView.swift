@@ -262,6 +262,16 @@ struct AnalysisWorkspaceView: View {
             return "视频读取失败，请重新导入。"
         case .insufficientPoseEvidence:
             return "未检测到清晰人体。请选择全身入镜、光线充足的视频；手工标注不会被清除。"
+        case .noStableGolfer:
+            return "无法持续锁定主球员。请使用固定机位、全身入镜且避免多人遮挡的视频。"
+        case .noSwingMotion:
+            return "没有找到完整挥杆动作。请确认视频包含从准备到收杆的连续挥杆。"
+        case .ambiguousSwingWindows:
+            return "检测到多个强度接近的挥杆片段。请裁剪为单次挥杆后重新分析。"
+        case .swingWindowTooLong:
+            return "挥杆候选片段超过 6 秒。请裁剪无关准备或走动部分后重试。"
+        case .frameExtractionFailed:
+            return "源视频帧读取不完整，无法进行逐帧定位。请重新导入原始视频。"
         }
     }
 }
