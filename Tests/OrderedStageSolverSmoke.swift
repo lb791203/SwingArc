@@ -19,15 +19,8 @@ struct OrderedStageSolverSmoke {
         precondition(detection(.impact, in: missingObjects).status != .confirmed)
         precondition(detection(.impact, in: missingObjects).time != nil)
 
-        let frames = evidence.map {
-            SwingFrameSample(
-                sourceFrameIndex: $0.sourceFrameIndex,
-                time: $0.time,
-                pose: $0.pose,
-                objectEvidence: $0.objectEvidence
-            )
-        }
-        precondition(SwingStageDetector.detect(frames: frames).detections.count == 8)
+        // OrderedStageSolver remains a compatibility-only surface. Production
+        // frame detection is covered by BidirectionalStageSolverSmoke.
     }
 
     private static func fixture(includeImpactObjects: Bool) -> [SwingFrameEvidence] {

@@ -944,6 +944,15 @@ struct ImpactCorridor: Equatable {
     let candidates: [StageCandidate]
 }
 
+struct StageCandidateSet: Equatable {
+    let impact: StageCandidate
+    let candidatesByStage: [SwingStage: [StageCandidate]]
+
+    func candidates(for stage: SwingStage) -> [StageCandidate] {
+        candidatesByStage[stage] ?? []
+    }
+}
+
 enum ImpactCorridorResolver {
     private static let minimumCandidateScore = 0.38
     private static let maximumCandidateCount = 5
@@ -1058,6 +1067,456 @@ enum ImpactCorridorResolver {
     }
 }
 
+enum BidirectionalStageCandidateResolver {
+    private static let maximumCandidateCount = 5
+
+    static func candidates(
+        timeline: [SwingTemporalFrame],
+        impact: StageCandidate
+    ) -> StageCandidateSet {
+        guard impact.stage == .impact,
+              timeline.indices.contains(impact.evidenceIndex),
+              timeline[impact.evidenceIndex].frame.sourceFrameIndex == impact.sourceFrameIndex else {
+            return StageCandidateSet(
+                impact: impact,
+                candidatesByStage: [.impact: [impact]]
+            )
+        }
+
+        let p5 = descendingCandidates(
+            before: impact.evidenceIndex,
+            timeline: timeline
+        )
+        let p4 = topPlateauEndCandidates(before: p5, timeline: timeline)
+        let p3 = ascendingParallelCandidates(before: p4, timeline: timeline)
+        let p2 = takeawayShaftCandidates(before: p3, timeline: timeline)
+        let p1 = addressBoundaryCandidates(before: p2, timeline: timeline)
+        let p7 = followThroughCandidates(
+            after: impact.evidenceIndex,
+            impact: impact,
+            timeline: timeline
+        )
+        let p8 = firstFinishPlateauCandidates(after: p7, timeline: timeline)
+
+        return StageCandidateSet(
+            impact: impact,
+            candidatesByStage: [
+                .address: p1,
+                .takeaway: p2,
+                .leadArmParallelBackswing: p3,
+                .top: p4,
+                .leadArmParallelDownswing: p5,
+                .impact: [impact],
+                .followThrough: p7,
+                .finish: p8
+            ]
+        )
+    }
+
+    private static func descendingCandidates(
+        before upperBound: Int,
+        timeline: [SwingTemporalFrame]
+    ) -> [StageCandidate] {
+        guard upperBound > timeline.startIndex else { return [] }
+        return retainedCandidates(
+            (timeline.startIndex..<upperBound).compactMap { index in
+                let temporal = timeline[index]
+                let frame = temporal.frame
+                guard temporal.sustainedDownswing,
+                      frame.leadArmAngle != nil else { return nil }
+                let armHorizontal = closeness(
+                    frame.leadArmAngle,
+                    target: 0,
+                    tolerance: 18
+                )
+                let armExtended = ramp(
+                    frame.leadArmExtension,
+                    minimum: 145,
+                    maximum: 175
+                )
+                let downward = ramp(
+                    Double(frame.handVelocity.y),
+                    minimum: 0.15,
+                    maximum: 1
+                )
+                let hipOpen = ramp(
+                    abs(frame.hipAngle ?? 0),
+                    minimum: 8,
+                    maximum: 32
+                )
+                let requirements = armHorizontal >= 0.55
+                    && armExtended >= 0.55
+                    && downward >= 0.35
+                    && abs(frame.hipAngle ?? 0) >= 8
+                let score = clamp(
+                    armHorizontal * 0.38
+                        + armExtended * 0.18
+                        + downward * 0.24
+                        + hipOpen * 0.12
+                        + frame.poseCoverage * 0.08
+                )
+                guard score >= 0.32 else { return nil }
+                return candidate(
+                    stage: .leadArmParallelDownswing,
+                    index: index,
+                    score: score,
+                    requirementsSatisfied: requirements,
+                    timeline: timeline
+                )
+            }
+        )
+    }
+
+    private static func topPlateauEndCandidates(
+        before laterCandidates: [StageCandidate],
+        timeline: [SwingTemporalFrame]
+    ) -> [StageCandidate] {
+        guard let upperBound = laterCandidates.map(\.evidenceIndex).max(),
+              upperBound > timeline.startIndex else { return [] }
+        return retainedCandidates(
+            (timeline.startIndex..<upperBound).compactMap { index in
+                let temporal = timeline[index]
+                guard temporal.isTopPlateauEnd else { return nil }
+                let frame = temporal.frame
+                let shoulderTurn = ramp(
+                    abs(frame.shoulderAngle ?? 0),
+                    minimum: 5,
+                    maximum: 28
+                )
+                let highHands = highHandsScore(frame)
+                let requirements = temporal.sustainedDownswing
+                let score = clamp(
+                    0.42
+                        + (temporal.sustainedDownswing ? 0.20 : 0)
+                        + highHands * 0.14
+                        + shoulderTurn * 0.14
+                        + frame.poseCoverage * 0.10
+                )
+                return candidate(
+                    stage: .top,
+                    index: index,
+                    score: score,
+                    requirementsSatisfied: requirements,
+                    timeline: timeline
+                )
+            },
+            preferLaterSourceFrame: true
+        )
+    }
+
+    private static func ascendingParallelCandidates(
+        before laterCandidates: [StageCandidate],
+        timeline: [SwingTemporalFrame]
+    ) -> [StageCandidate] {
+        guard let upperBound = laterCandidates.map(\.evidenceIndex).max(),
+              upperBound > timeline.startIndex else { return [] }
+        return retainedCandidates(
+            (timeline.startIndex..<upperBound).compactMap { index in
+                let temporal = timeline[index]
+                let frame = temporal.frame
+                guard temporal.sustainedBackswing,
+                      frame.leadArmAngle != nil else { return nil }
+                let armHorizontal = closeness(
+                    frame.leadArmAngle,
+                    target: 0,
+                    tolerance: 18
+                )
+                let armExtended = ramp(
+                    frame.leadArmExtension,
+                    minimum: 145,
+                    maximum: 175
+                )
+                let shoulderTurn = ramp(
+                    abs(frame.shoulderAngle ?? 0),
+                    minimum: 5,
+                    maximum: 28
+                )
+                let increasingTurn = shoulderTurnIsIncreasing(at: index, timeline: timeline)
+                let requirements = armHorizontal >= 0.55
+                    && armExtended >= 0.55
+                    && increasingTurn
+                let score = clamp(
+                    armHorizontal * 0.40
+                        + armExtended * 0.20
+                        + shoulderTurn * 0.16
+                        + (increasingTurn ? 0.14 : 0)
+                        + frame.poseCoverage * 0.10
+                )
+                guard score >= 0.32 else { return nil }
+                return candidate(
+                    stage: .leadArmParallelBackswing,
+                    index: index,
+                    score: score,
+                    requirementsSatisfied: requirements,
+                    timeline: timeline
+                )
+            }
+        )
+    }
+
+    private static func takeawayShaftCandidates(
+        before laterCandidates: [StageCandidate],
+        timeline: [SwingTemporalFrame]
+    ) -> [StageCandidate] {
+        guard let upperBound = laterCandidates.map(\.evidenceIndex).max(),
+              upperBound > timeline.startIndex else { return [] }
+        return retainedCandidates(
+            (timeline.startIndex..<upperBound).compactMap { index in
+                let temporal = timeline[index]
+                let frame = temporal.frame
+                guard temporal.sustainedBackswing,
+                      let shaft = frame.objectEvidence.shaft else { return nil }
+                let shaftHorizontal = closeness(
+                    horizontalAngle(shaft.angle),
+                    target: 0,
+                    tolerance: 18
+                ) * clamp(shaft.confidence)
+                guard shaftHorizontal >= 0.20 else { return nil }
+                let handsBelowShoulders = handsBelowShouldersScore(frame)
+                let backswingSpeed = ramp(
+                    -Double(frame.handVelocity.y),
+                    minimum: 0.12,
+                    maximum: 0.80
+                )
+                let requirements = shaftHorizontal >= 0.55
+                    && handsBelowShoulders == 1
+                let score = clamp(
+                    shaftHorizontal * 0.46
+                        + handsBelowShoulders * 0.20
+                        + backswingSpeed * 0.18
+                        + frame.poseCoverage * 0.16
+                )
+                return candidate(
+                    stage: .takeaway,
+                    index: index,
+                    score: score,
+                    requirementsSatisfied: requirements,
+                    timeline: timeline
+                )
+            }
+        )
+    }
+
+    private static func addressBoundaryCandidates(
+        before laterCandidates: [StageCandidate],
+        timeline: [SwingTemporalFrame]
+    ) -> [StageCandidate] {
+        guard let upperBound = laterCandidates.map(\.evidenceIndex).max(),
+              upperBound > timeline.startIndex else { return [] }
+        return retainedCandidates(
+            (timeline.startIndex..<upperBound).compactMap { index in
+                let temporal = timeline[index]
+                guard temporal.isAddressBoundary else { return nil }
+                let frame = temporal.frame
+                let bodyStable = clamp(
+                    1 - (frame.headSpeed + frame.hipSpeed) / 0.16
+                )
+                let handsStable = clamp(
+                    1 - hypot(
+                        Double(frame.handVelocity.x),
+                        Double(frame.handVelocity.y)
+                    ) / 0.30
+                )
+                let requirements = temporal.sustainedBackswing
+                let score = clamp(
+                    0.42
+                        + (temporal.sustainedBackswing ? 0.22 : 0)
+                        + bodyStable * 0.14
+                        + handsStable * 0.12
+                        + frame.poseCoverage * 0.10
+                )
+                return candidate(
+                    stage: .address,
+                    index: index,
+                    score: score,
+                    requirementsSatisfied: requirements,
+                    timeline: timeline
+                )
+            }
+        )
+    }
+
+    private static func followThroughCandidates(
+        after lowerBound: Int,
+        impact: StageCandidate,
+        timeline: [SwingTemporalFrame]
+    ) -> [StageCandidate] {
+        guard lowerBound < timeline.index(before: timeline.endIndex) else { return [] }
+        let impactHipTurn = abs(timeline[lowerBound].frame.hipAngle ?? 0)
+        return retainedCandidates(
+            ((lowerBound + 1)..<timeline.endIndex).compactMap { index in
+                let temporal = timeline[index]
+                let frame = temporal.frame
+                guard temporal.sustainedFollowThrough else { return nil }
+                let armHorizontal = closeness(
+                    frame.leadArmAngle,
+                    target: 0,
+                    tolerance: 18
+                )
+                let shaftHorizontal = frame.objectEvidence.shaft.map {
+                    closeness(
+                        horizontalAngle($0.angle),
+                        target: 0,
+                        tolerance: 18
+                    ) * clamp($0.confidence)
+                } ?? 0
+                let parallelEvidence = max(armHorizontal, shaftHorizontal)
+                let postImpactRise = ramp(
+                    -Double(frame.handVelocity.y),
+                    minimum: 0.15,
+                    maximum: 1
+                )
+                let hipTurn = abs(frame.hipAngle ?? 0)
+                let continuedTurn = hipTurn + 3 >= impactHipTurn
+                let requirements = postImpactRise >= 0.35
+                    && parallelEvidence >= 0.55
+                    && continuedTurn
+                let turnScore = ramp(hipTurn, minimum: 8, maximum: 38)
+                let score = clamp(
+                    parallelEvidence * 0.38
+                        + postImpactRise * 0.25
+                        + turnScore * 0.17
+                        + (continuedTurn ? 0.10 : 0)
+                        + frame.poseCoverage * 0.10
+                )
+                guard score >= 0.32 else { return nil }
+                return candidate(
+                    stage: .followThrough,
+                    index: index,
+                    score: score,
+                    requirementsSatisfied: requirements,
+                    timeline: timeline
+                )
+            }
+        )
+    }
+
+    private static func firstFinishPlateauCandidates(
+        after earlierCandidates: [StageCandidate],
+        timeline: [SwingTemporalFrame]
+    ) -> [StageCandidate] {
+        guard let lowerBound = earlierCandidates.map(\.evidenceIndex).min(),
+              lowerBound < timeline.index(before: timeline.endIndex) else { return [] }
+        return retainedCandidates(
+            ((lowerBound + 1)..<timeline.endIndex).compactMap { index in
+                let temporal = timeline[index]
+                guard temporal.isFinishPlateauStart else { return nil }
+                let frame = temporal.frame
+                let turn = max(
+                    ramp(abs(frame.shoulderAngle ?? 0), minimum: 5, maximum: 28),
+                    ramp(abs(frame.hipAngle ?? 0), minimum: 8, maximum: 38)
+                )
+                let score = clamp(
+                    0.55
+                        + highHandsScore(frame) * 0.15
+                        + turn * 0.15
+                        + frame.poseCoverage * 0.15
+                )
+                return candidate(
+                    stage: .finish,
+                    index: index,
+                    score: score,
+                    requirementsSatisfied: true,
+                    timeline: timeline
+                )
+            }
+        )
+    }
+
+    private static func retainedCandidates(
+        _ candidates: [StageCandidate],
+        preferLaterSourceFrame: Bool = false
+    ) -> [StageCandidate] {
+        Array(candidates.sorted {
+            if $0.score != $1.score { return $0.score > $1.score }
+            if $0.sourceFrameIndex != $1.sourceFrameIndex {
+                return preferLaterSourceFrame
+                    ? $0.sourceFrameIndex > $1.sourceFrameIndex
+                    : $0.sourceFrameIndex < $1.sourceFrameIndex
+            }
+            return preferLaterSourceFrame ? $0.time > $1.time : $0.time < $1.time
+        }.prefix(maximumCandidateCount))
+    }
+
+    private static func candidate(
+        stage: SwingStage,
+        index: Int,
+        score: Double,
+        requirementsSatisfied: Bool,
+        timeline: [SwingTemporalFrame]
+    ) -> StageCandidate {
+        let frame = timeline[index].frame
+        return StageCandidate(
+            stage: stage,
+            evidenceIndex: index,
+            sourceFrameIndex: frame.sourceFrameIndex,
+            time: frame.time,
+            score: clamp(score),
+            requirementsSatisfied: requirementsSatisfied,
+            maximumStatus: requirementsSatisfied ? .confirmed : .lowConfidence,
+            hasClubEvidence: frame.objectEvidence.shaft != nil,
+            hasBallEvidence: frame.objectEvidence.ball != nil
+                || frame.objectEvidence.stableBall != nil
+        )
+    }
+
+    private static func shoulderTurnIsIncreasing(
+        at index: Int,
+        timeline: [SwingTemporalFrame]
+    ) -> Bool {
+        guard index > timeline.startIndex,
+              let current = timeline[index].frame.shoulderAngle,
+              let previous = timeline[index - 1].frame.shoulderAngle else { return false }
+        return abs(current) + 0.5 >= abs(previous)
+    }
+
+    private static func highHandsScore(_ frame: SwingFrameEvidence) -> Double {
+        guard let handY = frame.handCenter?.y,
+              let shoulderY = SwingGeometry.center(
+                  frame.pose?.leftShoulder,
+                  frame.pose?.rightShoulder
+              )?.y else { return 0 }
+        return handY < shoulderY ? 1 : 0
+    }
+
+    private static func handsBelowShouldersScore(_ frame: SwingFrameEvidence) -> Double {
+        guard let handY = frame.handCenter?.y,
+              let shoulderY = SwingGeometry.center(
+                  frame.pose?.leftShoulder,
+                  frame.pose?.rightShoulder
+              )?.y else { return 0 }
+        return handY > shoulderY ? 1 : 0
+    }
+
+    private static func horizontalAngle(_ angle: Double) -> Double {
+        let normalized = abs(angle).truncatingRemainder(dividingBy: 180)
+        return min(normalized, 180 - normalized)
+    }
+
+    private static func closeness(
+        _ value: Double?,
+        target: Double,
+        tolerance: Double
+    ) -> Double {
+        guard let value, tolerance > 0 else { return 0 }
+        return clamp(1 - abs(value - target) / tolerance)
+    }
+
+    private static func ramp(
+        _ value: Double?,
+        minimum: Double,
+        maximum: Double
+    ) -> Double {
+        guard let value, value.isFinite, maximum > minimum else { return 0 }
+        return clamp((value - minimum) / (maximum - minimum))
+    }
+
+    private static func clamp(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(1, max(0, value))
+    }
+}
+
 struct SwingStageDetection: Equatable {
     let stage: SwingStage
     let time: Double?
@@ -1104,6 +1563,240 @@ struct SwingAnalysisResult: Equatable {
         self.detectedMarkers = detectedMarkers
         self.unresolvedStages = unresolvedStages
         self.detections = detections
+    }
+}
+
+enum ConstrainedSwingPathSolver {
+    private struct ScoredPath {
+        let candidates: [StageCandidate]
+        let total: Double
+    }
+
+    static func solve(
+        candidateSets: [StageCandidateSet],
+        timeline: [SwingTemporalFrame]
+    ) -> SwingAnalysisResult {
+        guard !timeline.isEmpty else { return unresolvedResult() }
+
+        var best: ScoredPath?
+        var secondBest: ScoredPath?
+        for candidateSet in candidateSets {
+            enumeratePaths(in: candidateSet, timeline: timeline) { path in
+                guard isLegalCompletePath(path, timeline: timeline) else { return }
+                let evidenceScore = path.reduce(0.0) { $0 + $1.score }
+                let missingPenalty = Double(
+                    path.filter { !$0.requirementsSatisfied }.count
+                ) * 0.35
+                let transitionScore = directionTransitionScore(
+                    path: path,
+                    timeline: timeline
+                )
+                let scored = ScoredPath(
+                    candidates: path,
+                    total: evidenceScore + transitionScore - missingPenalty
+                )
+                if isBetter(scored, than: best) {
+                    secondBest = best
+                    best = scored
+                } else if isBetter(scored, than: secondBest) {
+                    secondBest = scored
+                }
+            }
+        }
+
+        guard let best else { return unresolvedResult() }
+        let pathMargin = max(0, best.total - (secondBest?.total ?? best.total))
+        let detections = zip(SwingStage.allCases, best.candidates).map {
+            stage, candidate -> SwingStageDetection in
+            guard timeline.indices.contains(candidate.evidenceIndex) else {
+                return unresolvedDetection(stage: stage)
+            }
+            let frame = timeline[candidate.evidenceIndex].frame
+            var confidence = clamp(
+                candidate.score * 0.70
+                    + frame.poseCoverage * 0.20
+                    + min(0.10, pathMargin)
+            )
+            let status: SwingStageDetectionStatus
+            switch candidate.maximumStatus {
+            case .unresolved:
+                confidence = 0
+                status = .unresolved
+            case .lowConfidence:
+                confidence = min(confidence, 0.69)
+                status = .lowConfidence
+            case .confirmed:
+                status = confidence >= 0.72 ? .confirmed : .lowConfidence
+            }
+            return SwingStageDetection(
+                stage: stage,
+                time: status == .unresolved ? nil : candidate.time,
+                sourceFrameIndex: status == .unresolved
+                    ? nil
+                    : candidate.sourceFrameIndex,
+                confidence: confidence,
+                status: status,
+                hasClubEvidence: candidate.hasClubEvidence,
+                hasBallEvidence: candidate.hasBallEvidence
+            )
+        }
+        let unresolved = Set(
+            detections.filter { $0.status == .unresolved }.map(\.stage)
+        )
+        return SwingAnalysisResult(
+            detectedMarkers: detections.compactMap(\.marker),
+            unresolvedStages: unresolved,
+            detections: detections
+        )
+    }
+
+    private static func enumeratePaths(
+        in candidateSet: StageCandidateSet,
+        timeline: [SwingTemporalFrame],
+        visit: ([StageCandidate]) -> Void
+    ) {
+        let stages = SwingStage.allCases
+        func append(stageIndex: Int, path: [StageCandidate]) {
+            guard stageIndex < stages.count else {
+                visit(path)
+                return
+            }
+            let stage = stages[stageIndex]
+            for candidate in candidateSet.candidates(for: stage) {
+                guard candidate.stage == stage,
+                      directionMatches(
+                          candidate: candidate,
+                          stage: stage,
+                          timeline: timeline
+                      ) else { continue }
+                if let previous = path.last {
+                    guard previous.sourceFrameIndex < candidate.sourceFrameIndex,
+                          previous.time < candidate.time else { continue }
+                }
+                append(stageIndex: stageIndex + 1, path: path + [candidate])
+            }
+        }
+        append(stageIndex: 0, path: [])
+    }
+
+    private static func directionMatches(
+        candidate: StageCandidate,
+        stage: SwingStage,
+        timeline: [SwingTemporalFrame]
+    ) -> Bool {
+        guard timeline.indices.contains(candidate.evidenceIndex) else { return false }
+        let temporal = timeline[candidate.evidenceIndex]
+        switch stage {
+        case .address:
+            return temporal.isAddressBoundary
+        case .takeaway, .leadArmParallelBackswing:
+            return temporal.sustainedBackswing
+        case .top:
+            return temporal.isTopPlateauEnd && temporal.sustainedDownswing
+        case .leadArmParallelDownswing, .impact:
+            return temporal.sustainedDownswing
+        case .followThrough:
+            return temporal.sustainedFollowThrough
+        case .finish:
+            return temporal.isFinishPlateauStart
+        }
+    }
+
+    private static func isLegalCompletePath(
+        _ path: [StageCandidate],
+        timeline: [SwingTemporalFrame]
+    ) -> Bool {
+        guard path.count == SwingStage.allCases.count,
+              zip(path, path.dropFirst()).allSatisfy({
+                  $0.sourceFrameIndex < $1.sourceFrameIndex && $0.time < $1.time
+              }),
+              let first = path.first,
+              let last = path.last else { return false }
+        let swingDuration = max(0.001, last.time - first.time)
+        let normalizedGaps = zip(path, path.dropFirst()).map {
+            ($1.time - $0.time) / swingDuration
+        }
+        guard normalizedGaps.allSatisfy({ (0.01...0.45).contains($0) }) else {
+            return false
+        }
+        return hasRequiredDirectionTransitions(path: path, timeline: timeline)
+    }
+
+    private static func hasRequiredDirectionTransitions(
+        path: [StageCandidate],
+        timeline: [SwingTemporalFrame]
+    ) -> Bool {
+        guard path.allSatisfy({ timeline.indices.contains($0.evidenceIndex) }) else {
+            return false
+        }
+        let frames = path.map { timeline[$0.evidenceIndex] }
+        return frames[0].isAddressBoundary
+            && frames[1].sustainedBackswing
+            && frames[2].sustainedBackswing
+            && frames[3].isTopPlateauEnd
+            && frames[3].sustainedDownswing
+            && frames[4].sustainedDownswing
+            && frames[5].sustainedDownswing
+            && frames[6].sustainedFollowThrough
+            && path[6].evidenceIndex > path[5].evidenceIndex
+            && frames[7].isFinishPlateauStart
+    }
+
+    private static func directionTransitionScore(
+        path: [StageCandidate],
+        timeline: [SwingTemporalFrame]
+    ) -> Double {
+        guard hasRequiredDirectionTransitions(path: path, timeline: timeline) else {
+            return -Double.greatestFiniteMagnitude
+        }
+        return 0.90
+    }
+
+    private static func isBetter(
+        _ candidate: ScoredPath,
+        than incumbent: ScoredPath?
+    ) -> Bool {
+        guard let incumbent else { return true }
+        if candidate.total != incumbent.total {
+            return candidate.total > incumbent.total
+        }
+        return lexicographicallyEarlier(candidate.candidates, incumbent.candidates)
+    }
+
+    private static func lexicographicallyEarlier(
+        _ first: [StageCandidate],
+        _ second: [StageCandidate]
+    ) -> Bool {
+        for (lhs, rhs) in zip(first, second) where lhs.sourceFrameIndex != rhs.sourceFrameIndex {
+            if lhs.stage == .top {
+                return lhs.sourceFrameIndex > rhs.sourceFrameIndex
+            }
+            return lhs.sourceFrameIndex < rhs.sourceFrameIndex
+        }
+        return false
+    }
+
+    private static func unresolvedDetection(stage: SwingStage) -> SwingStageDetection {
+        SwingStageDetection(
+            stage: stage,
+            time: nil,
+            confidence: 0,
+            status: .unresolved
+        )
+    }
+
+    private static func unresolvedResult() -> SwingAnalysisResult {
+        let detections = SwingStage.allCases.map(unresolvedDetection)
+        return SwingAnalysisResult(
+            detectedMarkers: [],
+            unresolvedStages: Set(SwingStage.allCases),
+            detections: detections
+        )
+    }
+
+    private static func clamp(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(1, max(0, value))
     }
 }
 
@@ -1442,7 +2135,18 @@ enum SwingStageDetector {
     private static let directionChangeThreshold: CGFloat = 0.015
 
     static func detect(frames: [SwingFrameSample]) -> SwingAnalysisResult {
-        OrderedStageSolver.solve(evidence: SwingFeatureExtractor.extract(frames: frames))
+        let evidence = SwingFeatureExtractor.extract(frames: frames)
+        let timeline = SwingEvidenceTimeline.build(from: evidence)
+        let candidateSets = ImpactCorridorResolver.candidates(in: timeline).map {
+            BidirectionalStageCandidateResolver.candidates(
+                timeline: timeline,
+                impact: $0
+            )
+        }
+        return ConstrainedSwingPathSolver.solve(
+            candidateSets: candidateSets,
+            timeline: timeline
+        )
     }
 
     static func detect(samples rawSamples: [SwingPoseSample]) -> SwingAnalysisResult {

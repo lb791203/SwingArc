@@ -28,6 +28,23 @@ struct MultiJointStageDetectorSmoke {
             )
         }
         precondition(SwingStageDetector.detect(samples: occluded).detections.allSatisfy { $0.status != .confirmed })
+
+        // The frame-based production entry point must not fall back to the
+        // ordered solver and invent a complete path when club/ball and robust
+        // temporal boundaries are absent.
+        let incompleteFrames = samples.enumerated().map { index, sample in
+            SwingFrameSample(
+                sourceFrameIndex: 1_000 + index,
+                time: sample.time,
+                pose: sample,
+                objectEvidence: .empty
+            )
+        }
+        let incompleteResult = SwingStageDetector.detect(frames: incompleteFrames)
+        precondition(incompleteResult.unresolvedStages == Set(SwingStage.allCases))
+        precondition(incompleteResult.detections.allSatisfy {
+            $0.status == .unresolved && $0.sourceFrameIndex == nil
+        })
     }
 
     private static func sample(_ time: Double, _ wristY: CGFloat) -> SwingPoseSample {
