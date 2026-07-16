@@ -4,7 +4,14 @@ import Foundation
 struct SwingTemporalEvidenceSmoke {
     static func main() {
         verifyFrameRateInvariantBoundaries()
+        verifyBoundaryAdjacentNoiseDoesNotMoveBoundaries()
         verifySupportingTemporalEvidence()
+    }
+
+    private enum BoundaryNoise: CaseIterable {
+        case address
+        case top
+        case finish
     }
 
     private static func verifyFrameRateInvariantBoundaries() {
@@ -74,16 +81,61 @@ struct SwingTemporalEvidenceSmoke {
         )
     }
 
-    private static func temporalFixture(fps: Int) -> [SwingFrameEvidence] {
+    private static func verifyBoundaryAdjacentNoiseDoesNotMoveBoundaries() {
+        for fps in [30, 120] {
+            for noise in BoundaryNoise.allCases {
+                let evidence = temporalFixture(fps: fps, boundaryNoise: noise)
+                let timeline = SwingEvidenceTimeline.build(from: evidence)
+
+                let address = timeline.last(where: \.isAddressBoundary)?.frame
+                let top = timeline.first(where: \.isTopPlateauEnd)?.frame
+                let finish = timeline.first(where: \.isFinishPlateauStart)?.frame
+
+                precondition(
+                    address?.time == 1.00,
+                    "\(fps) FPS \(noise) noise moved address to \(String(describing: address?.time))"
+                )
+                precondition(
+                    top?.time == 2.50,
+                    "\(fps) FPS \(noise) noise moved top to \(String(describing: top?.time))"
+                )
+                precondition(
+                    finish?.time == 4.25,
+                    "\(fps) FPS \(noise) noise moved finish to \(String(describing: finish?.time))"
+                )
+
+                for boundary in [address, top, finish] {
+                    let source = evidence.first { $0.time == boundary?.time }
+                    precondition(boundary?.sourceFrameIndex == source?.sourceFrameIndex)
+                }
+            }
+        }
+    }
+
+    private static func temporalFixture(
+        fps: Int,
+        boundaryNoise: BoundaryNoise? = nil
+    ) -> [SwingFrameEvidence] {
         let duration = 5.0
         let regularTimes = (0...Int(duration * Double(fps))).map { Double($0) / Double(fps) }
         let requiredTimes = [1.00, 2.50, 2.60, 4.25, 4.35]
         let times = Array(Set(regularTimes + requiredTimes)).sorted()
+        let addressNoiseTime = times.first { $0 > 1.00 }
+        let topNoiseTime = times.first { $0 > 2.50 }
 
         return times.enumerated().map { ordinal, time in
             let velocityY: CGFloat
             let bodySpeed: Double
-            if time <= 1.00 {
+            if boundaryNoise == .address, time == addressNoiseTime {
+                velocityY = 0
+                bodySpeed = 0.20
+            } else if boundaryNoise == .top, time == topNoiseTime {
+                velocityY = 0
+                bodySpeed = 0.20
+            } else if boundaryNoise == .finish, time == 4.25 {
+                velocityY = 0.30
+                bodySpeed = 0.20
+            } else if time <= 1.00 {
                 velocityY = 0
                 bodySpeed = 0.01
             } else if time < 2.30 {

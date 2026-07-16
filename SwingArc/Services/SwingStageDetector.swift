@@ -336,36 +336,36 @@ enum SwingEvidenceTimeline {
                 evidence: evidence
             )
         }
-        let stableFuture = evidence.indices.map {
-            stabilityVote(
-                indices: timedIndices(startingAt: $0, duration: stableWindow, evidence: evidence),
-                duration: stableWindow,
-                evidence: evidence
-            )
-        }
-
         let addressIndex = evidence.indices.first { index in
-            guard index < evidence.index(before: evidence.endIndex) else { return false }
             return stablePast[index]
                 && rawDirections[index] == .stable
-                && rawDirections[index + 1] != .stable
-                && futureDirections[index] == .backswing
+                && sustainedDirectionBegins(
+                    after: index,
+                    direction: .backswing,
+                    rawDirections: rawDirections,
+                    evidence: evidence
+                )
         }
         let topIndex = evidence.indices.first { index in
-            guard index > (addressIndex ?? -1),
-                  index < evidence.index(before: evidence.endIndex) else { return false }
+            guard index > (addressIndex ?? -1) else { return false }
             return rawDirections[index] == .stable
-                && rawDirections[index + 1] != .stable
                 && pastDirections[index] != .downswing
-                && futureDirections[index] == .downswing
+                && sustainedDirectionBegins(
+                    after: index,
+                    direction: .downswing,
+                    rawDirections: rawDirections,
+                    evidence: evidence
+                )
         }
         let finishIndex = evidence.indices.first { index in
-            guard index > evidence.startIndex,
-                  index > (topIndex ?? addressIndex ?? -1) else { return false }
-            return rawDirections[index] == .stable
-                && rawDirections[index - 1] != .stable
-                && stableFuture[index]
-                && pastDirections[index] == .backswing
+            guard index > (topIndex ?? addressIndex ?? -1),
+                  pastDirections[index] == .backswing else { return false }
+            return sustainedStabilityBegins(
+                at: index,
+                pastDirection: .backswing,
+                rawDirections: rawDirections,
+                evidence: evidence
+            )
         }
 
         return evidence.indices.map { index in
@@ -440,22 +440,77 @@ enum SwingEvidenceTimeline {
         guard windowSpans(indices, duration: duration, evidence: evidence) else { return false }
         let validFrames = indices.compactMap { index -> SwingFrameEvidence? in
             let frame = evidence[index]
-            guard frame.handCenter != nil,
-                  frame.hipCenter != nil,
-                  frame.pose?.head != nil,
-                  frame.headSpeed.isFinite,
-                  frame.hipSpeed.isFinite,
-                  frame.handVelocity.x.isFinite,
-                  frame.handVelocity.y.isFinite else { return nil }
-            return frame
+            return frameStability(frame) == nil ? nil : frame
         }
         guard !validFrames.isEmpty else { return false }
-        let stableCount = validFrames.filter { frame in
-            frame.headSpeed <= bodyStabilityThreshold
-                && frame.hipSpeed <= bodyStabilityThreshold
-                && hypot(Double(frame.handVelocity.x), Double(frame.handVelocity.y)) <= handStabilityThreshold
-        }.count
+        let stableCount = validFrames.filter { frameStability($0) == true }.count
         return Double(stableCount) / Double(validFrames.count) >= stableVoteRatio
+    }
+
+    private static func sustainedDirectionBegins(
+        after index: Int,
+        direction: SwingMotionDirection,
+        rawDirections: [SwingMotionDirection?],
+        evidence: [SwingFrameEvidence]
+    ) -> Bool {
+        let transitionIndices = Array(
+            timedIndices(startingAt: index, duration: directionWindow, evidence: evidence)
+                .dropFirst()
+        )
+        var skippedOutlier = false
+        for futureIndex in transitionIndices {
+            if rawDirections[futureIndex] == direction {
+                let sustainedIndices = timedIndices(
+                    startingAt: futureIndex,
+                    duration: directionWindow,
+                    evidence: evidence
+                )
+                return directionVote(
+                    indices: sustainedIndices,
+                    duration: directionWindow,
+                    evidence: evidence
+                ) == direction
+            }
+            guard !skippedOutlier,
+                  frameStability(evidence[futureIndex]) == false else { return false }
+            skippedOutlier = true
+        }
+        return false
+    }
+
+    private static func sustainedStabilityBegins(
+        at index: Int,
+        pastDirection: SwingMotionDirection,
+        rawDirections: [SwingMotionDirection?],
+        evidence: [SwingFrameEvidence]
+    ) -> Bool {
+        let indices = timedIndices(startingAt: index, duration: stableWindow, evidence: evidence)
+        guard stabilityVote(indices: indices, duration: stableWindow, evidence: evidence) else {
+            return false
+        }
+
+        var skippedOutlier = false
+        for futureIndex in indices {
+            if frameStability(evidence[futureIndex]) == true { return true }
+            guard !skippedOutlier,
+                  rawDirections[futureIndex] != pastDirection else { return false }
+            skippedOutlier = true
+        }
+        return false
+    }
+
+    private static func frameStability(_ frame: SwingFrameEvidence) -> Bool? {
+        guard frame.handCenter != nil,
+              frame.hipCenter != nil,
+              frame.pose?.head != nil,
+              frame.headSpeed.isFinite,
+              frame.hipSpeed.isFinite,
+              frame.handVelocity.x.isFinite,
+              frame.handVelocity.y.isFinite else { return nil }
+        return frame.headSpeed <= bodyStabilityThreshold
+            && frame.hipSpeed <= bodyStabilityThreshold
+            && hypot(Double(frame.handVelocity.x), Double(frame.handVelocity.y))
+                <= handStabilityThreshold
     }
 
     private static func frameDirection(_ frame: SwingFrameEvidence) -> SwingMotionDirection? {
