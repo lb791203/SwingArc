@@ -10,6 +10,24 @@ struct SwingAnalysisResult: Equatable {
     let unresolvedStages: Set<SwingStage>
 }
 
+enum AnalysisFailure: Equatable {
+    case noVideo
+    case invalidDuration
+    case insufficientPoseEvidence
+}
+
+enum SwingAnalysisState: Equatable {
+    case idle
+    case scanning(progress: Double)
+    case completed(SwingAnalysisResult)
+    case failed(AnalysisFailure)
+
+    var hasCompletedResult: Bool {
+        if case .completed = self { return true }
+        return false
+    }
+}
+
 enum SwingStageDetector {
     private static let finishStabilityThreshold: CGFloat = 0.04
 

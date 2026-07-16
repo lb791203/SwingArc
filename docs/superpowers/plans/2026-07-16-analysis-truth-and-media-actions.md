@@ -132,7 +132,7 @@ git commit -m "feat: add evidence-backed P1-P8 stage detector"
 - 输入：任务 1 的 `SwingStageDetector.detect(samples:)` 和 AVAsset 视频帧。
 - 输出：`@Published var analysisResult: SwingAnalysisResult?`、`@Published var analysisFailure: AnalysisFailure?`、`@Published var scanProgress: Double`。
 
-- [ ] **步骤 1：写会话空结果测试**
+- [x] **步骤 1：写会话空结果测试**
 
 ```swift
 let emptyResult = SwingStageDetector.detect(samples: [])
@@ -140,7 +140,7 @@ precondition(emptyResult.detectedMarkers.isEmpty)
 precondition(emptyResult.unresolvedStages.count == 8)
 ```
 
-- [ ] **步骤 2：先确认测试失败**
+- [x] **步骤 2：先确认测试失败**
 
 ```bash
 swiftc SwingArc/Models/DrawingModels.swift SwingArc/Services/SwingStageDetector.swift Tests/SwingAnalysisSessionSmoke.swift -o /tmp/analysis-session-test && /tmp/analysis-session-test
@@ -148,7 +148,7 @@ swiftc SwingArc/Models/DrawingModels.swift SwingArc/Services/SwingStageDetector.
 
 预期：任务 1 尚未完成前失败。
 
-- [ ] **步骤 3：实现串行 Vision 边界**
+- [x] **步骤 3：实现串行 Vision 边界**
 
 ```swift
 private let poseQueue = DispatchQueue(label: "com.liangbo.swingarc.pose", qos: .userInitiated)
@@ -163,7 +163,7 @@ private func detectPoseSerially(_ image: CGImage, completion: @escaping (PoseEst
 
 当前帧识别与 AI 扫描都经过该边界。扫描期间停止 display link 再投递实时识别；扫描只收集 `(time, pose)` 样本，交给任务 1 的识别器。删除 `autoDetectSwingStages` 中按 0.08、0.22、0.45 等比例补点的分支；没有可靠体态则设置 `.insufficientPoseEvidence`。
 
-- [ ] **步骤 4：验证会话状态**
+- [x] **步骤 4：验证会话状态**
 
 ```bash
 swiftc SwingArc/Models/DrawingModels.swift SwingArc/Services/SwingStageDetector.swift Tests/SwingAnalysisSessionSmoke.swift -o /tmp/analysis-session-test && /tmp/analysis-session-test
@@ -171,7 +171,7 @@ swiftc SwingArc/Models/DrawingModels.swift SwingArc/Services/SwingStageDetector.
 
 预期：退出码为 0，测试不包含任何默认时长比例。
 
-- [ ] **步骤 5：编译真机架构**
+- [x] **步骤 5：编译真机架构**
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild -project /Users/liangbo/Documents/SwingArcProject/SwingArcProject.xcodeproj -scheme SwingArcProject -destination 'id=ECE6D973-A2C0-50A1-B4F1-AFD6ACA2ACF3' build CODE_SIGNING_ALLOWED=NO
@@ -179,7 +179,7 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild -projec
 
 预期：`BUILD SUCCEEDED`。
 
-- [ ] **步骤 6：提交本任务**
+- [x] **步骤 6：提交本任务**
 
 ```bash
 git add SwingArc/Services/VisionPoseDetector.swift SwingArc/Views/CustomVideoPlayer.swift Tests/SwingAnalysisSessionSmoke.swift

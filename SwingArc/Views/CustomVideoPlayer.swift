@@ -14,6 +14,9 @@ class VideoPlaybackManager: ObservableObject {
     @Published var isProcessing = false
     @Published var isScanning = false
     @Published var scanProgress: Double = 0.0
+    @Published private(set) var analysisState: SwingAnalysisState = .idle
+    @Published private(set) var analysisResult: SwingAnalysisResult? = nil
+    @Published private(set) var analysisFailure: AnalysisFailure? = nil
     
     var player: AVPlayer?
     private var videoOutput: AVPlayerItemVideoOutput?
@@ -21,6 +24,7 @@ class VideoPlaybackManager: ObservableObject {
     private var timeObserver: Any?
     
     private let poseDetector = VisionPoseDetector()
+    private let poseQueue = DispatchQueue(label: "com.liangbo.swingarc.pose", qos: .userInitiated)
     private var videoOrientation: CGImagePropertyOrientation = .up
     
     init() {}
@@ -35,6 +39,10 @@ class VideoPlaybackManager: ObservableObject {
         isPlaying = false
         stopDisplayLink()
         removeObservers()
+        analysisState = .idle
+        analysisResult = nil
+        analysisFailure = nil
+        scanProgress = 0
         
         let asset = AVAsset(url: url)
         
@@ -158,7 +166,7 @@ class VideoPlaybackManager: ObservableObject {
         let time = currentItem.currentTime()
         let asset = currentItem.asset
         
-        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+        poseQueue.async { [weak self] in
             guard let self = self else { return }
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
@@ -208,7 +216,7 @@ class VideoPlaybackManager: ObservableObject {
     
     @objc private func displayLinkDidFire() {
         // 只有在视频播放期间才实时刷新姿态估计
-        if isPlaying {
+        if isPlaying && !isScanning {
             processCurrentFramePose()
         }
     }
@@ -217,7 +225,8 @@ class VideoPlaybackManager: ObservableObject {
     func processCurrentFramePose() {
         guard let player = player,
               let currentItem = player.currentItem,
-              let videoOutput = videoOutput else { return }
+              let videoOutput = videoOutput,
+              !isScanning else { return }
         
         let itemTime = currentItem.currentTime()
         
@@ -225,11 +234,12 @@ class VideoPlaybackManager: ObservableObject {
         if videoOutput.hasNewPixelBuffer(forItemTime: itemTime) {
             var presentationItemTimeForDisplay = CMTime.zero
             if let pixelBuffer = videoOutput.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: &presentationItemTimeForDisplay) {
-                // 运行姿态检测 (在后台线程执行，避免阻塞主线程渲染)
-                DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+                let orientation = videoOrientation
+                // Vision request 只能在同一串行队列中使用，避免实时帧与 AI 扫描竞争。
+                poseQueue.async { [weak self] in
                     guard let self = self else { return }
                     
-                    if let result = self.poseDetector.detectPose(in: pixelBuffer, orientation: self.videoOrientation) {
+                    if let result = self.poseDetector.detectPose(in: pixelBuffer, orientation: orientation) {
                         DispatchQueue.main.async {
                             self.currentPose = result
                         }
@@ -249,25 +259,28 @@ class VideoPlaybackManager: ObservableObject {
         player = nil
     }
     
-    /// 自动分析高尔夫球挥杆并识别关键阶段（P1 准备、P2 起杆、P4 顶点、P6 击球、P7 送杆、P8 收杆）
-    func autoDetectSwingStages(completion: @escaping ([KeyframeMarker]) -> Void) {
+    /// 扫描整段视频，只返回有 Vision 体态证据支持的 P1 至 P8。
+    func analyzeSwing(completion: @escaping (SwingAnalysisResult) -> Void) {
         guard let player = player,
               let currentItem = player.currentItem else {
-            completion([])
+            finishAnalysis(with: .noVideo, completion: completion)
             return
         }
         
         let asset = currentItem.asset
         let durationSeconds = asset.duration.seconds
         guard durationSeconds > 0 && !durationSeconds.isNaN else {
-            completion([])
+            finishAnalysis(with: .invalidDuration, completion: completion)
             return
         }
         
-        self.isScanning = true
-        self.scanProgress = 0.0
+        isScanning = true
+        scanProgress = 0.0
+        analysisResult = nil
+        analysisFailure = nil
+        analysisState = .scanning(progress: 0)
         
-        // 1. 进行后台像素帧抽取与 AI 姿态检测
+        // 逐帧、顺序提取：AVAssetImageGenerator 和 Vision 都不与实时播放共享并发请求。
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             
@@ -276,116 +289,53 @@ class VideoPlaybackManager: ObservableObject {
             generator.requestedTimeToleranceBefore = .zero
             generator.requestedTimeToleranceAfter = .zero
             
-            // 我们在视频中抽取 60 个时间样本（提升密集度，解决捕捉不到 P4 和 P6 的问题）
-            let sampleCount = 60
-            var times: [CMTime] = []
-            for i in 0..<sampleCount {
-                let timeVal = Double(i) * durationSeconds / Double(sampleCount - 1)
-                times.append(CMTime(seconds: timeVal, preferredTimescale: 600))
-            }
-            
-            var detectedPoses: [(time: Double, pose: PoseEstimationResult)] = []
-            let group = DispatchGroup()
-            
-            for time in times {
-                group.enter()
-                generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: time)]) { [weak self] _, cgImage, _, result, _ in
-                    defer { group.leave() }
-                    guard let self = self, result == .succeeded, let cgImage = cgImage else { return }
-                    
-                    // 用 VisionPoseDetector 运算姿态
-                    if let pose = self.poseDetector.detectPose(in: cgImage, orientation: .up) {
-                        detectedPoses.append((time: time.seconds, pose: pose))
+            let sampleCount = 90
+            var poseSamples: [SwingPoseSample] = []
+            for index in 0..<sampleCount {
+                let time = CMTime(seconds: Double(index) * durationSeconds / Double(sampleCount - 1), preferredTimescale: 600)
+                autoreleasepool {
+                    guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else { return }
+                    let pose = self.poseQueue.sync {
+                        self.poseDetector.detectPose(in: cgImage, orientation: .up)
                     }
-                    
-                    // 更新进度
-                    DispatchQueue.main.async {
-                        self.scanProgress = Double(detectedPoses.count) / Double(sampleCount)
+                    if let wristY = pose?.point(for: "rightWrist")?.y {
+                        poseSamples.append(SwingPoseSample(time: time.seconds, wristY: wristY))
                     }
                 }
+                let progress = Double(index + 1) / Double(sampleCount)
+                DispatchQueue.main.async {
+                    self.scanProgress = progress
+                    self.analysisState = .scanning(progress: progress)
+                }
             }
-            
-            group.wait()
-            
-            // 2. 核心分析识别算法：结合人体运动学特征
-            // 按时间排序
-            detectedPoses.sort(by: { $0.time < $1.time })
-            
-            // 如果成功抓取到了关节点，则使用骨骼跟踪拟合；否则使用基于时间段的拟合算法作为坚实的兜底
-            var markers: [KeyframeMarker] = []
-            
-            if detectedPoses.count >= 8 {
-                // 找到双手/手腕 (wrist) 相对身体中轴线的位置
-                // 1. P1 准备姿势 (Address): 前 25% 时间内手部最低点 (y 轴坐标最大值，由于 y=0.0 为顶部，y=1.0 为底部)
-                let p1Range = detectedPoses.filter { $0.time <= durationSeconds * 0.25 }
-                let p1Best = p1Range.max(by: { a, b in
-                    let ay = a.pose.point(for: "rightWrist")?.y ?? 1.0
-                    let by = b.pose.point(for: "rightWrist")?.y ?? 1.0
-                    return ay < by
-                })
-                let p1Time = p1Best?.time ?? (durationSeconds * 0.08)
-                
-                // 2. P4 挥杆顶点 (Top of backswing): 在 P1 之后，20% - 60% 范围内，手部最高点 (y 轴坐标最小值)
-                let p4Range = detectedPoses.filter { $0.time > p1Time && $0.time <= durationSeconds * 0.6 }
-                let p4Best = p4Range.min(by: { a, b in
-                    let ay = a.pose.point(for: "rightWrist")?.y ?? 1.0
-                    let by = b.pose.point(for: "rightWrist")?.y ?? 1.0
-                    return ay < by
-                })
-                let p4Time = p4Best?.time ?? (durationSeconds * 0.42)
-                
-                // 3. P2 起杆上拉 (Takeaway): P1 和 P4 的中点
-                let p2Time = (p1Time + p4Time) / 2.0
-                
-                // 4. P6 击球刹那 (Impact): 在 P4 之后，手部最低点且速度最大（在此处手部 y 再次达到局部极大值）
-                let p6Range = detectedPoses.filter { $0.time > p4Time && $0.time <= durationSeconds * 0.85 }
-                let p6Best = p6Range.max(by: { a, b in
-                    let ay = a.pose.point(for: "rightWrist")?.y ?? 1.0
-                    let by = b.pose.point(for: "rightWrist")?.y ?? 1.0
-                    return ay < by
-                })
-                let p6Time = p6Best?.time ?? (p4Time + (durationSeconds - p4Time) * 0.4)
-                
-                // 5. P7 送杆 (Follow-Through): 在 P6 之后，最后 80% - 90% 时间段内，当手腕再次高举并相对静止时
-                let p7Range = detectedPoses.filter { $0.time > p6Time && $0.time <= durationSeconds * 0.92 }
-                let p7Best = p7Range.min(by: { a, b in
-                    let ay = a.pose.point(for: "rightWrist")?.y ?? 1.0
-                    let by = b.pose.point(for: "rightWrist")?.y ?? 1.0
-                    return ay < by
-                })
-                let p7Time = p7Best?.time ?? (durationSeconds * 0.85)
-                
-                // 6. P8 收杆 (Finish): 最后的稳定阶段
-                let p8Time = durationSeconds * 0.95
-                
-                markers = [
-                    KeyframeMarker(time: p1Time, stage: .address),
-                    KeyframeMarker(time: p2Time, stage: .takeaway),
-                    KeyframeMarker(time: p4Time, stage: .top),
-                    KeyframeMarker(time: p4Time + (p6Time - p4Time) * 0.5, stage: .downswing),
-                    KeyframeMarker(time: p6Time, stage: .impact),
-                    KeyframeMarker(time: p7Time, stage: .followThrough),
-                    KeyframeMarker(time: p8Time, stage: .finish)
-                ]
-            } else {
-                // 兜底拟合算法 (依据标准挥杆时间比率分配)
-                markers = [
-                    KeyframeMarker(time: durationSeconds * 0.08, stage: .address),
-                    KeyframeMarker(time: durationSeconds * 0.22, stage: .takeaway),
-                    KeyframeMarker(time: durationSeconds * 0.45, stage: .top),
-                    KeyframeMarker(time: durationSeconds * 0.58, stage: .downswing),
-                    KeyframeMarker(time: durationSeconds * 0.70, stage: .impact),
-                    KeyframeMarker(time: durationSeconds * 0.85, stage: .followThrough),
-                    KeyframeMarker(time: durationSeconds * 0.95, stage: .finish)
-                ]
-            }
-            
-            // 3. 返回结果给主线程
+
+            let result = SwingStageDetector.detect(samples: poseSamples)
             DispatchQueue.main.async {
                 self.isScanning = false
-                completion(markers)
+                self.scanProgress = 1
+                self.analysisResult = result
+                if result.detectedMarkers.isEmpty {
+                    self.analysisFailure = .insufficientPoseEvidence
+                    self.analysisState = .failed(.insufficientPoseEvidence)
+                } else {
+                    self.analysisState = .completed(result)
+                }
+                completion(result)
             }
         }
+    }
+
+    /// 兼容旧界面调用；新界面应使用 analyzeSwing 读取完整状态。
+    func autoDetectSwingStages(completion: @escaping ([KeyframeMarker]) -> Void) {
+        analyzeSwing { completion($0.detectedMarkers) }
+    }
+
+    private func finishAnalysis(with failure: AnalysisFailure, completion: @escaping (SwingAnalysisResult) -> Void) {
+        let result = SwingAnalysisResult(detectedMarkers: [], unresolvedStages: Set(SwingStage.allCases))
+        analysisResult = result
+        analysisFailure = failure
+        analysisState = .failed(failure)
+        completion(result)
     }
 }
 
