@@ -32,6 +32,64 @@
 | SwingArc/Views/DrawingOverlay.swift | Existing geometry/magnifier with neutral presentation. |
 | SwingArcTests/AnalysisThemeTests.swift | Pure UI state tests after the Xcode target exists. |
 
+## Task 0: Create the iOS project and test targets
+
+**Files:**
+- Create: SwingArc.xcodeproj through Xcode Beta’s iOS App template.
+- Create: SwingArcTests/SwingArcTests.swift.
+- Create: SwingArcUITests/SwingArcUITests.swift.
+
+**Interfaces:**
+- Produces the SwingArc app scheme, a unit-test target and a UI-test target with deployment target iOS 17.0.
+- Consumed by all verification commands in the following tasks.
+
+- [ ] **Step 1: Create the target without replacing repository source**
+
+In Xcode Beta, create an iOS App named SwingArc in this repository, with SwiftUI, Swift, iOS 17.0 deployment target, and the Unit Testing and UI Testing target options selected. Use the existing SwingArc folder as the source folder. Do not use Xcode’s generated ContentView.swift or SwingArcApp.swift: delete the generated duplicates from the target before adding the existing files.
+
+- [ ] **Step 2: Set target privacy descriptions**
+
+Add these Info target properties:
+
+~~~text
+NSCameraUsageDescription = 需要访问相机以录制分析视频。
+NSPhotoLibraryUsageDescription = 需要访问相册以导入分析视频。
+NSPhotoLibraryAddUsageDescription = 需要将导出的视频保存到相册。
+~~~
+
+- [ ] **Step 3: Write a first failing test**
+
+~~~swift
+import XCTest
+@testable import SwingArc
+
+final class SwingArcTests: XCTestCase {
+    func testThemeCompilesAfterTargetSetup() {
+        XCTAssertNotNil(AnalysisTheme.self)
+    }
+}
+~~~
+
+- [ ] **Step 4: Verify the test is initially red, then add the first theme file**
+
+Run with a temporary developer directory:
+
+~~~bash
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+xcodebuild test -project SwingArc.xcodeproj -scheme SwingArc \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:SwingArcTests/SwingArcTests/testThemeCompilesAfterTargetSetup
+~~~
+
+Expected before Task 1: compile failure because AnalysisTheme is not defined. Expected after Task 1: test passes.
+
+- [ ] **Step 5: Commit target configuration**
+
+~~~bash
+git add SwingArc.xcodeproj SwingArcTests SwingArcUITests
+git commit -m "build: add SwingArc iOS app and test targets"
+~~~
+
 ## Task 1: Establish the neutral visual system and workbench state
 
 **Files:**
