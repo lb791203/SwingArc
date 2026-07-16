@@ -3,6 +3,24 @@ import Foundation
 @main
 struct BidirectionalStageSolverSmoke {
     static func main() {
+        if let scenario = CommandLine.arguments.dropFirst().first {
+            switch scenario {
+            case "missing-p2":
+                verifyMissingTakeawayShaftKeepsPath()
+            case "transition-quality":
+                verifyObservedTransitionQualityRanksPaths()
+            case "counter-rotating-p7":
+                verifyCounterRotatingFollowThroughCannotConfirm()
+            case "chest-continuation":
+                verifyChestContinuationIsRequired()
+            case "impact-anchor":
+                verifyDeclaredImpactAnchorCannotDiverge()
+            default:
+                preconditionFailure("unknown scenario: \(scenario)")
+            }
+            return
+        }
+
         let evidence = fixture(includeImpactObjects: true)
         let timeline = SwingEvidenceTimeline.build(from: evidence)
         precondition(timeline.first(where: \.isAddressBoundary)?.frame.sourceFrameIndex == 120)
@@ -108,6 +126,108 @@ struct BidirectionalStageSolverSmoke {
             )
         }
         precondition(detection(.top, in: solve(timeline: noTopTimeline)).status == .unresolved)
+
+        verifyMissingTakeawayShaftKeepsPath()
+        verifyObservedTransitionQualityRanksPaths()
+        verifyCounterRotatingFollowThroughCannotConfirm()
+        verifyChestContinuationIsRequired()
+        verifyDeclaredImpactAnchorCannotDiverge()
+    }
+
+    private static func verifyMissingTakeawayShaftKeepsPath() {
+        let evidence = fixture(
+            includeImpactObjects: true,
+            includeTakeawayShaft: false
+        )
+        let timeline = SwingEvidenceTimeline.build(from: evidence)
+        let candidateSets = ImpactCorridorResolver.candidates(in: timeline).map {
+            BidirectionalStageCandidateResolver.candidates(timeline: timeline, impact: $0)
+        }
+        let centered = candidateSets.first { $0.impact.sourceFrameIndex == 300 }!
+        let bodyOnlyP2 = centered.candidates(for: .takeaway)
+        precondition(!bodyOnlyP2.isEmpty)
+        precondition(bodyOnlyP2.allSatisfy {
+            !$0.requirementsSatisfied && $0.maximumStatus == .lowConfidence
+        })
+
+        let result = ConstrainedSwingPathSolver.solve(
+            candidateSets: candidateSets,
+            timeline: timeline
+        )
+        precondition(result.detections.allSatisfy { $0.sourceFrameIndex != nil })
+        let takeaway = detection(.takeaway, in: result)
+        precondition(takeaway.status == .lowConfidence)
+        precondition(!takeaway.hasClubEvidence)
+        precondition(result.detections.filter { $0.stage != .takeaway }.allSatisfy {
+            $0.status != .unresolved
+        })
+    }
+
+    private static func verifyObservedTransitionQualityRanksPaths() {
+        let fixture = transitionQualityFixture()
+        let result = ConstrainedSwingPathSolver.solve(
+            candidateSets: [fixture.marginal, fixture.strong],
+            timeline: fixture.timeline
+        )
+        precondition(
+            detection(.impact, in: result).sourceFrameIndex == 1_010,
+            "equal-evidence paths must be ranked by observed transition support"
+        )
+    }
+
+    private static func verifyCounterRotatingFollowThroughCannotConfirm() {
+        let timeline = SwingEvidenceTimeline.build(from: fixture(
+            includeImpactObjects: true,
+            counterRotateAtFollowThrough: true
+        ))
+        let centered = candidateSet(impactFrame: 300, timeline: timeline)
+        let p7 = centered.candidates(for: .followThrough).filter {
+            (323...325).contains($0.sourceFrameIndex)
+        }
+        precondition(!p7.isEmpty)
+        precondition(p7.allSatisfy {
+            !$0.requirementsSatisfied && $0.maximumStatus == .lowConfidence
+        })
+        let result = ConstrainedSwingPathSolver.solve(
+            candidateSets: [centered],
+            timeline: timeline
+        )
+        let followThrough = detection(.followThrough, in: result)
+        precondition(followThrough.sourceFrameIndex != nil)
+        precondition(followThrough.status == .lowConfidence)
+    }
+
+    private static func verifyChestContinuationIsRequired() {
+        let timeline = SwingEvidenceTimeline.build(from: fixture(
+            includeImpactObjects: true,
+            reverseChestAtFollowThrough: true
+        ))
+        let centered = candidateSet(impactFrame: 300, timeline: timeline)
+        let p7 = centered.candidates(for: .followThrough).filter {
+            (323...325).contains($0.sourceFrameIndex)
+        }
+        precondition(!p7.isEmpty)
+        precondition(p7.allSatisfy { !$0.requirementsSatisfied })
+    }
+
+    private static func verifyDeclaredImpactAnchorCannotDiverge() {
+        let timeline = SwingEvidenceTimeline.build(from: fixture(includeImpactObjects: true))
+        let impactCandidates = ImpactCorridorResolver.candidates(in: timeline)
+        let centeredImpactSet = candidateSet(impactFrame: 300, timeline: timeline)
+        let otherImpact = impactCandidates.first {
+            $0.sourceFrameIndex != centeredImpactSet.impact.sourceFrameIndex
+        }!
+        var candidates = centeredImpactSet.candidatesByStage
+        candidates[.impact] = [otherImpact]
+        let divergent = StageCandidateSet(
+            impact: centeredImpactSet.impact,
+            candidatesByStage: candidates
+        )
+        let result = ConstrainedSwingPathSolver.solve(
+            candidateSets: [divergent],
+            timeline: timeline
+        )
+        precondition(result.unresolvedStages == Set(SwingStage.allCases))
     }
 
     private static func solve(timeline: [SwingTemporalFrame]) -> SwingAnalysisResult {
@@ -119,7 +239,25 @@ struct BidirectionalStageSolverSmoke {
         )
     }
 
-    private static func fixture(includeImpactObjects: Bool) -> [SwingFrameEvidence] {
+    private static func candidateSet(
+        impactFrame: Int,
+        timeline: [SwingTemporalFrame]
+    ) -> StageCandidateSet {
+        let impact = ImpactCorridorResolver.candidates(in: timeline).first {
+            $0.sourceFrameIndex == impactFrame
+        }!
+        return BidirectionalStageCandidateResolver.candidates(
+            timeline: timeline,
+            impact: impact
+        )
+    }
+
+    private static func fixture(
+        includeImpactObjects: Bool,
+        includeTakeawayShaft: Bool = true,
+        counterRotateAtFollowThrough: Bool = false,
+        reverseChestAtFollowThrough: Bool = false
+    ) -> [SwingFrameEvidence] {
         (60...420).map { sourceFrameIndex in
             let time = Double(sourceFrameIndex) / 120
             let velocityY: CGFloat
@@ -136,8 +274,13 @@ struct BidirectionalStageSolverSmoke {
 
             let isNoisyFinishFrame = sourceFrameIndex == 372
             let hand = handPosition(sourceFrameIndex: sourceFrameIndex)
-            let shoulderAngle = shoulderTurn(sourceFrameIndex: sourceFrameIndex)
-            let hipAngle = hipTurn(sourceFrameIndex: sourceFrameIndex)
+            let isP7Neighborhood = (323...325).contains(sourceFrameIndex)
+            let shoulderAngle = reverseChestAtFollowThrough && isP7Neighborhood
+                ? 18
+                : shoulderTurn(sourceFrameIndex: sourceFrameIndex)
+            let hipAngle = counterRotateAtFollowThrough && isP7Neighborhood
+                ? -42
+                : hipTurn(sourceFrameIndex: sourceFrameIndex)
             let pose = completePose(
                 time: time,
                 sourceFrameIndex: sourceFrameIndex,
@@ -145,7 +288,8 @@ struct BidirectionalStageSolverSmoke {
             )
             let object = objectEvidence(
                 sourceFrameIndex: sourceFrameIndex,
-                includeImpactObjects: includeImpactObjects
+                includeImpactObjects: includeImpactObjects,
+                includeTakeawayShaft: includeTakeawayShaft
             )
             return SwingFrameEvidence(
                 sourceFrameIndex: sourceFrameIndex,
@@ -217,10 +361,11 @@ struct BidirectionalStageSolverSmoke {
 
     private static func objectEvidence(
         sourceFrameIndex: Int,
-        includeImpactObjects: Bool
+        includeImpactObjects: Bool,
+        includeTakeawayShaft: Bool
     ) -> SwingObjectEvidence {
         let stableBall = CGPoint(x: 0.70, y: 0.82)
-        if (167...169).contains(sourceFrameIndex) {
+        if includeTakeawayShaft, (167...169).contains(sourceFrameIndex) {
             return SwingObjectEvidence(
                 shaft: ClubShaftEvidence(
                     start: CGPoint(x: 0.42, y: 0.66),
@@ -245,6 +390,130 @@ struct BidirectionalStageSolverSmoke {
             )
         }
         return .empty
+    }
+
+    private static func transitionQualityFixture() -> (
+        timeline: [SwingTemporalFrame],
+        marginal: StageCandidateSet,
+        strong: StageCandidateSet
+    ) {
+        var timeline: [SwingTemporalFrame] = []
+        let marginal = appendTransitionSegment(
+            to: &timeline,
+            startTime: 0,
+            startSourceFrame: 100,
+            hasStrongSupport: false
+        )
+        let strong = appendTransitionSegment(
+            to: &timeline,
+            startTime: 2,
+            startSourceFrame: 1_000,
+            hasStrongSupport: true
+        )
+        return (timeline, marginal, strong)
+    }
+
+    private static func appendTransitionSegment(
+        to timeline: inout [SwingTemporalFrame],
+        startTime: Double,
+        startSourceFrame: Int,
+        hasStrongSupport: Bool
+    ) -> StageCandidateSet {
+        let startIndex = timeline.count
+        let localStageIndices: [SwingStage: Int] = [
+            .address: 0,
+            .takeaway: 2,
+            .leadArmParallelBackswing: 4,
+            .top: 6,
+            .leadArmParallelDownswing: 8,
+            .impact: 10,
+            .followThrough: 12,
+            .finish: 16
+        ]
+        let candidateIndices = Set(localStageIndices.values)
+
+        for localIndex in 0...20 {
+            let isBackswing = (1...4).contains(localIndex)
+            let isDownswing = (6...10).contains(localIndex)
+            let isFollowThrough = (11...15).contains(localIndex)
+            let isStableTop = (5...6).contains(localIndex)
+            let isStableFinish = (16...20).contains(localIndex)
+            let retainEvidence = hasStrongSupport || candidateIndices.contains(localIndex)
+            let direction: SwingMotionDirection
+            if isBackswing && retainEvidence {
+                direction = .backswing
+            } else if isDownswing && retainEvidence && localIndex != 6 {
+                direction = .downswing
+            } else if isFollowThrough && retainEvidence {
+                direction = .backswing
+            } else {
+                direction = .stable
+            }
+            let stable = hasStrongSupport && (isStableTop || isStableFinish)
+                || candidateIndices.contains(localIndex) && (localIndex == 0 || localIndex == 6 || localIndex == 16)
+            let velocityY: CGFloat
+            switch direction {
+            case .backswing: velocityY = -0.60
+            case .downswing: velocityY = 0.75
+            case .stable: velocityY = stable ? 0 : 0.45
+            }
+            let sourceFrameIndex = startSourceFrame + localIndex
+            let time = startTime + Double(localIndex) * 0.05
+            let hand = CGPoint(x: 0.50, y: 0.50)
+            let frame = SwingFrameEvidence(
+                sourceFrameIndex: sourceFrameIndex,
+                time: time,
+                pose: completePose(
+                    time: time,
+                    sourceFrameIndex: sourceFrameIndex,
+                    hand: hand
+                ),
+                objectEvidence: .empty,
+                leadArm: .left,
+                leadArmAngle: 0,
+                leadArmExtension: 176,
+                shoulderAngle: 20,
+                hipAngle: 24,
+                handCenter: hand,
+                hipCenter: CGPoint(x: 0.50, y: 0.62),
+                handVelocity: CGPoint(x: 0, y: velocityY),
+                handAcceleration: .zero,
+                headSpeed: stable ? 0.01 : 0.16,
+                hipSpeed: stable ? 0.01 : 0.16,
+                poseCoverage: 1
+            )
+            timeline.append(SwingTemporalFrame(
+                frame: frame,
+                direction: direction,
+                sustainedBackswing: isBackswing && retainEvidence,
+                sustainedDownswing: isDownswing && retainEvidence,
+                sustainedFollowThrough: isFollowThrough && retainEvidence,
+                isAddressBoundary: localIndex == 0,
+                isTopPlateauEnd: localIndex == 6,
+                isFinishPlateauStart: localIndex == 16,
+                shaftAngleContinuity: 0,
+                ballStability: 0,
+                qualityFlags: []
+            ))
+        }
+
+        let candidates = Dictionary(uniqueKeysWithValues: localStageIndices.map { stage, localIndex in
+            let index = startIndex + localIndex
+            let frame = timeline[index].frame
+            return (stage, [StageCandidate(
+                stage: stage,
+                evidenceIndex: index,
+                sourceFrameIndex: frame.sourceFrameIndex,
+                time: frame.time,
+                score: 0.80,
+                requirementsSatisfied: true,
+                maximumStatus: .confirmed,
+                hasClubEvidence: false,
+                hasBallEvidence: false
+            )])
+        })
+        let impact = candidates[.impact]!.first!
+        return StageCandidateSet(impact: impact, candidatesByStage: candidates)
     }
 
     private static func completePose(

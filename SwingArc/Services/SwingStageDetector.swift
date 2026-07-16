@@ -1264,28 +1264,39 @@ enum BidirectionalStageCandidateResolver {
             (timeline.startIndex..<upperBound).compactMap { index in
                 let temporal = timeline[index]
                 let frame = temporal.frame
-                guard temporal.sustainedBackswing,
-                      let shaft = frame.objectEvidence.shaft else { return nil }
-                let shaftHorizontal = closeness(
-                    horizontalAngle(shaft.angle),
-                    target: 0,
-                    tolerance: 18
-                ) * clamp(shaft.confidence)
-                guard shaftHorizontal >= 0.20 else { return nil }
+                guard temporal.sustainedBackswing else { return nil }
+                let shaftHorizontal = frame.objectEvidence.shaft.map { shaft in
+                    closeness(
+                        horizontalAngle(shaft.angle),
+                        target: 0,
+                        tolerance: 18
+                    ) * clamp(shaft.confidence)
+                }
+                if let shaftHorizontal, shaftHorizontal < 0.20 { return nil }
                 let handsBelowShoulders = handsBelowShouldersScore(frame)
+                guard shaftHorizontal != nil || handsBelowShoulders == 1 else { return nil }
                 let backswingSpeed = ramp(
                     -Double(frame.handVelocity.y),
                     minimum: 0.12,
                     maximum: 0.80
                 )
-                let requirements = shaftHorizontal >= 0.55
+                let requirements = (shaftHorizontal ?? 0) >= 0.55
                     && handsBelowShoulders == 1
-                let score = clamp(
-                    shaftHorizontal * 0.46
-                        + handsBelowShoulders * 0.20
-                        + backswingSpeed * 0.18
-                        + frame.poseCoverage * 0.16
-                )
+                let score: Double
+                if let shaftHorizontal {
+                    score = clamp(
+                        shaftHorizontal * 0.46
+                            + handsBelowShoulders * 0.20
+                            + backswingSpeed * 0.18
+                            + frame.poseCoverage * 0.16
+                    )
+                } else {
+                    score = clamp(
+                        handsBelowShoulders * 0.23
+                            + backswingSpeed * 0.25
+                            + frame.poseCoverage * 0.17
+                    )
+                }
                 return candidate(
                     stage: .takeaway,
                     index: index,
@@ -1342,7 +1353,17 @@ enum BidirectionalStageCandidateResolver {
         timeline: [SwingTemporalFrame]
     ) -> [StageCandidate] {
         guard lowerBound < timeline.index(before: timeline.endIndex) else { return [] }
-        let impactHipTurn = abs(timeline[lowerBound].frame.hipAngle ?? 0)
+        let impactFrame = timeline[lowerBound].frame
+        let hipDirection = signedRotationDirection(
+            endingAt: lowerBound,
+            angle: \SwingFrameEvidence.hipAngle,
+            timeline: timeline
+        )
+        let chestDirection = signedRotationDirection(
+            endingAt: lowerBound,
+            angle: \SwingFrameEvidence.shoulderAngle,
+            timeline: timeline
+        )
         return retainedCandidates(
             ((lowerBound + 1)..<timeline.endIndex).compactMap { index in
                 let temporal = timeline[index]
@@ -1366,17 +1387,30 @@ enum BidirectionalStageCandidateResolver {
                     minimum: 0.15,
                     maximum: 1
                 )
-                let hipTurn = abs(frame.hipAngle ?? 0)
-                let continuedTurn = hipTurn + 3 >= impactHipTurn
+                let hipContinuation = signedRotationProgress(
+                    from: impactFrame.hipAngle,
+                    to: frame.hipAngle,
+                    direction: hipDirection
+                )
+                let chestContinuation = signedRotationProgress(
+                    from: impactFrame.shoulderAngle,
+                    to: frame.shoulderAngle,
+                    direction: chestDirection
+                )
+                let continuedHipTurn = hipContinuation.map { $0 >= 0.5 } ?? false
+                let continuedChestTurn = chestContinuation.map { $0 >= 0.5 } ?? false
                 let requirements = postImpactRise >= 0.35
                     && parallelEvidence >= 0.55
-                    && continuedTurn
-                let turnScore = ramp(hipTurn, minimum: 8, maximum: 38)
+                    && continuedHipTurn
+                    && continuedChestTurn
+                let hipTurnScore = ramp(hipContinuation, minimum: 0, maximum: 10)
+                let chestTurnScore = ramp(chestContinuation, minimum: 0, maximum: 12)
                 let score = clamp(
-                    parallelEvidence * 0.38
-                        + postImpactRise * 0.25
-                        + turnScore * 0.17
-                        + (continuedTurn ? 0.10 : 0)
+                    parallelEvidence * 0.34
+                        + postImpactRise * 0.23
+                        + hipTurnScore * 0.13
+                        + chestTurnScore * 0.10
+                        + (continuedHipTurn && continuedChestTurn ? 0.10 : 0)
                         + frame.poseCoverage * 0.10
                 )
                 guard score >= 0.32 else { return nil }
@@ -1468,6 +1502,37 @@ enum BidirectionalStageCandidateResolver {
               let current = timeline[index].frame.shoulderAngle,
               let previous = timeline[index - 1].frame.shoulderAngle else { return false }
         return abs(current) + 0.5 >= abs(previous)
+    }
+
+    private static func signedRotationDirection(
+        endingAt index: Int,
+        angle: KeyPath<SwingFrameEvidence, Double?>,
+        timeline: [SwingTemporalFrame]
+    ) -> Double? {
+        guard timeline.indices.contains(index),
+              let current = timeline[index].frame[keyPath: angle] else { return nil }
+        let currentTime = timeline[index].frame.time
+        var earliest: Double?
+        var priorIndex = index - 1
+        while timeline.indices.contains(priorIndex),
+              currentTime - timeline[priorIndex].frame.time
+                <= SwingEvidenceTimeline.directionWindow + 0.000_000_001 {
+            earliest = timeline[priorIndex].frame[keyPath: angle] ?? earliest
+            priorIndex -= 1
+        }
+        guard let earliest else { return nil }
+        let change = current - earliest
+        guard abs(change) >= 0.5 else { return nil }
+        return change > 0 ? 1 : -1
+    }
+
+    private static func signedRotationProgress(
+        from start: Double?,
+        to end: Double?,
+        direction: Double?
+    ) -> Double? {
+        guard let start, let end, let direction else { return nil }
+        return (end - start) * direction
     }
 
     private static func highHandsScore(_ frame: SwingFrameEvidence) -> Double {
@@ -1581,6 +1646,9 @@ enum ConstrainedSwingPathSolver {
         var best: ScoredPath?
         var secondBest: ScoredPath?
         for candidateSet in candidateSets {
+            guard hasConsistentImpactAnchor(candidateSet, timeline: timeline) else {
+                continue
+            }
             enumeratePaths(in: candidateSet, timeline: timeline) { path in
                 guard isLegalCompletePath(path, timeline: timeline) else { return }
                 let evidenceScore = path.reduce(0.0) { $0 + $1.score }
@@ -1679,6 +1747,20 @@ enum ConstrainedSwingPathSolver {
         append(stageIndex: 0, path: [])
     }
 
+    private static func hasConsistentImpactAnchor(
+        _ candidateSet: StageCandidateSet,
+        timeline: [SwingTemporalFrame]
+    ) -> Bool {
+        let declared = candidateSet.impact
+        let impactCandidates = candidateSet.candidatesByStage[.impact] ?? []
+        guard declared.stage == .impact,
+              impactCandidates == [declared],
+              timeline.indices.contains(declared.evidenceIndex) else { return false }
+        let frame = timeline[declared.evidenceIndex].frame
+        return frame.sourceFrameIndex == declared.sourceFrameIndex
+            && frame.time == declared.time
+    }
+
     private static func directionMatches(
         candidate: StageCandidate,
         stage: SwingStage,
@@ -1749,7 +1831,103 @@ enum ConstrainedSwingPathSolver {
         guard hasRequiredDirectionTransitions(path: path, timeline: timeline) else {
             return -Double.greatestFiniteMagnitude
         }
-        return 0.90
+        let backswing = durationWeightedSupport(
+            from: path[0].evidenceIndex,
+            through: path[2].evidenceIndex,
+            timeline: timeline,
+            matches: { $0.sustainedBackswing }
+        )
+        let downswing = durationWeightedSupport(
+            from: path[3].evidenceIndex,
+            through: path[5].evidenceIndex,
+            timeline: timeline,
+            matches: { $0.sustainedDownswing }
+        )
+        let followThrough = durationWeightedSupport(
+            from: path[5].evidenceIndex,
+            through: path[6].evidenceIndex,
+            timeline: timeline,
+            matches: { $0.sustainedFollowThrough }
+        )
+        let topTime = path[3].time
+        let topPlateau = elapsedStabilitySupport(
+            from: topTime - 0.08,
+            through: topTime,
+            timeline: timeline
+        )
+        let finishTime = path[7].time
+        let finishPlateau = elapsedStabilitySupport(
+            from: finishTime,
+            through: finishTime + SwingEvidenceTimeline.stableWindow,
+            timeline: timeline
+        )
+        return backswing * 0.20
+            + downswing * 0.25
+            + followThrough * 0.20
+            + topPlateau * 0.10
+            + finishPlateau * 0.15
+    }
+
+    private static func durationWeightedSupport(
+        from lowerBound: Int,
+        through upperBound: Int,
+        timeline: [SwingTemporalFrame],
+        matches: (SwingTemporalFrame) -> Bool
+    ) -> Double {
+        guard timeline.indices.contains(lowerBound),
+              timeline.indices.contains(upperBound),
+              lowerBound < upperBound else { return 0 }
+        let slice = timeline[lowerBound...upperBound]
+        let intervals = zip(slice, slice.dropFirst())
+        var supportedDuration = 0.0
+        for (first, second) in intervals {
+            let duration = max(0, second.frame.time - first.frame.time)
+            guard duration <= SwingEvidenceTimeline.directionWindow
+                    + 0.000_000_001 else { continue }
+            let support = (matches(first) ? 0.5 : 0) + (matches(second) ? 0.5 : 0)
+            supportedDuration += duration * support
+        }
+        let elapsed = timeline[upperBound].frame.time - timeline[lowerBound].frame.time
+        guard elapsed > 0 else { return 0 }
+        return clamp(supportedDuration / elapsed)
+    }
+
+    private static func elapsedStabilitySupport(
+        from startTime: Double,
+        through endTime: Double,
+        timeline: [SwingTemporalFrame]
+    ) -> Double {
+        guard endTime > startTime else { return 0 }
+        var observedDuration = 0.0
+        var supportedDuration = 0.0
+        for (first, second) in zip(timeline, timeline.dropFirst()) {
+            guard second.frame.time - first.frame.time
+                    <= SwingEvidenceTimeline.directionWindow + 0.000_000_001 else {
+                continue
+            }
+            let intervalStart = max(startTime, first.frame.time)
+            let intervalEnd = min(endTime, second.frame.time)
+            let duration = intervalEnd - intervalStart
+            guard duration > 0 else { continue }
+            observedDuration += duration
+            let support = (isStable(first) ? 0.5 : 0) + (isStable(second) ? 0.5 : 0)
+            supportedDuration += duration * support
+        }
+        guard observedDuration > 0 else { return 0 }
+        return clamp(supportedDuration / (endTime - startTime))
+    }
+
+    private static func isStable(_ temporal: SwingTemporalFrame) -> Bool {
+        let frame = temporal.frame
+        return temporal.direction == .stable
+            && frame.handCenter != nil
+            && frame.hipCenter != nil
+            && frame.pose?.head != nil
+            && frame.headSpeed.isFinite
+            && frame.hipSpeed.isFinite
+            && frame.headSpeed <= SwingEvidenceTimeline.bodyStabilityThreshold
+            && frame.hipSpeed <= SwingEvidenceTimeline.bodyStabilityThreshold
+            && hypot(Double(frame.handVelocity.x), Double(frame.handVelocity.y)) <= 0.18
     }
 
     private static func isBetter(
