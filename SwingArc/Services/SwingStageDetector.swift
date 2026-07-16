@@ -531,6 +531,12 @@ enum AnalysisFailure: Equatable {
     case ambiguousSwingWindows
     case swingWindowTooLong
     case frameExtractionFailed
+    case missingAddressBoundary
+    case missingTopTransition
+    case noImpactCorridor
+    case missingFinishBoundary
+    case incompleteSwingClip
+    case analysisCancelled
 }
 
 enum SwingAnalysisState: Equatable {
@@ -1128,6 +1134,66 @@ struct SwingWindow: Equatable {
     var duration: Double { max(0, endTime - startTime) }
 }
 
+struct SwingCore: Equatable {
+    let startTime: Double
+    let endTime: Double
+    let peakTime: Double
+}
+
+enum SwingCoreLocationResult: Equatable {
+    case located(SwingCore)
+    case failed(SwingWindowFailure)
+}
+
+struct AdaptiveBoundaryEvidence: Equatable {
+    let hasAddressBoundary: Bool
+    let hasFinishBoundary: Bool
+}
+
+enum AdaptiveSwingWindowAction: Equatable {
+    case expand(SwingWindow)
+    case ready(SwingWindow)
+    case failed(AnalysisFailure)
+}
+
+enum AdaptiveSwingWindowPlanner {
+    static let expansionStep = 0.5
+    static let initialPadding = 0.5
+    static let maximumSpan = 8.0
+
+    static func initialWindow(core: SwingCore, duration: Double) -> SwingWindow {
+        SwingWindow(
+            startTime: max(0, core.startTime - initialPadding),
+            endTime: min(duration, core.endTime + initialPadding)
+        )
+    }
+
+    static func nextAction(
+        current: SwingWindow,
+        duration: Double,
+        evidence: AdaptiveBoundaryEvidence
+    ) -> AdaptiveSwingWindowAction {
+        if evidence.hasAddressBoundary && evidence.hasFinishBoundary { return .ready(current) }
+        if current.duration >= maximumSpan {
+            return .failed(
+                evidence.hasAddressBoundary ? .missingFinishBoundary : .missingAddressBoundary
+            )
+        }
+        if !evidence.hasAddressBoundary {
+            guard current.startTime > 0 else { return .failed(.incompleteSwingClip) }
+            return .expand(SwingWindow(
+                startTime: max(0, current.startTime - expansionStep),
+                endTime: current.endTime
+            ))
+        }
+        guard current.endTime < duration else { return .failed(.incompleteSwingClip) }
+        return .expand(SwingWindow(
+            startTime: current.startTime,
+            endTime: min(duration, current.endTime + expansionStep)
+        ))
+    }
+}
+
 enum SwingWindowFailure: Equatable {
     case insufficientPoseEvidence
     case noSwingMotion
@@ -1140,13 +1206,10 @@ enum SwingWindowLocationResult: Equatable {
     case failed(SwingWindowFailure)
 }
 
-enum SwingWindowLocator {
+enum SwingCoreLocator {
     static let samplesPerSecond = 8.0
-    private static let maximumWindowDuration = 6.0
     private static let bridgeGapDuration = 0.5
     private static let featureSmoothingRadius = 2
-    private static let leadingPadding = 1.5
-    private static let trailingPadding = 1.0
 
     static func sampleTimes(duration: Double) -> [Double] {
         guard duration.isFinite, duration > 0 else { return [] }
@@ -1155,7 +1218,7 @@ enum SwingWindowLocator {
         return (0...count).map { min(duration, Double($0) * interval) }
     }
 
-    static func locate(samples rawSamples: [CoarseSwingSample]) -> SwingWindowLocationResult {
+    static func locate(samples rawSamples: [CoarseSwingSample]) -> SwingCoreLocationResult {
         let samples = rawSamples
             .filter { $0.time.isFinite }
             .sorted { $0.time < $1.time }
@@ -1224,83 +1287,32 @@ enum SwingWindowLocator {
             candidate(
                 from: group,
                 samples: samples,
-                energies: energies,
-                maximumIndexGap: maximumIndexGap
+                energies: energies
             )
         }.sorted { lhs, rhs in
-            lhs.score == rhs.score ? lhs.window.startTime < rhs.window.startTime : lhs.score > rhs.score
+            lhs.score == rhs.score ? lhs.core.startTime < rhs.core.startTime : lhs.score > rhs.score
         }
 
         guard let best = candidates.first else { return .failed(.noSwingMotion) }
         if candidates.count > 1, candidates[1].score >= best.score * 0.85 {
             return .failed(.ambiguousCandidates)
         }
-        guard best.window.duration <= maximumWindowDuration else {
-            return .failed(.windowTooLong)
-        }
-        return .located(best.window)
+        return .located(best.core)
     }
 
     private static func candidate(
         from group: [Int],
         samples: [CoarseSwingSample],
-        energies: [Double],
-        maximumIndexGap: Int
-    ) -> (window: SwingWindow, score: Double)? {
-        guard let fullCandidate = makeCandidate(from: group, samples: samples, energies: energies) else {
-            return nil
-        }
-        guard fullCandidate.window.duration > maximumWindowDuration else {
-            return fullCandidate
-        }
-
-        let groupEnergies = group.map { energies[$0] }.sorted()
-        guard let peak = groupEnergies.last else { return nil }
-        let median = groupEnergies[groupEnergies.count / 2]
-        let localizationThreshold = max(peak * 0.55, median * 1.35)
-        let localizedIndices = group.filter { energies[$0] >= localizationThreshold }
-        guard !localizedIndices.isEmpty else { return fullCandidate }
-
-        var localizedGroups: [[Int]] = []
-        for index in localizedIndices {
-            if let lastGroup = localizedGroups.indices.last,
-               let priorIndex = localizedGroups[lastGroup].last,
-               index - priorIndex <= maximumIndexGap {
-                localizedGroups[lastGroup].append(index)
-            } else {
-                localizedGroups.append([index])
-            }
-        }
-
-        let localizedCandidates = localizedGroups.compactMap {
-            makeCandidate(from: $0, samples: samples, energies: energies)
-        }.filter {
-            $0.window.duration <= maximumWindowDuration
-        }.sorted {
-            $0.score == $1.score ? $0.window.startTime < $1.window.startTime : $0.score > $1.score
-        }
-
-        guard let best = localizedCandidates.first else { return fullCandidate }
-        if localizedCandidates.count > 1,
-           localizedCandidates[1].score >= best.score * 0.85 {
-            return fullCandidate
-        }
-        return best
-    }
-
-    private static func makeCandidate(
-        from group: [Int],
-        samples: [CoarseSwingSample],
         energies: [Double]
-    ) -> (window: SwingWindow, score: Double)? {
+    ) -> (core: SwingCore, score: Double)? {
         guard let first = group.first, let last = group.last else { return nil }
-        let coreStartIndex = max(0, first - 1)
-        let coreStart = samples[coreStartIndex].time
-        let coreEnd = samples[last].time
-        let start = max(samples[0].time, coreStart - leadingPadding)
-        let end = min(samples[samples.count - 1].time, coreEnd + trailingPadding)
+        let peakIndex = group.max { energies[$0] < energies[$1] } ?? first
         return (
-            SwingWindow(startTime: start, endTime: end),
+            core: SwingCore(
+                startTime: samples[max(0, first - 1)].time,
+                endTime: samples[last].time,
+                peakTime: samples[peakIndex].time
+            ),
             group.reduce(0.0) { $0 + energies[$1] }
         )
     }
@@ -1368,6 +1380,23 @@ enum SwingWindowLocator {
             .filter { $0 > 0 }
             .sorted()
         return intervals.isEmpty ? 1.0 / samplesPerSecond : intervals[intervals.count / 2]
+    }
+}
+
+/// Temporary compatibility adapter for the production orchestration, which is
+/// migrated to the adaptive planner in a later task.
+enum SwingWindowLocator {
+    static func sampleTimes(duration: Double) -> [Double] {
+        SwingCoreLocator.sampleTimes(duration: duration)
+    }
+
+    static func locate(samples: [CoarseSwingSample]) -> SwingWindowLocationResult {
+        switch SwingCoreLocator.locate(samples: samples) {
+        case let .located(core):
+            return .located(SwingWindow(startTime: core.startTime, endTime: core.endTime))
+        case let .failed(reason):
+            return .failed(reason)
+        }
     }
 }
 

@@ -272,6 +272,18 @@ struct AnalysisWorkspaceView: View {
             return "挥杆候选片段超过 6 秒。请裁剪无关准备或走动部分后重试。"
         case .frameExtractionFailed:
             return "源视频帧读取不完整，无法进行逐帧定位。请重新导入原始视频。"
+        case .missingAddressBoundary:
+            return "无法确认准备姿态边界。请保留挥杆开始前的完整画面。"
+        case .missingTopTransition:
+            return "无法确认上杆顶点转换。请使用固定机位且确保手臂清晰可见。"
+        case .noImpactCorridor:
+            return "无法确认击球区间。请确保球和杆头区域清晰可见。"
+        case .missingFinishBoundary:
+            return "无法确认收杆边界。请保留击球后的完整收杆画面。"
+        case .incompleteSwingClip:
+            return "视频未包含完整挥杆。请导入从准备到收杆的连续片段。"
+        case .analysisCancelled:
+            return nil
         }
     }
 }

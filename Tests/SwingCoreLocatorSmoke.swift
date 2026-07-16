@@ -1,42 +1,47 @@
 import Foundation
 
 @main
-struct SwingWindowLocatorSmoke {
+struct SwingCoreLocatorSmoke {
     static func main() {
-        let unique = coarseFixture(bursts: [8.0])
-        switch SwingWindowLocator.locate(samples: unique) {
-        case let .located(window):
-            precondition(window.startTime >= 7.75)
-            precondition(window.startTime <= 8.125)
-            precondition(window.endTime >= 9.125)
-            precondition(window.endTime <= 9.50)
+        let samples = coarseFixture(bursts: [8.0])
+        switch SwingCoreLocator.locate(samples: samples) {
+        case let .located(core):
+            precondition(core.startTime >= 7.75)
+            precondition(core.startTime <= 8.125)
+            precondition(core.endTime >= 9.125)
+            precondition(core.endTime <= 9.50)
+            precondition((core.startTime...core.endTime).contains(core.peakTime))
         case let .failed(reason):
-            preconditionFailure("Expected one swing window, got \(reason)")
+            preconditionFailure("Expected unpadded swing core, got \(reason)")
         }
 
-        let ambiguous = coarseFixture(bursts: [4.0, 13.0])
         precondition(
-            SwingWindowLocator.locate(samples: ambiguous) == .failed(.ambiguousCandidates),
+            SwingCoreLocator.locate(samples: coarseFixture(bursts: [4.0, 13.0]))
+                == .failed(.ambiguousCandidates),
             "Two equally strong separated swings must not be guessed"
         )
-
-        let still = coarseFixture(bursts: [])
         precondition(
-            SwingWindowLocator.locate(samples: still) == .failed(.noSwingMotion),
-            "A stationary golfer must not create a fabricated swing window"
+            SwingCoreLocator.locate(samples: coarseFixture(bursts: []))
+                == .failed(.noSwingMotion),
+            "A stationary golfer must not create a fabricated swing core"
         )
 
-        let alternatingLeftRightLabels = stride(from: 0.0, through: 10.0, by: 0.125).enumerated().map { index, time in
-            CoarseSwingSample(
-                time: time,
-                pose: poseWithAlternatingLabels(time: time, swapsLeftRight: index.isMultiple(of: 2))
-            )
-        }
+        let alternatingLeftRightLabels = stride(from: 0.0, through: 10.0, by: 0.125)
+            .enumerated()
+            .map { index, time in
+                CoarseSwingSample(
+                    time: time,
+                    pose: poseWithAlternatingLabels(
+                        time: time,
+                        swapsLeftRight: index.isMultiple(of: 2)
+                    )
+                )
+            }
         precondition(
-            SwingWindowLocator.locate(samples: alternatingLeftRightLabels) == .failed(.noSwingMotion),
-            "Swapping left/right labels on the same shoulder and hip axes must not create fake rotation"
+            SwingCoreLocator.locate(samples: alternatingLeftRightLabels)
+                == .failed(.noSwingMotion),
+            "Swapping left/right labels on fixed axes must not create fake rotation"
         )
-
     }
 
     private static func coarseFixture(bursts: [Double]) -> [CoarseSwingSample] {
