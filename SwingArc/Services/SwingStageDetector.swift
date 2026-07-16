@@ -177,14 +177,14 @@ enum SwingStageDetector {
             }
         }
 
-        // P5 requires a sustained transition out of the P4 plateau. A single
-        // lower hand frame is commonly pose jitter, not the downswing.
-        if let p5Index = sustainedDownswingIndex(after: p4Index, in: samples) {
+        // P5 is lead-arm-parallel on the downswing. It happens when the hands
+        // cross the shoulder line, not at the first frame that leaves P4.
+        if let p5Index = downswingParallelIndex(after: p4Index, in: samples) {
             resolved[.leadArmParallelDownswing] = samples[p5Index]
 
-            // P6 is the fastest hand movement through the hip zone, rather
-            // than the lowest observed wrist. That avoids a slow post-impact
-            // dip being reported as impact.
+            // P6 couples 2D hand velocity with the hands' position over the
+            // hip centre. Vertical velocity alone fires too early in a steep
+            // downswing, before the club reaches the ball.
             if let p6Index = impactIndex(after: p5Index, in: samples) {
                 resolved[.impact] = samples[p6Index]
 
@@ -274,27 +274,39 @@ enum SwingStageDetector {
         return (first.y + second.y) / 2
     }
 
-    private static func sustainedDownswingIndex(after topIndex: Int, in samples: [SwingPoseSample]) -> Int? {
+    private static func downswingParallelIndex(after topIndex: Int, in samples: [SwingPoseSample]) -> Int? {
         guard topIndex + 2 < samples.count else { return nil }
         return ((topIndex + 1)..<(samples.count - 1)).first { index in
-            samples[index].wristY > samples[topIndex].wristY + directionChangeThreshold &&
-            samples[index + 1].wristY > samples[index].wristY + directionChangeThreshold
+            guard let shoulderY = midpointY(samples[index].leftShoulder, samples[index].rightShoulder) else {
+                return false
+            }
+            return samples[index].wristY > samples[topIndex].wristY + directionChangeThreshold &&
+                samples[index + 1].wristY > samples[index].wristY + directionChangeThreshold &&
+                samples[index].wristY >= shoulderY
         }
     }
 
     private static func impactIndex(after downswingIndex: Int, in samples: [SwingPoseSample]) -> Int? {
         guard downswingIndex + 1 < samples.count else { return nil }
         let finalIndices = (samples.count - 3)..<samples.count
-        let candidates = ((downswingIndex + 1)..<(samples.count - 1)).filter { index in
+        let candidates = ((downswingIndex + 1)..<(samples.count - 1)).compactMap { index -> (index: Int, score: CGFloat)? in
             guard !finalIndices.contains(index),
-                  let hipY = midpointY(samples[index].leftHip, samples[index].rightHip) else {
-                return false
+                  let hipY = midpointY(samples[index].leftHip, samples[index].rightHip),
+                  let shoulderY = midpointY(samples[index].leftShoulder, samples[index].rightShoulder),
+                  let hand = handCenter(in: samples[index]),
+                  let hip = center(samples[index].leftHip, samples[index].rightHip) else {
+                return nil
             }
-            return abs(samples[index].wristY - hipY) <= 0.35
+            guard hand.y >= shoulderY,
+                  abs(hand.y - hipY) <= 0.25,
+                  abs(hand.x - hip.x) <= 0.30 else {
+                return nil
+            }
+            let hipAlignment = max(0, 1 - (abs(hand.x - hip.x) / 0.30 + abs(hand.y - hipY) / 0.25) / 2)
+            let score = handSpeed(at: index, in: samples) * (0.35 + 0.65 * hipAlignment)
+            return (index, score)
         }
-        return candidates.max { left, right in
-            handSpeed(at: left, in: samples) < handSpeed(at: right, in: samples)
-        }
+        return candidates.max { $0.score < $1.score }?.index
     }
 
     private static func sustainedFollowThroughIndex(after impactIndex: Int, in samples: [SwingPoseSample]) -> Int? {
@@ -318,7 +330,20 @@ enum SwingStageDetector {
     private static func handSpeed(at index: Int, in samples: [SwingPoseSample]) -> CGFloat {
         guard index > 0 else { return 0 }
         let elapsed = max(samples[index].time - samples[index - 1].time, .leastNonzeroMagnitude)
-        return abs(samples[index].wristY - samples[index - 1].wristY) / elapsed
+        guard let current = handCenter(in: samples[index]),
+              let previous = handCenter(in: samples[index - 1]) else {
+            return abs(samples[index].wristY - samples[index - 1].wristY) / elapsed
+        }
+        return hypot(current.x - previous.x, current.y - previous.y) / elapsed
+    }
+
+    private static func handCenter(in sample: SwingPoseSample) -> CGPoint? {
+        center(sample.leftWrist, sample.rightWrist) ?? sample.rightWrist ?? sample.leftWrist
+    }
+
+    private static func center(_ first: CGPoint?, _ second: CGPoint?) -> CGPoint? {
+        guard let first, let second else { return nil }
+        return CGPoint(x: (first.x + second.x) / 2, y: (first.y + second.y) / 2)
     }
 
     /// P4 is the earliest high-hand apex that reverses into a downswing.  A

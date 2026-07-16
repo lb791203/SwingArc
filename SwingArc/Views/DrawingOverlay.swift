@@ -13,6 +13,7 @@ struct DrawingOverlay: View {
     @Binding var selectedColor: Color
     @Binding var strokeWidth: CGFloat
     @Binding var isKeyframeMode: Bool
+    var isInteractionEnabled: Bool = true
     
     @State private var currentPoints: [CGPoint] = []
     @State private var selectedControlPoint: SelectedControlPoint? = nil
@@ -36,6 +37,7 @@ struct DrawingOverlay: View {
                     // 1. 手势检测层 (使用 contentShape 确保透明层也能 100% 捕获触摸手势)
                     Color.clear
                         .contentShape(Rectangle())
+                        .allowsHitTesting(isInteractionEnabled)
                         .gesture(
                             DragGesture(minimumDistance: 0, coordinateSpace: .local)
                                 .onChanged { value in
@@ -87,12 +89,13 @@ struct DrawingOverlay: View {
                         }
                         
                         // 在选择工具模式下，绘制控制端点把手 (Handles)
-                        if activeTool == .select {
+                        if isInteractionEnabled && activeTool == .select {
                             drawControlHandles(context: context, rect: rect)
                         }
                         
                         // 3. 绘制微调向量放大镜
-                        if isDragging, activeTool == .select || activeTool == .angle || activeTool == .line {
+                        if isInteractionEnabled && isDragging,
+                           activeTool == .select || activeTool == .angle || activeTool == .line {
                             drawVectorMagnifier(context: context, rect: rect, size: size)
                         }
                     }
@@ -138,6 +141,22 @@ struct DrawingOverlay: View {
             path.move(to: screenPoints[0])
             path.addLine(to: screenPoints[1])
             context.stroke(path, with: .color(element.color), lineWidth: element.lineWidth)
+
+        case .arrow:
+            let start = screenPoints[0]
+            let end = screenPoints[1]
+            path.move(to: start)
+            path.addLine(to: end)
+            if let head = ArrowGeometry.headPoints(start: start, end: end, length: 14) {
+                path.move(to: head.left)
+                path.addLine(to: end)
+                path.addLine(to: head.right)
+            }
+            context.stroke(
+                path,
+                with: .color(element.color),
+                style: StrokeStyle(lineWidth: element.lineWidth, lineCap: .round, lineJoin: .round)
+            )
             
         case .circle:
             let center = screenPoints[0]
@@ -458,6 +477,25 @@ struct DrawingOverlay: View {
             path.move(to: zoomedPoints[0])
             path.addLine(to: zoomedPoints[1])
             context.stroke(path, with: .color(element.color), lineWidth: element.lineWidth * scale)
+        case .arrow:
+            let start = zoomedPoints[0]
+            let end = zoomedPoints[1]
+            path.move(to: start)
+            path.addLine(to: end)
+            if let head = ArrowGeometry.headPoints(start: start, end: end, length: 14 * scale) {
+                path.move(to: head.left)
+                path.addLine(to: end)
+                path.addLine(to: head.right)
+            }
+            context.stroke(
+                path,
+                with: .color(element.color),
+                style: StrokeStyle(
+                    lineWidth: element.lineWidth * scale,
+                    lineCap: .round,
+                    lineJoin: .round
+                )
+            )
         case .circle:
             let zCenter = zoomedPoints[0]
             let zEdge = zoomedPoints[1]
@@ -610,7 +648,7 @@ struct DrawingOverlay: View {
             } else {
                 // 拖动更新终点
                 switch activeTool {
-                case .line, .circle:
+                case .line, .arrow, .circle:
                     currentPoints[1] = finalPoint
                 case .angle:
                     if currentPoints.count == 3 {
@@ -655,7 +693,7 @@ struct DrawingOverlay: View {
                 drawings.append(newElement)
                 activeTool = .select // 自动切回选择工具进行把手微调
             } else {
-                // 正常保存直线、圆圈、手绘
+                // 正常保存直线、箭头、圆圈、手绘
                 let newElement = DrawingElement(
                     tool: activeTool,
                     points: currentPoints,

@@ -14,6 +14,8 @@ class VideoPlaybackManager: ObservableObject {
     @Published var isProcessing = false
     @Published var isScanning = false
     @Published var scanProgress: Double = 0.0
+    @Published var analysisProgressPhase: AnalysisProgressPhase = .preparing
+    @Published var sourceFrameRate: Double = 60
     @Published private(set) var analysisState: SwingAnalysisState = .idle
     @Published private(set) var analysisResult: SwingAnalysisResult? = nil
     @Published private(set) var analysisFailure: AnalysisFailure? = nil
@@ -28,6 +30,7 @@ class VideoPlaybackManager: ObservableObject {
     private let poseQueue = DispatchQueue(label: "com.liangbo.swingarc.pose", qos: .userInitiated)
     private var videoOrientation: CGImagePropertyOrientation = .up
     private var isPoseDetectionInFlight = false
+    private let analysisRunGate = AnalysisRunGate()
     
     init() {}
     
@@ -38,6 +41,7 @@ class VideoPlaybackManager: ObservableObject {
     
     /// 加载本地或沙盒视频文件
     func loadVideo(url: URL) {
+        cancelAnalysis()
         isPlaying = false
         stopDisplayLink()
         removeObservers()
@@ -45,6 +49,7 @@ class VideoPlaybackManager: ObservableObject {
         analysisResult = nil
         analysisFailure = nil
         scanProgress = 0
+        analysisProgressPhase = .preparing
         currentPose = nil
         isPoseDetectionInFlight = false
         
@@ -52,6 +57,7 @@ class VideoPlaybackManager: ObservableObject {
         
         // 获取视频原始分辨率和方向
         if let track = asset.tracks(withMediaType: .video).first {
+            sourceFrameRate = track.nominalFrameRate > 0 ? Double(track.nominalFrameRate) : 60
             let transform = track.preferredTransform
             let size = track.naturalSize
             
@@ -113,6 +119,22 @@ class VideoPlaybackManager: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             self.processCurrentFramePose()
         }
+    }
+
+    func unloadVideo() {
+        cancelAnalysis()
+        pause()
+        stopDisplayLink()
+        removeObservers()
+        currentTime = 0
+        duration = 0
+        currentPose = nil
+        videoSize = .zero
+        videoRect = .zero
+        sourceFrameRate = 60
+        analysisResult = nil
+        analysisFailure = nil
+        analysisState = .idle
     }
     
     @objc private func playerDidFinishPlaying() {
@@ -193,11 +215,10 @@ class VideoPlaybackManager: ObservableObject {
     /// 逐帧步进：向前或向后移动一帧
     /// 假定 60fps 视频一帧约 16.7ms，30fps 约 33.3ms。高尔夫分析中我们按 240fps (约 4.1ms) 或普通帧 16ms 步进。
     func stepFrame(forward: Bool) {
-        guard let player = player else { return }
+        guard player != nil else { return }
         pause()
         
-        // 采用 1/60 秒（约16.6毫秒）作为通用单帧步进单位，若是高速摄像则使用更小单位
-        let frameDuration = 0.0166 
+        let frameDuration = VideoFramePolicy.frameDuration(sourceFrameRate: sourceFrameRate)
         let targetTime = forward ? (currentTime + frameDuration) : (currentTime - frameDuration)
         let clampedTime = max(0, min(targetTime, duration))
         
@@ -275,6 +296,7 @@ class VideoPlaybackManager: ObservableObject {
     
     /// 扫描整段视频，只返回有 Vision 体态证据支持的 P1 至 P8。
     func analyzeSwing(completion: @escaping (SwingAnalysisResult) -> Void) {
+        analysisRunGate.cancel()
         guard let player = player,
               let currentItem = player.currentItem else {
             finishAnalysis(with: .noVideo, completion: completion)
@@ -287,16 +309,19 @@ class VideoPlaybackManager: ObservableObject {
             finishAnalysis(with: .invalidDuration, completion: completion)
             return
         }
+
+        let runID = analysisRunGate.begin()
         
         isScanning = true
         scanProgress = 0.0
+        analysisProgressPhase = .preparing
         analysisResult = nil
         analysisFailure = nil
         analysisState = .scanning(progress: 0)
         
         // 逐帧、顺序提取：AVAssetImageGenerator 和 Vision 都不与实时播放共享并发请求。
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
+            guard let self = self, self.analysisRunGate.isActive(runID) else { return }
             
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
@@ -306,6 +331,7 @@ class VideoPlaybackManager: ObservableObject {
             let sampleTimes = SwingAnalysisSamplingPlan.sampleTimes(duration: durationSeconds)
             var poseSamples: [SwingPoseSample] = []
             for (index, seconds) in sampleTimes.enumerated() {
+                guard self.analysisRunGate.isActive(runID) else { return }
                 let time = CMTime(seconds: seconds, preferredTimescale: 600)
                 autoreleasepool {
                     guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else { return }
@@ -318,13 +344,43 @@ class VideoPlaybackManager: ObservableObject {
                 }
                 let progress = Double(index + 1) / Double(sampleTimes.count)
                 DispatchQueue.main.async {
+                    guard self.analysisRunGate.isActive(runID) else { return }
+                    self.analysisProgressPhase = .extracting
                     self.scanProgress = progress
                     self.analysisState = .scanning(progress: progress)
                 }
             }
 
+            guard self.analysisRunGate.isActive(runID) else { return }
+            DispatchQueue.main.async {
+                guard self.analysisRunGate.isActive(runID) else { return }
+                self.analysisProgressPhase = .solving
+            }
+
+            #if DEBUG
+            let diagnosticSamples = poseSamples
+                .filter { (14...18).contains($0.time) }
+                .map { sample in
+                    let wrist = sample.rightWrist ?? sample.leftWrist ?? .zero
+                    let shoulder = CGPoint(
+                        x: ((sample.leftShoulder?.x ?? 0) + (sample.rightShoulder?.x ?? 0)) / 2,
+                        y: ((sample.leftShoulder?.y ?? 0) + (sample.rightShoulder?.y ?? 0)) / 2
+                    )
+                    let hip = CGPoint(
+                        x: ((sample.leftHip?.x ?? 0) + (sample.rightHip?.x ?? 0)) / 2,
+                        y: ((sample.leftHip?.y ?? 0) + (sample.rightHip?.y ?? 0)) / 2
+                    )
+                    return String(format: "%.3f wrist=(%.3f,%.3f) shoulder=(%.3f,%.3f) hip=(%.3f,%.3f)", sample.time, wrist.x, wrist.y, shoulder.x, shoulder.y, hip.x, hip.y)
+                }
+            print("SWING_DEBUG_SAMPLES_BEGIN")
+            print(diagnosticSamples.joined(separator: "\n"))
+            print("SWING_DEBUG_SAMPLES_END")
+            #endif
+
             let result = SwingStageDetector.detect(samples: poseSamples)
             DispatchQueue.main.async {
+                guard self.analysisRunGate.isActive(runID) else { return }
+                self.analysisRunGate.complete(runID)
                 self.isScanning = false
                 self.scanProgress = 1
                 self.analysisResult = result
@@ -337,6 +393,16 @@ class VideoPlaybackManager: ObservableObject {
                 completion(result)
             }
         }
+    }
+
+    func cancelAnalysis() {
+        analysisRunGate.cancel()
+        isScanning = false
+        scanProgress = 0
+        analysisProgressPhase = .preparing
+        analysisState = .idle
+        analysisResult = nil
+        analysisFailure = nil
     }
 
     /// 兼容旧界面调用；新界面应使用 analyzeSwing 读取完整状态。

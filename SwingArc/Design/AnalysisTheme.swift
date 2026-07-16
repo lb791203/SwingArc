@@ -1,11 +1,20 @@
 import SwiftUI
 
 enum AnalysisTheme {
-    static let libraryBackground = Color(red: 0.95, green: 0.95, blue: 0.94)
-    static let canvasBackground = Color(red: 0.08, green: 0.09, blue: 0.09)
-    static let chrome = Color(red: 0.16, green: 0.17, blue: 0.17)
-    static let active = Color(red: 0.97, green: 0.79, blue: 0.26)
-    static let overlay = Color(red: 0.26, green: 0.83, blue: 0.77)
+    static let libraryBackground = Color(red: 0.965, green: 0.957, blue: 0.941)
+    static let libraryCard = Color.white
+    static let primaryText = Color(red: 0.08, green: 0.09, blue: 0.10)
+    static let secondaryText = Color(red: 0.40, green: 0.42, blue: 0.45)
+    static let canvasBackground = Color(red: 0.075, green: 0.082, blue: 0.09)
+    static let chrome = Color(red: 0.12, green: 0.14, blue: 0.17)
+    static let raisedChrome = Color(red: 0.17, green: 0.19, blue: 0.23)
+    static let confirmed = Color(red: 0.18, green: 0.79, blue: 0.37)
+    static let current = Color(red: 0.98, green: 0.78, blue: 0.20)
+    static let pose = Color(red: 0.10, green: 0.75, blue: 0.87)
+
+    // Compatibility aliases used by existing views and smoke tests.
+    static let active = current
+    static let overlay = pose
 }
 
 enum WorkspaceMode: Equatable {

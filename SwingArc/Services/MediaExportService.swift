@@ -220,6 +220,19 @@ enum MediaExportService {
         case .angle:
             path.move(to: first)
             for point in points.dropFirst() { path.addLine(to: point) }
+        case .arrow:
+            let end = points.dropFirst().first ?? first
+            path.move(to: first)
+            path.addLine(to: end)
+            if let head = ArrowGeometry.headPoints(
+                start: first,
+                end: end,
+                length: 14 * max(1, canvasSize.width / 390)
+            ) {
+                path.move(to: head.left)
+                path.addLine(to: end)
+                path.addLine(to: head.right)
+            }
         case .select, .line, .freehand:
             path.move(to: first)
             for point in points.dropFirst() { path.addLine(to: point) }

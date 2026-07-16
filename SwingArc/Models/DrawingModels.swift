@@ -8,6 +8,7 @@ import UIKit
 enum DrawingTool: String, CaseIterable, Identifiable, Codable {
     case select = "选择"
     case line = "直线"
+    case arrow = "箭头"
     case circle = "圆圈"
     case angle = "量角器"
     case freehand = "手绘"
@@ -16,12 +17,42 @@ enum DrawingTool: String, CaseIterable, Identifiable, Codable {
     
     var iconName: String {
         switch self {
-        case .select: return "arrow.up.and.pointer"
-        case .line: return "line.horizontal.3"
+        case .select: return "hand.tap"
+        case .line: return "minus"
+        case .arrow: return "arrow.up.right"
         case .circle: return "circle"
         case .angle: return "angle"
         case .freehand: return "scribble"
         }
+    }
+
+    var revealsColorPalette: Bool {
+        self == .line || self == .arrow
+    }
+}
+
+enum ArrowGeometry {
+    static func headPoints(
+        start: CGPoint,
+        end: CGPoint,
+        length: CGFloat,
+        spread: CGFloat = .pi / 7
+    ) -> (left: CGPoint, right: CGPoint)? {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        guard hypot(dx, dy) > 0.001 else { return nil }
+
+        let direction = atan2(dy, dx)
+        return (
+            left: CGPoint(
+                x: end.x - length * cos(direction - spread),
+                y: end.y - length * sin(direction - spread)
+            ),
+            right: CGPoint(
+                x: end.x - length * cos(direction + spread),
+                y: end.y - length * sin(direction + spread)
+            )
+        )
     }
 }
 
