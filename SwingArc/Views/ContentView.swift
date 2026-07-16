@@ -30,11 +30,16 @@ struct ContentView: View {
     // 控制右侧分析面板显示/隐藏，最大化视频 analysis 区域
     @State private var showRightPanel = true
     
-    // AI 自动分析与评估报告状态
+    // AI 分析结果面板状态
     @State private var showAnalysisReport = false
-    @State private var swingScore = 88
-    @State private var headSwayScore = "优秀"
-    @State private var spineAngleDelta = 1.2
+
+    private var analysisPresentation: AnalysisWorkspacePresentation {
+        AnalysisWorkspacePresentation(state: playbackManager.analysisState)
+    }
+
+    private var visibleKeyframes: [KeyframeMarker] {
+        analysisPresentation.allowsPoseOverlays ? keyframes : []
+    }
     
     var body: some View {
         GeometryReader { geo in
@@ -61,7 +66,7 @@ struct ContentView: View {
                             }
                             
                             // 右侧：自动追踪与人体指标监测面板
-                            if showRightPanel {
+                            if showRightPanel && analysisPresentation.allowsPoseOverlays {
                                 rightAnalysisPanel
                                     .frame(width: 180) // 缩窄为 180pt
                                     .background(Color(white: 0.08).opacity(0.85))
@@ -124,23 +129,9 @@ struct ContentView: View {
             
             Spacer()
             
-            // 顶栏中间放置“AI 自动分析挥杆”按钮，一键扫描
-            Button(action: runAISwingAnalysis) {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 13, weight: .bold))
-                    Text("AI 挥杆分析")
-                        .font(.system(size: 12, weight: .bold))
-                }
-                .foregroundColor(.black)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
-                .background(
-                    LinearGradient(colors: [Color.green, Color(red: 0.7, green: 0.95, blue: 0.4)], startPoint: .leading, endPoint: .trailing)
-                )
-                .clipShape(Capsule())
-                .shadow(color: .green.opacity(0.4), radius: 8)
-            }
+            Text("视频分析")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.white)
             
             Spacer()
             
@@ -252,8 +243,9 @@ struct ContentView: View {
                 // 竖屏浮动紧凑工具栏 (左侧浮动，最大化垂直分析空间)
                 if !isLandscape {
                     HStack {
-                        // AI 控制快捷图标 (左侧)
-                        VStack(spacing: 16) {
+                        if analysisPresentation.allowsPoseOverlays {
+                            // AI 分析完成后才允许显示体态叠层。
+                            VStack(spacing: 16) {
                             Button(action: { showPoseSkeleton.toggle() }) {
                                 Image(systemName: "figure.walk")
                                     .font(.system(size: 14, weight: .bold))
@@ -287,10 +279,11 @@ struct ContentView: View {
                                     .clipShape(Circle())
                             }
                         }
-                        .padding(8)
-                        .background(.ultraThinMaterial)
-                        .cornerRadius(20)
-                        .padding(.leading, 12)
+                            .padding(8)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(20)
+                            .padding(.leading, 12)
+                        }
                         
                         Spacer()
                         
@@ -581,7 +574,7 @@ struct ContentView: View {
                         .accentColor(.green)
                         
                         // 标记在进度条上的关键帧小圆点
-                        ForEach(keyframes) { marker in
+                        ForEach(visibleKeyframes) { marker in
                             let pct = marker.time / max(0.1, playbackManager.duration)
                             let posX = pct * (timelineGeo.size.width - 16) + 8 // 略微居中补偿
                             Circle()
@@ -603,7 +596,8 @@ struct ContentView: View {
             .padding(.horizontal)
             
             // 2. 高尔夫关键阶段快捷标记定位
-            ScrollView(.horizontal, showsIndicators: false) {
+            if analysisPresentation.allowsPoseOverlays {
+                ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(SwingStage.allCases) { stage in
                         let savedMarker = keyframes.first(where: { $0.stage == stage.rawValue })
@@ -620,7 +614,7 @@ struct ContentView: View {
                                 Circle()
                                     .fill(stage.color)
                                     .frame(width: 6, height: 6)
-                                Text(stage.shortName)
+                                Text(savedMarker == nil ? "\(stage.shortName) 未确定" : stage.shortName)
                                     .font(.system(size: 11, weight: .bold))
                                 if savedMarker != nil {
                                     Image(systemName: "checkmark")
@@ -642,7 +636,7 @@ struct ContentView: View {
                     }
                     
                     // 重置标记按钮
-                    if !keyframes.isEmpty {
+                    if !visibleKeyframes.isEmpty {
                         Button(action: { keyframes.removeAll() }) {
                             Text("重置")
                                 .font(.system(size: 11, weight: .bold))
@@ -654,7 +648,8 @@ struct ContentView: View {
                         }
                     }
                 }
-                .padding(.horizontal)
+                    .padding(.horizontal)
+                }
             }
             
             // 3. 核心控制按键栏 (慢速、播放暂停、逐帧拨盘)
@@ -707,50 +702,19 @@ struct ContentView: View {
                 
                 Spacer()
                 
-                // 导入与辅助侧栏浮窗
-                if isLandscape {
-                    HStack(spacing: 10) {
-                        // AI 自动分析挥杆按钮 (横屏快捷版)
-                        Button(action: runAISwingAnalysis) {
-                            Image(systemName: "sparkles")
-                                .foregroundColor(.black)
-                                .frame(width: 36, height: 36)
-                                .background(Color.green)
-                                .clipShape(Circle())
-                        }
-                        
-                        // AI 分析面板折叠开关
-                        Button(action: {
-                            withAnimation(.easeInOut) {
-                                showRightPanel.toggle()
-                            }
-                        }) {
-                            Image(systemName: showRightPanel ? "sidebar.right" : "sidebar.left")
-                                .foregroundColor(.white)
-                                .frame(width: 36, height: 36)
-                                .background(showRightPanel ? Color.green : Color.gray)
-                                .clipShape(Circle())
-                        }
-                        
-                        Button(action: { showVideoPicker = true }) {
-                            Image(systemName: "photo.badge.plus")
-                                .foregroundColor(.white)
-                                .frame(width: 36, height: 36)
-                                .background(Color.blue)
-                                .clipShape(Circle())
-                        }
-                        
-                        Button(action: { showCameraView = true }) {
-                            Image(systemName: "video.circle.fill")
-                                .foregroundColor(.white)
-                                .frame(width: 36, height: 36)
-                                .background(Color.red)
-                                .clipShape(Circle())
-                        }
+                Button(action: runAISwingAnalysis) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles")
+                        Text(playbackManager.isScanning ? "分析中" : "AI 分析")
                     }
-                } else {
-                    Spacer().frame(width: 80) // 占位保持居中
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.cyan)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color.cyan.opacity(0.12))
+                    .clipShape(Capsule())
                 }
+                .disabled(playbackManager.isScanning)
             }
             .padding(.horizontal)
             .padding(.bottom, 12)
@@ -859,19 +823,12 @@ struct ContentView: View {
         return String(format: "%02d:%02d.%02d", mins, secs, hundredths)
     }
     
-    // MARK: - AI 自动分析与竞品报告浮层 (DeepSwing & GolfFix 风格)
+    // MARK: - AI 分析结果
     
     private func runAISwingAnalysis() {
-        playbackManager.autoDetectSwingStages { markers in
-            self.keyframes = markers
-            // 自动计算报告数据，模拟高真实度人体工学指标评分
-            self.swingScore = Int.random(in: 85...95)
-            self.headSwayScore = Double.random(in: 0...1) > 0.35 ? "优秀" : "良好"
-            self.spineAngleDelta = Double.random(in: 0.7...1.9)
-            
-            withAnimation(.spring()) {
-                self.showAnalysisReport = true
-            }
+        playbackManager.analyzeSwing { result in
+            self.keyframes = result.detectedMarkers
+            withAnimation(.spring()) { self.showAnalysisReport = true }
         }
     }
     
@@ -889,7 +846,7 @@ struct ContentView: View {
                     Image(systemName: "sparkles")
                         .foregroundColor(.green)
                         .font(.title3)
-                    Text("AI 挥杆测评报告")
+                    Text("AI 分析结果")
                         .font(.system(size: 16, weight: .black))
                         .foregroundColor(.white)
                     Spacer()
@@ -901,81 +858,43 @@ struct ContentView: View {
                 }
                 .padding(.bottom, 2)
                 
-                // Score Circle
-                HStack(spacing: 16) {
-                    ZStack {
-                        Circle()
-                            .stroke(Color.white.opacity(0.08), lineWidth: 6)
-                            .frame(width: 72, height: 72)
-                        Circle()
-                            .trim(from: 0, to: CGFloat(swingScore) / 100.0)
-                            .stroke(
-                                LinearGradient(colors: [.green, .cyan], startPoint: .top, endPoint: .bottom),
-                                style: StrokeStyle(lineWidth: 6, lineCap: .round)
-                            )
-                            .frame(width: 72, height: 72)
-                            .rotationEffect(.degrees(-90))
-                        
-                        VStack(spacing: 0) {
-                            Text("\(swingScore)")
-                                .font(.system(size: 22, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                            Text("综合分")
-                                .font(.system(size: 9))
-                                .foregroundColor(.gray)
-                        }
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("等级评定：\(swingScore >= 90 ? "卓越 (PRO)" : "优秀 (EXCELLENT)")")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.green)
-                        
-                        Text("AI 已自动定位 P1-P8 共 7 个挥杆关键帧。您可以点击下方快捷标记，或使用新版 V1 飞轮进行极慢速微调核对。")
-                            .font(.system(size: 10))
-                            .foregroundColor(.gray)
-                            .lineLimit(3)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("已识别 \(analysisPresentation.markers.count) / 8 个关键阶段")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                    Text(analysisPresentation.unresolvedStages.isEmpty ? "所有阶段均可在时间轴中逐帧核对。" : "未确定阶段可在时间轴逐帧手动设置。")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray)
                 }
                 .padding(12)
                 .background(Color.white.opacity(0.04))
                 .cornerRadius(12)
+
+                if let analysisFailureMessage {
+                    Text(analysisFailureMessage)
+                        .font(.system(size: 11))
+                        .foregroundColor(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color.orange.opacity(0.10))
+                        .cornerRadius(12)
+                }
                 
-                // Details Grid
-                VStack(spacing: 8) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("头部高度起伏")
-                                .font(.system(size: 9))
-                                .foregroundColor(.gray)
-                            Text(headSwayScore)
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(.green)
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("击球脊椎角偏差")
-                                .font(.system(size: 9))
-                                .foregroundColor(.gray)
-                            Text(String(format: "%.1f° (极佳)", spineAngleDelta))
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(.orange)
-                        }
-                    }
-                    
-                    Divider().background(Color.white.opacity(0.1))
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("AI 诊断评估建议：")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.white)
-                        
-                        Text("测试显示，您在下杆到击球瞬间（P6）身体倾斜轴保持极佳，动力释放流畅。但在上杆顶点（P4）处头部出现轻微的水平向右偏移。这通常是由于起杆阶段膝部支撑松动导致。建议锁住右腿支点，维持转体中心稳定。")
-                            .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.8))
-                            .lineSpacing(3)
-                            .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("体态叠层")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white)
+                    Toggle("骨架", isOn: $showPoseSkeleton)
+                    Toggle("头部轨迹", isOn: $showHeadStability)
+                    Toggle("身体倾斜", isOn: $showSpineAngle)
+                    if let angle = playbackManager.currentPose?.spineAngle {
+                        Text(String(format: "当前帧身体倾斜：%.1f°", abs(angle)))
+                            .font(.system(size: 11))
+                            .foregroundColor(.cyan)
+                    } else {
+                        Text("暂停或拖动到清晰人体帧后可显示当前体态。")
+                            .font(.system(size: 11))
+                            .foregroundColor(.gray)
                     }
                 }
                 .padding(12)
@@ -1005,6 +924,19 @@ struct ContentView: View {
             .shadow(color: .black.opacity(0.4), radius: 12)
         }
         .transition(.opacity)
+    }
+
+    private var analysisFailureMessage: String? {
+        switch playbackManager.analysisFailure {
+        case .noVideo:
+            return "没有可分析的视频。请先导入或录制一段挥杆视频。"
+        case .invalidDuration:
+            return "这段视频无法读取有效时长，请更换视频后重试。"
+        case .insufficientPoseEvidence:
+            return "未检测到足够清晰的人体关节点；请使用全身入镜、侧面且光线充足的视频后重试。"
+        case nil:
+            return nil
+        }
     }
 }
 

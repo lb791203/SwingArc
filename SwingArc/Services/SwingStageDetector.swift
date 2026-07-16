@@ -28,6 +28,24 @@ enum SwingAnalysisState: Equatable {
     }
 }
 
+struct AnalysisWorkspacePresentation: Equatable {
+    let markers: [KeyframeMarker]
+    let unresolvedStages: Set<SwingStage>
+    let allowsPoseOverlays: Bool
+
+    init(state: SwingAnalysisState) {
+        guard case let .completed(result) = state else {
+            markers = []
+            unresolvedStages = Set(SwingStage.allCases)
+            allowsPoseOverlays = false
+            return
+        }
+        markers = result.detectedMarkers
+        unresolvedStages = result.unresolvedStages
+        allowsPoseOverlays = true
+    }
+}
+
 enum SwingStageDetector {
     private static let finishStabilityThreshold: CGFloat = 0.04
 

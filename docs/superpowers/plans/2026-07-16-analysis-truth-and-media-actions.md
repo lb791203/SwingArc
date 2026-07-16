@@ -199,7 +199,7 @@ git commit -m "fix: serialize pose analysis and remove fabricated markers"
 - 输入：`VideoPlaybackManager.analysisResult`、`.analysisFailure`、`.isScanning`。
 - 输出：AI 底部结果面板、仅分析后可见的 P 点、仅分析后可用的体态叠层。
 
-- [ ] **步骤 1：写 UI 状态失败测试**
+- [x] **步骤 1：写 UI 状态失败测试**
 
 ```swift
 let idleMarkers: [KeyframeMarker] = []
@@ -208,7 +208,7 @@ let failed = SwingAnalysisResult(detectedMarkers: [], unresolvedStages: Set(Swin
 precondition(failed.detectedMarkers.isEmpty)
 ```
 
-- [ ] **步骤 2：确认测试在新类型出现前失败**
+- [x] **步骤 2：确认测试在新类型出现前失败**
 
 ```bash
 swiftc SwingArc/Models/DrawingModels.swift Tests/AnalysisWorkspaceStateSmoke.swift -o /tmp/workspace-state-test && /tmp/workspace-state-test
@@ -216,7 +216,7 @@ swiftc SwingArc/Models/DrawingModels.swift Tests/AnalysisWorkspaceStateSmoke.swi
 
 预期：因尚无 `SwingAnalysisResult` 而失败。
 
-- [ ] **步骤 3：替换现有 AI 展示逻辑**
+- [x] **步骤 3：替换现有 AI 展示逻辑**
 
 ```swift
 private func runAISwingAnalysis() {
@@ -233,7 +233,7 @@ private var visibleStageMarkers: [KeyframeMarker] {
 
 删除 `swingScore`、`headSwayScore`、`spineAngleDelta`、固定诊断文字、`Int.random` 与 `Double.random`。阶段标签只从 `visibleStageMarkers` 生成；未确定阶段显示禁用的“未确定”，同时提供逐帧手动设置。只有 `analysisResult != nil` 时，骨架、头部轨迹、身体倾斜三个开关才能出现；AI 入口放在底部面板，不保留顶部霓虹按钮。
 
-- [ ] **步骤 4：验证通过并编译**
+- [x] **步骤 4：验证通过并编译**
 
 ```bash
 swiftc SwingArc/Models/DrawingModels.swift SwingArc/Services/SwingStageDetector.swift Tests/AnalysisWorkspaceStateSmoke.swift -o /tmp/workspace-state-test && /tmp/workspace-state-test
@@ -247,7 +247,7 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild -projec
 
 预期：`BUILD SUCCEEDED`。
 
-- [ ] **步骤 5：提交本任务**
+- [x] **步骤 5：提交本任务**
 
 ```bash
 git add SwingArc/Views/ContentView.swift SwingArc/Views/DrawingOverlay.swift Tests/AnalysisWorkspaceStateSmoke.swift
