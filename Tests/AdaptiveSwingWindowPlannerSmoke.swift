@@ -119,5 +119,70 @@ struct AdaptiveSwingWindowPlannerSmoke {
                 )
             ) == .failed(.incompleteSwingClip)
         )
+
+        var earlierSearch = AdaptiveWindowSearchState()
+        let earlierFirst = earlierSearch.nextAction(
+            current: SwingWindow(startTime: 5, endTime: 13),
+            duration: duration,
+            evidence: AdaptiveBoundaryEvidence(
+                hasAddressBoundary: false,
+                hasFinishBoundary: true
+            )
+        )
+        precondition(earlierFirst == .expand(SwingWindow(startTime: 4.5, endTime: 12.5)))
+        precondition(earlierSearch.shiftDirection == .earlier)
+        precondition(
+            earlierSearch.nextAction(
+                current: SwingWindow(startTime: 4.5, endTime: 12.5),
+                duration: duration,
+                evidence: AdaptiveBoundaryEvidence(
+                    hasAddressBoundary: true,
+                    hasFinishBoundary: false
+                )
+            ) == .failed(.missingFinishBoundary),
+            "A left-shifting full window must report the newly missing finish instead of reversing"
+        )
+
+        var laterSearch = AdaptiveWindowSearchState()
+        let laterFirst = laterSearch.nextAction(
+            current: SwingWindow(startTime: 5, endTime: 13),
+            duration: duration,
+            evidence: AdaptiveBoundaryEvidence(
+                hasAddressBoundary: true,
+                hasFinishBoundary: false
+            )
+        )
+        precondition(laterFirst == .expand(SwingWindow(startTime: 5.5, endTime: 13.5)))
+        precondition(laterSearch.shiftDirection == .later)
+        precondition(
+            laterSearch.nextAction(
+                current: SwingWindow(startTime: 5.5, endTime: 13.5),
+                duration: duration,
+                evidence: AdaptiveBoundaryEvidence(
+                    hasAddressBoundary: false,
+                    hasFinishBoundary: true
+                )
+            ) == .failed(.missingAddressBoundary),
+            "A right-shifting full window must report the newly missing address instead of reversing"
+        )
+
+        var monotonicSearch = AdaptiveWindowSearchState()
+        var monotonicWindow = SwingWindow(startTime: 5, endTime: 13)
+        for expectedStart in [4.5, 4.0, 3.5] {
+            let action = monotonicSearch.nextAction(
+                current: monotonicWindow,
+                duration: duration,
+                evidence: AdaptiveBoundaryEvidence(
+                    hasAddressBoundary: false,
+                    hasFinishBoundary: true
+                )
+            )
+            guard case let .expand(next) = action else {
+                preconditionFailure("Repeated fixed-width search must remain monotonic")
+            }
+            precondition(next.startTime == expectedStart)
+            precondition(next.duration == AdaptiveSwingWindowPlanner.maximumSpan)
+            monotonicWindow = next
+        }
     }
 }

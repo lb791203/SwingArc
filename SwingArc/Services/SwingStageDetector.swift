@@ -3049,16 +3049,62 @@ enum AdaptiveSwingWindowAction: Equatable {
     case failed(AnalysisFailure)
 }
 
+enum AdaptiveWindowShiftDirection: Equatable {
+    case earlier
+    case later
+}
+
+/// Run-local adaptive search state. Once the maximum-width window starts
+/// moving, it may continue only in that direction; evicted fine frames can
+/// therefore never re-enter the active window.
+struct AdaptiveWindowSearchState {
+    private(set) var shiftDirection: AdaptiveWindowShiftDirection?
+
+    mutating func nextAction(
+        current: SwingWindow,
+        duration: Double,
+        evidence: AdaptiveBoundaryEvidence
+    ) -> AdaptiveSwingWindowAction {
+        if evidence.hasAddressBoundary && evidence.hasFinishBoundary {
+            return AdaptiveSwingWindowPlanner.nextAction(
+                current: current,
+                duration: duration,
+                evidence: evidence
+            )
+        }
+
+        let requiredDirection: AdaptiveWindowShiftDirection = evidence.hasAddressBoundary
+            ? .later
+            : .earlier
+        if current.duration >= AdaptiveSwingWindowPlanner.maximumSpan - 0.000_000_001,
+           let shiftDirection,
+           shiftDirection != requiredDirection {
+            return .failed(
+                evidence.hasAddressBoundary
+                    ? .missingFinishBoundary
+                    : .missingAddressBoundary
+            )
+        }
+
+        let action = AdaptiveSwingWindowPlanner.nextAction(
+            current: current,
+            duration: duration,
+            evidence: evidence
+        )
+        if case let .expand(next) = action,
+           next.duration >= AdaptiveSwingWindowPlanner.maximumSpan - 0.000_000_001,
+           abs(next.startTime - current.startTime) > 0.000_000_001,
+           abs(next.endTime - current.endTime) > 0.000_000_001 {
+            shiftDirection = requiredDirection
+        }
+        return action
+    }
+}
+
 enum AdaptiveSwingWindowPlanner {
     static let expansionStep = 0.5
     static let initialPadding = 0.5
     static let maximumSpan = 8.0
-
-    static func missingBoundaryFailure(
-        evidence: AdaptiveBoundaryEvidence
-    ) -> AnalysisFailure {
-        evidence.hasAddressBoundary ? .missingFinishBoundary : .missingAddressBoundary
-    }
 
     static func initialWindow(core: SwingCore, duration: Double) -> SwingWindow {
         SwingWindow(

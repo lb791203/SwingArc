@@ -546,33 +546,20 @@ enum SourceFrameMatchValidation: Equatable {
     case failed(AnalysisFailure)
 }
 
-enum VideoAnalysisDecodePass: Hashable {
-    case coarse
-    case fine
-}
-
-/// Run-local accounting guard for AV source-frame decoding. Registering a
-/// frame twice is rejected, independent of which analysis pass requested it.
-final class SourceFrameDecodeLedger {
+/// Run-local accounting guard for adaptive fine-frame AV decoding. Coarse
+/// localization is a separate 8 FPS pass; sparse object analysis reuses the
+/// fine image cache and performs no AV decode.
+final class AdaptiveFineDecodeLedger {
     private var sourceFrames: Set<Int> = []
-    private var countsByPass: [VideoAnalysisDecodePass: Int] = [:]
 
     @discardableResult
-    func registerDecode(
-        sourceFrameIndex: Int,
-        pass: VideoAnalysisDecodePass
-    ) -> Bool {
+    func registerDecode(sourceFrameIndex: Int) -> Bool {
         guard sourceFrameIndex >= 0,
               sourceFrames.insert(sourceFrameIndex).inserted else { return false }
-        countsByPass[pass, default: 0] += 1
         return true
     }
 
     var totalDecodeCount: Int { sourceFrames.count }
-
-    func decodeCount(for pass: VideoAnalysisDecodePass) -> Int {
-        countsByPass[pass, default: 0]
-    }
 
     var maximumDecodeCountPerSourceFrame: Int {
         sourceFrames.isEmpty ? 0 : 1
@@ -670,18 +657,6 @@ final class FineFrameImageCache {
         }
     }
 
-    @discardableResult
-    func storePrepared(sourceFrameIndex: Int, image: CGImage) -> Bool {
-        if imagesBySourceFrame[sourceFrameIndex] != nil { return true }
-        guard imagesBySourceFrame.count < maximumEntryCount else { return false }
-        imagesBySourceFrame[sourceFrameIndex] = image
-        return true
-    }
-
-    static func prepareContourImage(_ image: CGImage) -> CGImage? {
-        downscaledContourImage(image)
-    }
-
     private static func downscaledContourImage(_ image: CGImage) -> CGImage? {
         let sourceMaximum = max(image.width, image.height)
         guard sourceMaximum > 0 else { return nil }
@@ -734,11 +709,7 @@ final class SwingVideoAnalysisEngine: Sendable {
             )
         }
 
-        func detectPoses(in image: CGImage) -> [PoseEstimationResult] {
-            vision.detectPoses(in: image, orientation: .up)
-        }
-
-        func selectPose(
+        private func selectPose(
             from candidates: [PoseEstimationResult],
             time: Double,
             recordsCoreAnchorCandidate: Bool
@@ -761,14 +732,6 @@ final class SwingVideoAnalysisEngine: Sendable {
     private struct PoseFrameExtraction {
         let sample: SwingFrameSample
         let rawPose: PoseEstimationResult?
-    }
-
-    private struct CoarseDecodedFrame {
-        let sourceFrameIndex: Int
-        let time: Double
-        let poseCandidates: [PoseEstimationResult]
-        let selectedPose: PoseEstimationResult?
-        let contourImage: CGImage
     }
 
     func analyze(
@@ -802,10 +765,8 @@ final class SwingVideoAnalysisEngine: Sendable {
         // One tracker is intentionally reused for the complete coarse pass and
         // every adaptive block. Expansion must never create a new golfer identity.
         let trackedPoseDetector = TrackedPoseDetector()
-        let decodeLedger = SourceFrameDecodeLedger()
         let coarseTimes = SwingCoreLocator.sampleTimes(duration: duration)
         var coarseSamples: [CoarseSwingSample] = []
-        var coarseFramesBySourceIndex: [Int: CoarseDecodedFrame] = [:]
         let maximumSourceFrameIndex = SourceFrameBounds.maximumSourceFrameIndex(
             duration: duration,
             sourceFrameRate: nominalFrameRate
@@ -818,22 +779,7 @@ final class SwingVideoAnalysisEngine: Sendable {
                 maximumSourceFrameIndex,
                 max(0, Int((seconds * nominalFrameRate).rounded()))
             )
-            if let cached = coarseFramesBySourceIndex[requestedSourceFrameIndex] {
-                coarseSamples.append(CoarseSwingSample(
-                    time: cached.time,
-                    pose: cached.selectedPose.map {
-                        SwingPoseSample(time: cached.time, pose: $0)
-                    }
-                ))
-                continue
-            }
-            guard decodeLedger.registerDecode(
-                sourceFrameIndex: requestedSourceFrameIndex,
-                pass: .coarse
-            ) else {
-                return activeFrameExtractionFailure(runID: runID, gate: gate)
-            }
-            let decodedFrame: CoarseDecodedFrame? = autoreleasepool {
+            let sample: CoarseSwingSample? = autoreleasepool {
                 let requestedTime = SourceFrameRequestTimePolicy.time(
                     sourceFrameIndex: requestedSourceFrameIndex,
                     sourceFrameRate: nominalFrameRate
@@ -851,33 +797,20 @@ final class SwingVideoAnalysisEngine: Sendable {
                     sourceFrameRate: nominalFrameRate
                 ) else { return nil }
                 let actualSeconds = actualTime.seconds
-                let poseCandidates = trackedPoseDetector.detectPoses(in: image)
                 let selectedPose = trackedPoseDetector.selectPose(
-                    from: poseCandidates,
+                    in: image,
                     time: actualSeconds,
                     recordsCoreAnchorCandidate: true
                 )
-                guard let contourImage = FineFrameImageCache.prepareContourImage(image) else {
-                    return nil
-                }
-                return CoarseDecodedFrame(
-                    sourceFrameIndex: requestedSourceFrameIndex,
+                return CoarseSwingSample(
                     time: actualSeconds,
-                    poseCandidates: poseCandidates,
-                    selectedPose: selectedPose,
-                    contourImage: contourImage
+                    pose: selectedPose.map { SwingPoseSample(time: actualSeconds, pose: $0) }
                 )
             }
-            guard let decodedFrame else {
+            guard let sample else {
                 return activeFrameExtractionFailure(runID: runID, gate: gate)
             }
-            coarseFramesBySourceIndex[requestedSourceFrameIndex] = decodedFrame
-            coarseSamples.append(CoarseSwingSample(
-                time: decodedFrame.time,
-                pose: decodedFrame.selectedPose.map {
-                    SwingPoseSample(time: decodedFrame.time, pose: $0)
-                }
-            ))
+            coarseSamples.append(sample)
             publish(
                 .locating,
                 progress: Double(index + 1) / Double(max(1, coarseTimes.count)) * 0.20,
@@ -906,8 +839,8 @@ final class SwingVideoAnalysisEngine: Sendable {
         var samplesByFrame: [Int: SwingFrameSample] = [:]
         var rawPosesByFrame: [Int: PoseEstimationResult] = [:]
         var finalTimeline: [SwingTemporalFrame] = []
-        var observedAddressBoundary = false
-        var observedFinishBoundary = false
+        var windowSearchState = AdaptiveWindowSearchState()
+        let fineDecodeLedger = AdaptiveFineDecodeLedger()
         let maximumFrameBudget = adaptiveFrameBudget(sourceFrameRate: nominalFrameRate)
         let fineFrameImageCache = FineFrameImageCache(
             maximumEntryCount: adaptiveFrameCacheBudget(sourceFrameRate: nominalFrameRate)
@@ -927,46 +860,15 @@ final class SwingVideoAnalysisEngine: Sendable {
             }
             for reference in references {
                 guard gate.isActive(runID) else { return .cancelled }
-                let extraction: PoseFrameExtraction
-                if let coarse = coarseFramesBySourceIndex[reference.sourceFrameIndex] {
-                    guard fineFrameImageCache.storePrepared(
-                        sourceFrameIndex: reference.sourceFrameIndex,
-                        image: coarse.contourImage
-                    ) else {
-                        return activeFrameExtractionFailure(runID: runID, gate: gate)
-                    }
-                    let selected = trackedPoseDetector.selectPose(
-                        from: coarse.poseCandidates,
-                        time: coarse.time,
-                        recordsCoreAnchorCandidate: false
-                    )
-                    extraction = PoseFrameExtraction(
-                        sample: SwingFrameSample(
-                            sourceFrameIndex: coarse.sourceFrameIndex,
-                            time: coarse.time,
-                            pose: selected.map {
-                                SwingPoseSample(
-                                    time: coarse.time,
-                                    sourceFrameIndex: coarse.sourceFrameIndex,
-                                    pose: $0
-                                )
-                            },
-                            objectEvidence: .empty
-                        ),
-                        rawPose: selected
-                    )
-                } else {
-                    guard let decoded = extractPoseSample(
-                        reference: reference,
-                        generator: generator,
-                        detector: trackedPoseDetector,
-                        sourceFrameRate: nominalFrameRate,
-                        frameImageCache: fineFrameImageCache,
-                        decodeLedger: decodeLedger
-                    ) else {
-                        return activeFrameExtractionFailure(runID: runID, gate: gate)
-                    }
-                    extraction = decoded
+                guard let extraction = extractPoseSample(
+                    reference: reference,
+                    generator: generator,
+                    detector: trackedPoseDetector,
+                    sourceFrameRate: nominalFrameRate,
+                    frameImageCache: fineFrameImageCache,
+                    decodeLedger: fineDecodeLedger
+                ) else {
+                    return activeFrameExtractionFailure(runID: runID, gate: gate)
                 }
                 samplesByFrame[extraction.sample.sourceFrameIndex] = extraction.sample
                 if let rawPose = extraction.rawPose {
@@ -991,18 +893,10 @@ final class SwingVideoAnalysisEngine: Sendable {
                 from: SwingFeatureExtractor.extract(frames: frames)
             )
             let currentBoundaryEvidence = finalTimeline.adaptiveBoundaryEvidence
-            observedAddressBoundary = observedAddressBoundary
-                || currentBoundaryEvidence.hasAddressBoundary
-            observedFinishBoundary = observedFinishBoundary
-                || currentBoundaryEvidence.hasFinishBoundary
-            let accumulatedBoundaryEvidence = AdaptiveBoundaryEvidence(
-                hasAddressBoundary: observedAddressBoundary,
-                hasFinishBoundary: observedFinishBoundary
-            )
-            switch AdaptiveSwingWindowPlanner.nextAction(
+            switch windowSearchState.nextAction(
                 current: window,
                 duration: duration,
-                evidence: accumulatedBoundaryEvidence
+                evidence: currentBoundaryEvidence
             ) {
             case let .expand(next):
                 let retainedSourceFrames = Set(FineSwingSamplingPlan.frames(
@@ -1020,14 +914,6 @@ final class SwingVideoAnalysisEngine: Sendable {
                 fineFrameImageCache.retainSourceFrames(retainedSourceFrames)
                 window = next
             case let .ready(readyWindow):
-                guard currentBoundaryEvidence.hasAddressBoundary,
-                      currentBoundaryEvidence.hasFinishBoundary else {
-                    return activeFailure(
-                        .incompleteSwingClip,
-                        runID: runID,
-                        gate: gate
-                    )
-                }
                 window = readyWindow
                 break adaptiveExtraction
             case let .failed(reason):
@@ -1170,15 +1056,14 @@ final class SwingVideoAnalysisEngine: Sendable {
         detector: TrackedPoseDetector,
         sourceFrameRate: Double,
         frameImageCache: FineFrameImageCache,
-        decodeLedger: SourceFrameDecodeLedger
+        decodeLedger: AdaptiveFineDecodeLedger
     ) -> PoseFrameExtraction? {
         autoreleasepool {
             var observedTime: Double?
             var observedSourceFrameIndex: Int?
             let load = frameImageCache.load(sourceFrameIndex: reference.sourceFrameIndex) {
                 guard decodeLedger.registerDecode(
-                    sourceFrameIndex: reference.sourceFrameIndex,
-                    pass: .fine
+                    sourceFrameIndex: reference.sourceFrameIndex
                 ) else { return nil }
                 let requestedTime = SourceFrameRequestTimePolicy.time(
                     sourceFrameIndex: reference.sourceFrameIndex,
