@@ -297,6 +297,8 @@ enum MediaExportKind: CaseIterable {
 
 `MediaExportService.saveFrame` 通过 `AVAssetImageGenerator` 在当前时间生成 JPEG 临时文件。`MediaExportService.exportAnnotatedVideo` 通过 `AVAssetExportSession` 和 `AVVideoCompositionCoreAnimationTool` 输出带手工标注和已选体态叠层的 MOV 文件。`ShareSheet` 使用 `UIActivityViewController(activityItems: [url], applicationActivities: nil)`。
 
+补充：`LocalProjectStore` 会随编辑自动保存画线、P 点与体态叠层开关；导入和录制的视频会落在 App Support，以便下次启动恢复上一次本地项目。
+
 - [x] **步骤 4：实现只有两项的菜单**
 
 ```swift

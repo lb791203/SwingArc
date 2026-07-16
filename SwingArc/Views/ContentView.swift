@@ -53,6 +53,7 @@ struct ContentView: View {
     @State private var sharePayload: SharePayload?
     @State private var isExporting = false
     @State private var mediaStatusMessage: String?
+    @State private var currentProjectURL: URL?
 
     private var analysisPresentation: AnalysisWorkspacePresentation {
         AnalysisWorkspacePresentation(state: playbackManager.analysisState)
@@ -127,9 +128,17 @@ struct ContentView: View {
                 loadSelectedVideo(from: item)
             }
         }
+        .onChange(of: drawings) { _, _ in persistCurrentProject() }
+        .onChange(of: keyframes) { _, _ in persistCurrentProject() }
+        .onChange(of: isKeyframeMode) { _, _ in persistCurrentProject() }
+        .onChange(of: showPoseSkeleton) { _, _ in persistCurrentProject() }
+        .onChange(of: showHeadStability) { _, _ in persistCurrentProject() }
+        .onChange(of: showSpineAngle) { _, _ in persistCurrentProject() }
+        .onChange(of: showGrid) { _, _ in persistCurrentProject() }
+        .task { restoreLastProjectIfAvailable() }
         .sheet(isPresented: $showCameraView) {
             CameraView(onRecordCompleted: { recordedURL in
-                loadVideoFromURL(recordedURL)
+                loadVideoFromURL(persistVideoIfNeeded(recordedURL))
             })
         }
         .confirmationDialog(
@@ -838,15 +847,13 @@ struct ContentView: View {
             switch result {
             case .success(let data?):
                 // PhotosPicker 返回数据，必须存入本地临时沙盒才能由 AVPlayer 加载
-                let tempDir = NSTemporaryDirectory()
-                let tempURL = URL(fileURLWithPath: tempDir).appendingPathComponent("imported_swing.mp4")
-                
-                try? FileManager.default.removeItem(at: tempURL)
+                let videoURL = persistentVideoDirectory()
+                    .appendingPathComponent("imported-\(UUID().uuidString).mp4")
                 
                 do {
-                    try data.write(to: tempURL)
+                    try data.write(to: videoURL, options: .atomic)
                     DispatchQueue.main.async {
-                        loadVideoFromURL(tempURL)
+                        loadVideoFromURL(videoURL)
                     }
                 } catch {
                     print("Error saving video data to sandbox: \(error)")
@@ -860,9 +867,71 @@ struct ContentView: View {
     }
     
     private func loadVideoFromURL(_ url: URL) {
+        currentProjectURL = nil
         drawings.removeAll()
         keyframes.removeAll()
+        drawingHistory.removeAll()
+        drawingRedoHistory.removeAll()
+        isKeyframeMode = true
+        showPoseSkeleton = false
+        showHeadStability = false
+        showSpineAngle = false
+        showGrid = false
         playbackManager.loadVideo(url: url)
+
+        if let project = LocalProjectStore.load(for: url) {
+            drawings = project.drawings
+            keyframes = project.keyframes
+            isKeyframeMode = project.isKeyframeMode
+            showPoseSkeleton = project.showPoseSkeleton
+            showHeadStability = project.showHeadStability
+            showSpineAngle = project.showSpineAngle
+            showGrid = project.showGrid
+        }
+        currentProjectURL = url
+    }
+
+    private func persistCurrentProject() {
+        guard let videoURL = currentProjectURL else { return }
+        LocalProjectStore.save(
+            LocalAnalysisProject(
+                drawings: drawings,
+                keyframes: keyframes,
+                isKeyframeMode: isKeyframeMode,
+                showPoseSkeleton: showPoseSkeleton,
+                showHeadStability: showHeadStability,
+                showSpineAngle: showSpineAngle,
+                showGrid: showGrid
+            ),
+            for: videoURL
+        )
+    }
+
+    private func restoreLastProjectIfAvailable() {
+        guard playbackManager.player == nil,
+              let videoURL = LocalProjectStore.lastVideoURL(),
+              !videoURL.isFileURL || FileManager.default.fileExists(atPath: videoURL.path) else { return }
+        loadVideoFromURL(videoURL)
+    }
+
+    private func persistVideoIfNeeded(_ sourceURL: URL) -> URL {
+        guard sourceURL.isFileURL else { return sourceURL }
+        let directory = persistentVideoDirectory()
+        guard !sourceURL.path.hasPrefix(directory.path) else { return sourceURL }
+        let destination = directory.appendingPathComponent("recorded-\(UUID().uuidString).mov")
+        do {
+            try FileManager.default.copyItem(at: sourceURL, to: destination)
+            return destination
+        } catch {
+            return sourceURL
+        }
+    }
+
+    private func persistentVideoDirectory() -> URL {
+        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("SwingArcVideos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
     }
     
     /// 加载网络示例高尔夫挥杆视频 (LG Golf Slo-Mo 慢动作教程视频)

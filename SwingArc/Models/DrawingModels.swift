@@ -1,7 +1,11 @@
 import SwiftUI
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 /// 绘图工具类型
-enum DrawingTool: String, CaseIterable, Identifiable {
+enum DrawingTool: String, CaseIterable, Identifiable, Codable {
     case select = "选择"
     case line = "直线"
     case circle = "圆圈"
@@ -75,7 +79,7 @@ struct KeyframeMarker: Identifiable, Codable, Equatable {
 }
 
 /// 归一化绘图元素（坐标均为 0.0 - 1.0，适配不同屏幕及缩放）
-struct DrawingElement: Identifiable, Equatable {
+struct DrawingElement: Identifiable, Equatable, Codable {
     let id: UUID
     var tool: DrawingTool
     var points: [CGPoint] // 归一化坐标点：(0,0)为左下角，(1,1)为右上角 (Vision/AVFoundation标准)
@@ -106,5 +110,73 @@ struct DrawingElement: Identifiable, Equatable {
     func shouldShow(at currentTime: Double, threshold: Double = 0.15) -> Bool {
         if !isKeyframeSpecific { return true }
         return abs(currentTime - videoTime) <= threshold
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, tool, points, color, lineWidth, isKeyframeSpecific, videoTime
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        tool = try container.decode(DrawingTool.self, forKey: .tool)
+        points = try container.decode([PersistedPoint].self, forKey: .points).map(\.cgPoint)
+        color = try container.decode(PersistedColor.self, forKey: .color).swiftUIColor
+        lineWidth = try container.decode(CGFloat.self, forKey: .lineWidth)
+        isKeyframeSpecific = try container.decode(Bool.self, forKey: .isKeyframeSpecific)
+        videoTime = try container.decode(Double.self, forKey: .videoTime)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(tool, forKey: .tool)
+        try container.encode(points.map(PersistedPoint.init), forKey: .points)
+        try container.encode(PersistedColor(color), forKey: .color)
+        try container.encode(lineWidth, forKey: .lineWidth)
+        try container.encode(isKeyframeSpecific, forKey: .isKeyframeSpecific)
+        try container.encode(videoTime, forKey: .videoTime)
+    }
+}
+
+private struct PersistedPoint: Codable {
+    let x: CGFloat
+    let y: CGFloat
+
+    init(_ point: CGPoint) {
+        x = point.x
+        y = point.y
+    }
+
+    var cgPoint: CGPoint { CGPoint(x: x, y: y) }
+}
+
+private struct PersistedColor: Codable {
+    let red: Double
+    let green: Double
+    let blue: Double
+    let opacity: Double
+
+    init(_ color: Color) {
+        #if canImport(UIKit)
+        var red: CGFloat = 0
+        var green: CGFloat = 0.8
+        var blue: CGFloat = 0.3
+        var opacity: CGFloat = 1
+        UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &opacity)
+        self.red = Double(red)
+        self.green = Double(green)
+        self.blue = Double(blue)
+        self.opacity = Double(opacity)
+        #else
+        self.red = 0
+        self.green = 0.8
+        self.blue = 0.3
+        self.opacity = 1
+        #endif
+    }
+
+    var swiftUIColor: Color {
+        Color(.sRGB, red: red, green: green, blue: blue, opacity: opacity)
     }
 }
