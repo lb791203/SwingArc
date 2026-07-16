@@ -79,10 +79,16 @@ struct OrderedStageSolverSmoke {
             make(0.80, hand: CGPoint(x: 0.68, y: 0.28), armAngle: 45, velocityY: -0.80, headSpeed: 0.02, hipSpeed: 0.02, shoulderAngle: -20, hipAngle: 42, object: neutralObject),
             make(0.90, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.01, headSpeed: 0.01, hipSpeed: 0.01, shoulderAngle: -24, hipAngle: 44, object: neutralObject),
             make(1.00, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.00, headSpeed: 0.01, hipSpeed: 0.01, shoulderAngle: -24, hipAngle: 44, object: neutralObject),
-            make(1.10, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.00, headSpeed: 0.01, hipSpeed: 0.01, shoulderAngle: -24, hipAngle: 44, object: neutralObject),
+            // One slightly noisy Vision frame must not invalidate the plateau.
+            make(1.10, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.00, headSpeed: 0.09, hipSpeed: 0.01, shoulderAngle: -24, hipAngle: 44, object: neutralObject),
             make(1.20, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.00, headSpeed: 0.01, hipSpeed: 0.01, shoulderAngle: -24, hipAngle: 44, object: neutralObject),
+            // A later, higher-scoring stable pose must not replace the first finish plateau.
+            make(1.30, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.00, headSpeed: 0.01, hipSpeed: 0.01, shoulderAngle: 80, hipAngle: 80, object: neutralObject),
+            make(1.40, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.00, headSpeed: 0.01, hipSpeed: 0.01, shoulderAngle: 80, hipAngle: 80, object: neutralObject),
+            make(1.50, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.00, headSpeed: 0.01, hipSpeed: 0.01, shoulderAngle: 80, hipAngle: 80, object: neutralObject),
+            make(1.60, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.00, headSpeed: 0.01, hipSpeed: 0.01, shoulderAngle: 80, hipAngle: 80, object: neutralObject),
             // Later walking must not replace the first stable finish window.
-            make(1.30, hand: CGPoint(x: 0.50, y: 0.55), armAngle: 25, velocityY: 2.00, headSpeed: 0.40, hipSpeed: 0.35, object: .empty)
+            make(1.70, hand: CGPoint(x: 0.50, y: 0.55), armAngle: 25, velocityY: 2.00, headSpeed: 0.40, hipSpeed: 0.35, object: .empty)
         ]
     }
 

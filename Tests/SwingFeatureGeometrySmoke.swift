@@ -23,6 +23,16 @@ struct SwingFeatureGeometrySmoke {
         precondition(abs(SwingGeometry.lineAngle(from: pose.leftShoulder!, to: pose.rightShoulder!)) < 0.001)
         precondition(abs(SwingGeometry.lineAngle(from: pose.leftHip!, to: pose.rightHip!)) < 0.001)
 
+        let leftwardArmAngle = SwingGeometry.angleFromHorizontal(
+            from: CGPoint(x: 0.50, y: 0.40),
+            to: CGPoint(x: 0.20, y: 0.26)
+        )
+        let expectedAcuteAngle = atan2(0.14, 0.30) * 180 / Double.pi
+        precondition(
+            abs(leftwardArmAngle - expectedAcuteAngle) < 0.001,
+            "A leftward arm axis must use its acute angle from horizontal, got \(leftwardArmAngle)"
+        )
+
         let object = SwingObjectEvidence(
             shaft: nil,
             ball: BallEvidence(center: CGPoint(x: 0.25, y: 0.80), radius: 0.012, confidence: 0.9),
@@ -42,5 +52,66 @@ struct SwingFeatureGeometrySmoke {
         precondition(evidence.allSatisfy { $0.leadArm == .left })
         precondition(evidence.allSatisfy { abs(($0.leadArmAngle ?? 90)) < 0.001 })
         precondition(evidence.allSatisfy { ($0.leadArmExtension ?? 0) > 179.9 })
+
+        let jumpedPose = SwingPoseSample(
+            time: 0,
+            leftWrist: CGPoint(x: 0.82, y: 0.10),
+            rightWrist: CGPoint(x: 0.86, y: 0.10),
+            leftElbow: pose.leftElbow,
+            rightElbow: pose.rightElbow,
+            leftShoulder: pose.leftShoulder,
+            rightShoulder: pose.rightShoulder,
+            leftHip: pose.leftHip,
+            rightHip: pose.rightHip,
+            head: pose.head,
+            spineAngle: pose.spineAngle,
+            aggregateConfidence: pose.aggregateConfidence
+        )
+        let outlierFrames = (0..<9).map { index in
+            SwingFrameSample(
+                sourceFrameIndex: index,
+                time: Double(index) / 30,
+                pose: index == 4 ? jumpedPose : pose,
+                objectEvidence: .empty
+            )
+        }
+        let outlierEvidence = SwingFeatureExtractor.extract(frames: outlierFrames)
+        let maximumHandSpeed = outlierEvidence.map {
+            hypot(Double($0.handVelocity.x), Double($0.handVelocity.y))
+        }.max() ?? 0
+        precondition(
+            maximumHandSpeed < 0.5,
+            "One isolated Vision wrist outlier must not create a fake high-speed phase, got \(maximumHandSpeed)"
+        )
+
+        let swappedTorsoPose = SwingPoseSample(
+            time: 0,
+            leftWrist: pose.rightWrist,
+            rightWrist: pose.leftWrist,
+            leftElbow: pose.rightElbow,
+            rightElbow: pose.leftElbow,
+            leftShoulder: pose.rightShoulder,
+            rightShoulder: pose.leftShoulder,
+            leftHip: pose.rightHip,
+            rightHip: pose.leftHip,
+            head: pose.head,
+            spineAngle: pose.spineAngle,
+            aggregateConfidence: pose.aggregateConfidence
+        )
+        let alternatingTorsoFrames = (0..<9).map { index in
+            SwingFrameSample(
+                sourceFrameIndex: index,
+                time: Double(index) / 30,
+                pose: index.isMultiple(of: 2) ? pose : swappedTorsoPose,
+                objectEvidence: .empty
+            )
+        }
+        let alternatingTorsoEvidence = SwingFeatureExtractor.extract(frames: alternatingTorsoFrames)
+        precondition(
+            alternatingTorsoEvidence.allSatisfy {
+                abs($0.shoulderAngle ?? 180) < 0.001 && abs($0.hipAngle ?? 180) < 0.001
+            },
+            "Shoulder and hip axes must remain unchanged when Vision exchanges left/right labels"
+        )
     }
 }

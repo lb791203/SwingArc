@@ -395,8 +395,8 @@ class VideoPlaybackManager: ObservableObject {
                 return
             }
 
-            let fineObjectDetector = SwingObjectDetector()
             var fineFrames: [SwingFrameSample] = []
+            var rawPosesByFrame: [Int: PoseEstimationResult] = [:]
             var fineFrameFailures = 0
             for (index, reference) in fineReferences.enumerated() {
                 guard self.analysisRunGate.isActive(runID) else { return }
@@ -406,16 +406,14 @@ class VideoPlaybackManager: ObservableObject {
                         fineFrameFailures += 1
                         return
                     }
-                    let analysis: (PoseEstimationResult?, SwingObjectEvidence) = self.poseQueue.sync {
+                    let selected: PoseEstimationResult? = self.poseQueue.sync {
                         let candidates = self.poseDetector.detectPoses(in: cgImage, orientation: .up)
-                        let selected = golferTracker.select(
-                            from: candidates,
-                            stableBall: fineObjectDetector.stableBall?.center
-                        )
-                        let objects = fineObjectDetector.detect(in: cgImage, pose: selected)
-                        return (selected, objects)
+                        return golferTracker.select(from: candidates, stableBall: nil)
                     }
-                    let pose = analysis.0.map {
+                    if let selected {
+                        rawPosesByFrame[reference.sourceFrameIndex] = selected
+                    }
+                    let pose = selected.map {
                         SwingPoseSample(
                             time: reference.time,
                             sourceFrameIndex: reference.sourceFrameIndex,
@@ -427,12 +425,12 @@ class VideoPlaybackManager: ObservableObject {
                             sourceFrameIndex: reference.sourceFrameIndex,
                             time: reference.time,
                             pose: pose,
-                            objectEvidence: analysis.1
+                            objectEvidence: .empty
                         )
                     )
                 }
 
-                let progress = 0.25 + Double(index + 1) / Double(max(1, fineReferences.count)) * 0.70
+                let progress = 0.25 + Double(index + 1) / Double(max(1, fineReferences.count)) * 0.55
                 DispatchQueue.main.async {
                     guard self.analysisRunGate.isActive(runID) else { return }
                     self.analysisProgressPhase = .extracting
@@ -450,6 +448,60 @@ class VideoPlaybackManager: ObservableObject {
             guard poseFrameCount >= SwingStage.allCases.count else {
                 self.publishAnalysisFailure(.noStableGolfer, runID: runID, completion: completion)
                 return
+            }
+
+            let preliminaryResult = SwingStageDetector.detect(frames: fineFrames)
+            let objectReferences = SparseObjectSamplingPlan.frames(
+                from: fineReferences,
+                preliminaryResult: preliminaryResult
+            )
+            let fineObjectDetector = SwingObjectDetector()
+            var objectEvidenceByFrame: [Int: SwingObjectEvidence] = [:]
+            for (index, reference) in objectReferences.enumerated() {
+                guard self.analysisRunGate.isActive(runID) else { return }
+                let requestedTime = CMTime(seconds: reference.time, preferredTimescale: 60_000)
+                autoreleasepool {
+                    guard let cgImage = try? generator.copyCGImage(at: requestedTime, actualTime: nil) else {
+                        return
+                    }
+                    let objects = self.poseQueue.sync {
+                        fineObjectDetector.detect(
+                            in: cgImage,
+                            pose: rawPosesByFrame[reference.sourceFrameIndex]
+                        )
+                    }
+                    objectEvidenceByFrame[reference.sourceFrameIndex] = objects
+                }
+
+                let progress = 0.80 + Double(index + 1) / Double(max(1, objectReferences.count)) * 0.15
+                DispatchQueue.main.async {
+                    guard self.analysisRunGate.isActive(runID) else { return }
+                    self.analysisProgressPhase = .extracting
+                    self.scanProgress = progress
+                    self.analysisState = .scanning(progress: progress)
+                }
+            }
+
+            let stableBall = fineObjectDetector.stableBall?.center
+            fineFrames = fineFrames.map { frame in
+                let detected = objectEvidenceByFrame[frame.sourceFrameIndex] ?? .empty
+                let objects: SwingObjectEvidence
+                if detected.stableBall == nil, let stableBall {
+                    objects = SwingObjectEvidence(
+                        shaft: detected.shaft,
+                        ball: detected.ball,
+                        stableBall: stableBall,
+                        ballLocalChange: detected.ballLocalChange
+                    )
+                } else {
+                    objects = detected
+                }
+                return SwingFrameSample(
+                    sourceFrameIndex: frame.sourceFrameIndex,
+                    time: frame.time,
+                    pose: frame.pose,
+                    objectEvidence: objects
+                )
             }
 
             DispatchQueue.main.async {

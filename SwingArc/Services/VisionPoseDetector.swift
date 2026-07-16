@@ -327,7 +327,11 @@ final class SwingObjectDetector {
         let request = VNDetectContoursRequest()
         request.contrastAdjustment = 1.3
         request.detectsDarkOnLight = true
-        request.maximumImageDimension = 640
+        request.maximumImageDimension = SwingObjectRegionPolicy.maximumImageDimension
+        let visionRegion = SwingObjectRegionPolicy.visionRegion(
+            points: pose?.keypoints.values.map(\.position) ?? []
+        )
+        request.regionOfInterest = visionRegion
 
         let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
         guard (try? handler.perform([request])) != nil,
@@ -343,12 +347,13 @@ final class SwingObjectDetector {
 
         let contours = flattenedContours(observation.topLevelContours)
         let handCenter = pose.flatMap(Self.handCenter)
-        let ballCandidate = bestBallCandidate(in: contours, pose: pose)
+        let ballCandidate = bestBallCandidate(in: contours, pose: pose, visionRegion: visionRegion)
         let update = ballTracker.update(ballCandidate)
         let shaft = bestShaftCandidate(
             in: contours,
             handCenter: handCenter,
-            stableBall: update.stableBall?.center
+            stableBall: update.stableBall?.center,
+            visionRegion: visionRegion
         )
         return SwingObjectEvidence(
             shaft: shaft,
@@ -364,11 +369,12 @@ final class SwingObjectDetector {
 
     private func bestBallCandidate(
         in contours: [VNContour],
-        pose: PoseEstimationResult?
+        pose: PoseEstimationResult?,
+        visionRegion: CGRect
     ) -> BallEvidence? {
         let hipY = pose?.hipMid?.y ?? 0.55
         return contours.compactMap { contour -> (BallEvidence, Double)? in
-            let points = normalizedPoints(contour)
+            let points = normalizedPoints(contour, visionRegion: visionRegion)
             guard points.count >= 5, let bounds = bounds(of: points) else { return nil }
             let width = Double(bounds.width)
             let height = Double(bounds.height)
@@ -390,11 +396,12 @@ final class SwingObjectDetector {
     private func bestShaftCandidate(
         in contours: [VNContour],
         handCenter: CGPoint?,
-        stableBall: CGPoint?
+        stableBall: CGPoint?,
+        visionRegion: CGRect
     ) -> ClubShaftEvidence? {
         guard let handCenter else { return nil }
         return contours.compactMap { contour -> (ClubShaftEvidence, Double)? in
-            let points = normalizedPoints(contour)
+            let points = normalizedPoints(contour, visionRegion: visionRegion)
             guard points.count >= 2,
                   let pair = farthestPair(in: points) else { return nil }
             let evidence = ClubShaftEvidence(start: pair.0, end: pair.1, confidence: 0)
@@ -417,9 +424,12 @@ final class SwingObjectDetector {
         }.max { $0.1 < $1.1 }?.0
     }
 
-    private func normalizedPoints(_ contour: VNContour) -> [CGPoint] {
+    private func normalizedPoints(_ contour: VNContour, visionRegion: CGRect) -> [CGPoint] {
         contour.normalizedPoints.map {
-            CGPoint(x: CGFloat($0.x), y: 1 - CGFloat($0.y))
+            CGPoint(
+                x: visionRegion.minX + CGFloat($0.x) * visionRegion.width,
+                y: 1 - (visionRegion.minY + CGFloat($0.y) * visionRegion.height)
+            )
         }
     }
 

@@ -232,7 +232,8 @@ enum SwingGeometry {
     }
 
     nonisolated static func angleFromHorizontal(from: CGPoint, to: CGPoint) -> Double {
-        abs(lineAngle(from: from, to: to)).truncatingRemainder(dividingBy: 180)
+        let normalized = abs(lineAngle(from: from, to: to)).truncatingRemainder(dividingBy: 180)
+        return min(normalized, 180 - normalized)
     }
 
     nonisolated static func jointAngle(a: CGPoint, vertex: CGPoint, c: CGPoint) -> Double {
@@ -258,8 +259,11 @@ enum SwingGeometry {
 }
 
 enum SwingFeatureExtractor {
+    private static let poseSmoothingRadius = 2
+
     static func extract(frames rawFrames: [SwingFrameSample]) -> [SwingFrameEvidence] {
-        let frames = rawFrames.sorted { $0.time < $1.time }
+        let sortedFrames = rawFrames.sorted { $0.time < $1.time }
+        let frames = smoothedFrames(sortedFrames)
         let leadArm = resolveLeadArm(frames: frames)
         var previousHand: CGPoint?
         var previousVelocity = CGPoint.zero
@@ -295,8 +299,8 @@ enum SwingFeatureExtractor {
             }
 
             let armPoints = points(for: leadArm, pose: pose)
-            let shoulderAngle = lineAngle(pose?.leftShoulder, pose?.rightShoulder)
-            let hipAngle = lineAngle(pose?.leftHip, pose?.rightHip)
+            let shoulderAngle = axisAngle(pose?.leftShoulder, pose?.rightShoulder)
+            let hipAngle = axisAngle(pose?.leftHip, pose?.rightHip)
             let coverage = pose.map(poseCoverage) ?? 0
             let evidence = SwingFrameEvidence(
                 sourceFrameIndex: frame.sourceFrameIndex,
@@ -323,6 +327,70 @@ enum SwingFeatureExtractor {
             previousTime = frame.time
             return evidence
         }
+    }
+
+    private static func smoothedFrames(_ frames: [SwingFrameSample]) -> [SwingFrameSample] {
+        let poses = frames.map(\.pose)
+        return frames.indices.map { index in
+            let frame = frames[index]
+            guard let rawPose = frame.pose else { return frame }
+            let pose = SwingPoseSample(
+                time: frame.time,
+                leftWrist: medianPoint(poses, at: index, keyPath: \.leftWrist),
+                rightWrist: medianPoint(poses, at: index, keyPath: \.rightWrist),
+                leftElbow: medianPoint(poses, at: index, keyPath: \.leftElbow),
+                rightElbow: medianPoint(poses, at: index, keyPath: \.rightElbow),
+                leftShoulder: medianPoint(poses, at: index, keyPath: \.leftShoulder),
+                rightShoulder: medianPoint(poses, at: index, keyPath: \.rightShoulder),
+                leftHip: medianPoint(poses, at: index, keyPath: \.leftHip),
+                rightHip: medianPoint(poses, at: index, keyPath: \.rightHip),
+                head: medianPoint(poses, at: index, keyPath: \.head),
+                spineAngle: medianValue(poses, at: index, keyPath: \.spineAngle),
+                aggregateConfidence: rawPose.aggregateConfidence,
+                sourceFrameIndex: frame.sourceFrameIndex,
+                leftKnee: medianPoint(poses, at: index, keyPath: \.leftKnee),
+                rightKnee: medianPoint(poses, at: index, keyPath: \.rightKnee),
+                leftAnkle: medianPoint(poses, at: index, keyPath: \.leftAnkle),
+                rightAnkle: medianPoint(poses, at: index, keyPath: \.rightAnkle)
+            )
+            return SwingFrameSample(
+                sourceFrameIndex: frame.sourceFrameIndex,
+                time: frame.time,
+                pose: pose,
+                objectEvidence: frame.objectEvidence
+            )
+        }
+    }
+
+    private static func medianPoint(
+        _ poses: [SwingPoseSample?],
+        at index: Int,
+        keyPath: KeyPath<SwingPoseSample, CGPoint?>
+    ) -> CGPoint? {
+        let start = max(0, index - poseSmoothingRadius)
+        let end = min(poses.count - 1, index + poseSmoothingRadius)
+        let points = poses[start...end].compactMap { $0?[keyPath: keyPath] }
+        let requiredCount = max(1, (end - start + 2) / 2)
+        guard points.count >= requiredCount else { return nil }
+        let xValues = points.map(\.x).sorted()
+        let yValues = points.map(\.y).sorted()
+        return CGPoint(
+            x: xValues[xValues.count / 2],
+            y: yValues[yValues.count / 2]
+        )
+    }
+
+    private static func medianValue(
+        _ poses: [SwingPoseSample?],
+        at index: Int,
+        keyPath: KeyPath<SwingPoseSample, Double?>
+    ) -> Double? {
+        let start = max(0, index - poseSmoothingRadius)
+        let end = min(poses.count - 1, index + poseSmoothingRadius)
+        let values = poses[start...end].compactMap { $0?[keyPath: keyPath] }.sorted()
+        let requiredCount = max(1, (end - start + 2) / 2)
+        guard values.count >= requiredCount else { return nil }
+        return values[values.count / 2]
     }
 
     private static func resolveLeadArm(frames: [SwingFrameSample]) -> LeadArmSide {
@@ -370,6 +438,13 @@ enum SwingFeatureExtractor {
     private static func lineAngle(_ first: CGPoint?, _ second: CGPoint?) -> Double? {
         guard let first, let second else { return nil }
         return SwingGeometry.lineAngle(from: first, to: second)
+    }
+
+    private static func axisAngle(_ first: CGPoint?, _ second: CGPoint?) -> Double? {
+        guard var angle = lineAngle(first, second) else { return nil }
+        while angle > 90 { angle -= 180 }
+        while angle <= -90 { angle += 180 }
+        return angle
     }
 
     private static func angleFromHorizontal(_ first: CGPoint?, _ second: CGPoint?) -> Double? {
@@ -563,6 +638,17 @@ enum OrderedStageSolver {
             }
         }
 
+        if let followThroughStageIndex = stages.firstIndex(of: .followThrough),
+           let finishStageIndex = stages.firstIndex(of: .finish) {
+            let firstPostFollowThrough = selected[followThroughStageIndex] + 1
+            if firstPostFollowThrough < evidence.count,
+               let earliestFinish = (firstPostFollowThrough..<evidence.count).first(where: {
+                   isStableFinish(startingAt: $0, evidence: evidence)
+               }) {
+                selected[finishStageIndex] = earliestFinish
+            }
+        }
+
         let detections = stages.indices.map { stageIndex -> SwingStageDetection in
             let stage = stages[stageIndex]
             let frameIndex = selected[stageIndex]
@@ -690,20 +776,26 @@ enum OrderedStageSolver {
         evidence: [SwingFrameEvidence]
     ) -> Bool {
         let start = evidence[index]
-        guard start.headSpeed <= 0.08,
-              start.hipSpeed <= 0.08,
-              hypot(Double(start.handVelocity.x), Double(start.handVelocity.y)) <= 0.18 else { return false }
-        var reachedDuration = false
+        guard isLocallyStable(start) else { return false }
+        let targetDuration = 0.30
+        let minimumObservedDuration = 0.25
+        var observed = 0
+        var stable = 0
+        var lastTime = start.time
         for candidate in evidence[index...] {
-            guard candidate.headSpeed <= 0.08,
-                  candidate.hipSpeed <= 0.08,
-                  hypot(Double(candidate.handVelocity.x), Double(candidate.handVelocity.y)) <= 0.18 else { break }
-            if candidate.time - start.time >= 0.25 {
-                reachedDuration = true
-                break
-            }
+            guard candidate.time - start.time <= targetDuration + 0.001 else { break }
+            observed += 1
+            if isLocallyStable(candidate) { stable += 1 }
+            lastTime = candidate.time
         }
-        return reachedDuration
+        guard lastTime - start.time >= minimumObservedDuration, observed > 0 else { return false }
+        return Double(stable) / Double(observed) >= 0.75
+    }
+
+    private static func isLocallyStable(_ frame: SwingFrameEvidence) -> Bool {
+        frame.headSpeed <= 0.08 &&
+            frame.hipSpeed <= 0.08 &&
+            hypot(Double(frame.handVelocity.x), Double(frame.handVelocity.y)) <= 0.18
     }
 
     private static func shaftBallScore(_ object: SwingObjectEvidence) -> Double {
@@ -1052,7 +1144,8 @@ enum SwingWindowLocator {
     static let samplesPerSecond = 8.0
     private static let maximumWindowDuration = 6.0
     private static let bridgeGapDuration = 0.5
-    private static let leadingPadding = 0.6
+    private static let featureSmoothingRadius = 2
+    private static let leadingPadding = 1.5
     private static let trailingPadding = 1.0
 
     static func sampleTimes(duration: Double) -> [Double] {
@@ -1071,24 +1164,37 @@ enum SwingWindowLocator {
         let poseCoverage = Double(samples.filter { $0.pose != nil }.count) / Double(samples.count)
         guard poseCoverage >= 0.5 else { return .failed(.insufficientPoseEvidence) }
 
+        let hands = samples.map { $0.pose.flatMap(handCenter) }
+        let shoulderAxes = samples.map { $0.pose.flatMap { lineAngle($0.leftShoulder, $0.rightShoulder) } }
+        let hipAxes = samples.map { $0.pose.flatMap { lineAngle($0.leftHip, $0.rightHip) } }
+        let smoothedHands = hands.indices.map {
+            medianPoint(hands, at: $0, radius: featureSmoothingRadius)
+        }
+        let smoothedShoulderAxes = shoulderAxes.indices.map {
+            meanAxisAngle(shoulderAxes, at: $0, radius: featureSmoothingRadius)
+        }
+        let smoothedHipAxes = hipAxes.indices.map {
+            meanAxisAngle(hipAxes, at: $0, radius: featureSmoothingRadius)
+        }
+
         var energies = Array(repeating: 0.0, count: samples.count)
         for index in 1..<samples.count {
-            guard let current = samples[index].pose,
-                  let previous = samples[index - 1].pose else { continue }
+            guard samples[index].pose != nil,
+                  samples[index - 1].pose != nil else { continue }
             let elapsed = samples[index].time - samples[index - 1].time
             guard elapsed > 0 else { continue }
 
             let handMotion = normalizedDistance(
-                handCenter(current),
-                handCenter(previous)
+                smoothedHands[index],
+                smoothedHands[index - 1]
             ) / elapsed
             let shoulderMotion = angularDistance(
-                lineAngle(current.leftShoulder, current.rightShoulder),
-                lineAngle(previous.leftShoulder, previous.rightShoulder)
+                smoothedShoulderAxes[index],
+                smoothedShoulderAxes[index - 1]
             ) / elapsed
             let hipMotion = angularDistance(
-                lineAngle(current.leftHip, current.rightHip),
-                lineAngle(previous.leftHip, previous.rightHip)
+                smoothedHipAxes[index],
+                smoothedHipAxes[index - 1]
             ) / elapsed
             energies[index] = handMotion + shoulderMotion * 0.20 + hipMotion * 0.15
         }
@@ -1211,6 +1317,37 @@ enum SwingWindowLocator {
         return atan2(Double(second.y - first.y), Double(second.x - first.x))
     }
 
+    private static func medianPoint(
+        _ values: [CGPoint?],
+        at index: Int,
+        radius: Int
+    ) -> CGPoint? {
+        let start = max(0, index - radius)
+        let end = min(values.count - 1, index + radius)
+        let points = values[start...end].compactMap { $0 }
+        guard !points.isEmpty else { return nil }
+        let xValues = points.map(\.x).sorted()
+        let yValues = points.map(\.y).sorted()
+        return CGPoint(
+            x: xValues[xValues.count / 2],
+            y: yValues[yValues.count / 2]
+        )
+    }
+
+    private static func meanAxisAngle(
+        _ values: [Double?],
+        at index: Int,
+        radius: Int
+    ) -> Double? {
+        let start = max(0, index - radius)
+        let end = min(values.count - 1, index + radius)
+        let angles = values[start...end].compactMap { $0 }
+        guard !angles.isEmpty else { return nil }
+        let sine = angles.reduce(0.0) { $0 + sin($1 * 2) }
+        let cosine = angles.reduce(0.0) { $0 + cos($1 * 2) }
+        return atan2(sine, cosine) / 2
+    }
+
     private static func normalizedDistance(_ first: CGPoint?, _ second: CGPoint?) -> Double {
         guard let first, let second else { return 0 }
         return hypot(Double(first.x - second.x), Double(first.y - second.y))
@@ -1218,8 +1355,11 @@ enum SwingWindowLocator {
 
     private static func angularDistance(_ first: Double?, _ second: Double?) -> Double {
         guard let first, let second else { return 0 }
-        let raw = abs(first - second).truncatingRemainder(dividingBy: .pi * 2)
-        return min(raw, .pi * 2 - raw)
+        // Shoulder and hip lines are axes, not directed vectors. Vision can
+        // exchange left/right labels in side-on poses; a 180-degree endpoint
+        // reversal must therefore remain zero motion instead of a huge spike.
+        let raw = abs(first - second).truncatingRemainder(dividingBy: .pi)
+        return min(raw, .pi - raw)
     }
 
     private static func medianInterval(_ times: [Double]) -> Double {
@@ -1265,5 +1405,74 @@ enum FineSwingSamplingPlan {
             references.append(FineFrameReference(sourceFrameIndex: lastFrame, time: Double(lastFrame) / sourceFrameRate))
         }
         return references
+    }
+}
+
+enum SparseObjectSamplingPlan {
+    static let maximumFrameCount = 32
+    private static let neighborRadius = 1
+
+    static func frames(
+        from references: [FineFrameReference],
+        preliminaryResult: SwingAnalysisResult
+    ) -> [FineFrameReference] {
+        guard !references.isEmpty else { return [] }
+        var selectedIndices = Set<Int>()
+        for time in preliminaryResult.detections.compactMap(\.time) {
+            guard let nearest = references.indices.min(by: {
+                abs(references[$0].time - time) < abs(references[$1].time - time)
+            }) else { continue }
+            for index in max(references.startIndex, nearest - neighborRadius)...min(references.index(before: references.endIndex), nearest + neighborRadius) {
+                selectedIndices.insert(index)
+            }
+        }
+
+        if selectedIndices.isEmpty {
+            let fallbackCount = min(12, references.count)
+            for offset in 0..<fallbackCount {
+                let fraction = fallbackCount == 1 ? 0 : Double(offset) / Double(fallbackCount - 1)
+                selectedIndices.insert(Int((fraction * Double(references.count - 1)).rounded()))
+            }
+        }
+
+        return selectedIndices
+            .sorted()
+            .prefix(maximumFrameCount)
+            .map { references[$0] }
+    }
+}
+
+enum SwingObjectRegionPolicy {
+    static let maximumImageDimension = 256
+
+    /// Returns a normalized Vision ROI. Input points use the app's top-left
+    /// coordinate system; Vision expects the ROI origin at the bottom-left.
+    static func visionRegion(points: [CGPoint]) -> CGRect {
+        let valid = points.filter {
+            $0.x.isFinite && $0.y.isFinite &&
+                (0...1).contains($0.x) && (0...1).contains($0.y)
+        }
+        guard let minimumX = valid.map(\.x).min(),
+              let maximumX = valid.map(\.x).max(),
+              let minimumY = valid.map(\.y).min(),
+              let maximumY = valid.map(\.y).max() else {
+            return CGRect(x: 0.15, y: 0.06, width: 0.70, height: 0.88)
+        }
+
+        let bodyWidth = max(0.10, maximumX - minimumX)
+        let bodyHeight = max(0.20, maximumY - minimumY)
+        let horizontalPadding = max(0.12, bodyWidth * 1.10)
+        let topPadding = max(0.08, bodyHeight * 0.25)
+        let bottomPadding = max(0.15, bodyHeight * 0.75)
+        let left = max(0, minimumX - horizontalPadding)
+        let right = min(1, maximumX + horizontalPadding)
+        let top = max(0, minimumY - topPadding)
+        let bottom = min(1, maximumY + bottomPadding)
+        return CGRect(
+            x: left,
+            y: 1 - bottom,
+            width: max(0.01, right - left),
+            height: max(0.01, bottom - top)
+        )
     }
 }
