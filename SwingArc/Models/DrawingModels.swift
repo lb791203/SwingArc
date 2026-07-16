@@ -25,8 +25,9 @@ enum DrawingTool: String, CaseIterable, Identifiable {
 enum SwingStage: String, CaseIterable, Identifiable {
     case address = "准备姿势 (Address)"
     case takeaway = "起杆 (Takeaway)"
+    case leadArmParallelBackswing = "上杆左臂平行 (Lead Arm Parallel)"
     case top = "上杆顶点 (Top)"
-    case downswing = "下杆 (Downswing)"
+    case leadArmParallelDownswing = "下杆左臂平行 (Lead Arm Parallel)"
     case impact = "击球瞬间 (Impact)"
     case followThrough = "送杆 (Follow-Through)"
     case finish = "收杆 (Finish)"
@@ -37,8 +38,9 @@ enum SwingStage: String, CaseIterable, Identifiable {
         switch self {
         case .address: return "P1 准备"
         case .takeaway: return "P2 起杆"
+        case .leadArmParallelBackswing: return "P3 上杆"
         case .top: return "P4 顶点"
-        case .downswing: return "P5 下杆"
+        case .leadArmParallelDownswing: return "P5 下杆"
         case .impact: return "P6 击球"
         case .followThrough: return "P7 送杆"
         case .finish: return "P8 收杆"
@@ -49,8 +51,9 @@ enum SwingStage: String, CaseIterable, Identifiable {
         switch self {
         case .address: return .blue
         case .takeaway: return .purple
+        case .leadArmParallelBackswing: return .cyan
         case .top: return .orange
-        case .downswing: return .yellow
+        case .leadArmParallelDownswing: return .yellow
         case .impact: return .red
         case .followThrough: return .indigo
         case .finish: return .green
