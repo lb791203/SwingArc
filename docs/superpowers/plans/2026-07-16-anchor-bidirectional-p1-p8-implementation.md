@@ -96,7 +96,7 @@ Expected success output for every smoke executable is exit status `0` with no pr
 - Modify: `README.md`
 
 **Interfaces:**
-- Consumes: `/Users/liangbo/Desktop/IMG_4500.mov`, `SwingStage.rawValue`, `SwingStageDetection.sourceFrameIndex`.
+- Consumes: `/Users/liangbo/Desktop/IMG_4500.mov`, the explicit `P1`–`P8` to `SwingStage` mapping, and `SwingStageDetection.sourceFrameIndex`.
 - Produces: `GroundTruthManifest`, `StageGroundTruth`, `StageAcceptance`, and `RealVideoAcceptance.evaluate(manifest:result:)` for the Task 7 CLI.
 
 - [ ] **Step 1: Freeze the reviewed baseline labels before changing the algorithm**
@@ -197,7 +197,7 @@ enum RealVideoAcceptance {
 }
 ```
 
-Add `Tests/P1P8AcceptanceEvaluationSmoke.swift` with this `@main` behavior:
+Add `Tests/P1P8AcceptanceEvaluationSmoke.swift` with this `@main` behavior; derive the deliberately wrong P4 from the frozen manifest so a visual annotation correction does not silently change the intended two-frame error:
 
 ```swift
 import Foundation
@@ -231,12 +231,14 @@ struct P1P8AcceptanceEvaluationSmoke {
         )
         precondition(RealVideoAcceptance.evaluate(manifest: manifest, result: correctResult).allSatisfy(\.passed))
 
+        let p4Truth = manifest.stages.first { $0.stage == "P4" }!
+        let wrongP4Frame = p4Truth.sourceFrameIndex + 2
         let wrongDetections = correctDetections.map { detection in
             detection.stage == .top
                 ? SwingStageDetection(
                     stage: .top,
-                    time: 455.0 / manifest.sourceFrameRate,
-                    sourceFrameIndex: 455,
+                    time: Double(wrongP4Frame) / manifest.sourceFrameRate,
+                    sourceFrameIndex: wrongP4Frame,
                     confidence: 0.9,
                     status: .confirmed
                 )
