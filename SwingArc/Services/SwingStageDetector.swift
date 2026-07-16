@@ -1114,16 +1114,13 @@ enum SwingWindowLocator {
             }
         }
 
-        let candidates = groups.compactMap { group -> (window: SwingWindow, score: Double)? in
-            guard let first = group.first, let last = group.last else { return nil }
-            let coreStartIndex = max(0, first - 1)
-            let coreStart = samples[coreStartIndex].time
-            let coreEnd = samples[last].time
-            let start = max(samples[0].time, coreStart - leadingPadding)
-            let end = min(samples[samples.count - 1].time, coreEnd + trailingPadding)
-            let window = SwingWindow(startTime: start, endTime: end)
-            let score = group.reduce(0.0) { $0 + energies[$1] }
-            return (window, score)
+        let candidates = groups.compactMap { group in
+            candidate(
+                from: group,
+                samples: samples,
+                energies: energies,
+                maximumIndexGap: maximumIndexGap
+            )
         }.sorted { lhs, rhs in
             lhs.score == rhs.score ? lhs.window.startTime < rhs.window.startTime : lhs.score > rhs.score
         }
@@ -1136,6 +1133,70 @@ enum SwingWindowLocator {
             return .failed(.windowTooLong)
         }
         return .located(best.window)
+    }
+
+    private static func candidate(
+        from group: [Int],
+        samples: [CoarseSwingSample],
+        energies: [Double],
+        maximumIndexGap: Int
+    ) -> (window: SwingWindow, score: Double)? {
+        guard let fullCandidate = makeCandidate(from: group, samples: samples, energies: energies) else {
+            return nil
+        }
+        guard fullCandidate.window.duration > maximumWindowDuration else {
+            return fullCandidate
+        }
+
+        let groupEnergies = group.map { energies[$0] }.sorted()
+        guard let peak = groupEnergies.last else { return nil }
+        let median = groupEnergies[groupEnergies.count / 2]
+        let localizationThreshold = max(peak * 0.55, median * 1.35)
+        let localizedIndices = group.filter { energies[$0] >= localizationThreshold }
+        guard !localizedIndices.isEmpty else { return fullCandidate }
+
+        var localizedGroups: [[Int]] = []
+        for index in localizedIndices {
+            if let lastGroup = localizedGroups.indices.last,
+               let priorIndex = localizedGroups[lastGroup].last,
+               index - priorIndex <= maximumIndexGap {
+                localizedGroups[lastGroup].append(index)
+            } else {
+                localizedGroups.append([index])
+            }
+        }
+
+        let localizedCandidates = localizedGroups.compactMap {
+            makeCandidate(from: $0, samples: samples, energies: energies)
+        }.filter {
+            $0.window.duration <= maximumWindowDuration
+        }.sorted {
+            $0.score == $1.score ? $0.window.startTime < $1.window.startTime : $0.score > $1.score
+        }
+
+        guard let best = localizedCandidates.first else { return fullCandidate }
+        if localizedCandidates.count > 1,
+           localizedCandidates[1].score >= best.score * 0.85 {
+            return fullCandidate
+        }
+        return best
+    }
+
+    private static func makeCandidate(
+        from group: [Int],
+        samples: [CoarseSwingSample],
+        energies: [Double]
+    ) -> (window: SwingWindow, score: Double)? {
+        guard let first = group.first, let last = group.last else { return nil }
+        let coreStartIndex = max(0, first - 1)
+        let coreStart = samples[coreStartIndex].time
+        let coreEnd = samples[last].time
+        let start = max(samples[0].time, coreStart - leadingPadding)
+        let end = min(samples[samples.count - 1].time, coreEnd + trailingPadding)
+        return (
+            SwingWindow(startTime: start, endTime: end),
+            group.reduce(0.0) { $0 + energies[$1] }
+        )
     }
 
     private static func handCenter(_ sample: SwingPoseSample) -> CGPoint? {
