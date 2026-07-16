@@ -1,6 +1,23 @@
 import SwiftUI
 import PhotosUI
 
+private enum MediaAction {
+    case save
+    case share
+
+    var title: String {
+        switch self {
+        case .save: return "保存"
+        case .share: return "分享"
+        }
+    }
+}
+
+private struct SharePayload: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
 struct ContentView: View {
     @StateObject private var playbackManager = VideoPlaybackManager()
     
@@ -32,6 +49,10 @@ struct ContentView: View {
     
     // AI 分析结果面板状态
     @State private var showAnalysisReport = false
+    @State private var pendingMediaAction: MediaAction?
+    @State private var sharePayload: SharePayload?
+    @State private var isExporting = false
+    @State private var mediaStatusMessage: String?
 
     private var analysisPresentation: AnalysisWorkspacePresentation {
         AnalysisWorkspacePresentation(state: playbackManager.analysisState)
@@ -111,6 +132,40 @@ struct ContentView: View {
                 loadVideoFromURL(recordedURL)
             })
         }
+        .confirmationDialog(
+            "\(pendingMediaAction?.title ?? "")内容",
+            isPresented: Binding(
+                get: { pendingMediaAction != nil },
+                set: { if !$0 { pendingMediaAction = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("当前帧") { performMediaAction(kind: .frame) }
+            Button("标注视频") { performMediaAction(kind: .annotatedVideo) }
+        }
+        .sheet(item: $sharePayload) { payload in
+            ShareSheet(items: [payload.url])
+        }
+        .alert("SwingArc", isPresented: Binding(
+            get: { mediaStatusMessage != nil },
+            set: { if !$0 { mediaStatusMessage = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(mediaStatusMessage ?? "")
+        }
+        .overlay {
+            if isExporting {
+                ZStack {
+                    Color.black.opacity(0.45).ignoresSafeArea()
+                    ProgressView("正在生成媒体…")
+                        .tint(.white)
+                        .padding(18)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
     }
     
     // MARK: - 子视图组件
@@ -135,13 +190,27 @@ struct ContentView: View {
             
             Spacer()
             
-            Button(action: { showCameraView = true }) {
-                Image(systemName: "camera")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(width: 40, height: 40)
-                    .background(Color.white.opacity(0.15))
-                    .clipShape(Circle())
+            HStack(spacing: 8) {
+                Menu {
+                    Button("保存") { pendingMediaAction = .save }
+                    Button("分享") { pendingMediaAction = .share }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 40, height: 40)
+                        .background(Color.white.opacity(0.15))
+                        .clipShape(Circle())
+                }
+
+                Button(action: { showCameraView = true }) {
+                    Image(systemName: "camera")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 40, height: 40)
+                        .background(Color.white.opacity(0.15))
+                        .clipShape(Circle())
+                }
             }
         }
         .padding(.horizontal, 20)
@@ -829,6 +898,41 @@ struct ContentView: View {
         playbackManager.analyzeSwing { result in
             self.keyframes = result.detectedMarkers
             withAnimation(.spring()) { self.showAnalysisReport = true }
+        }
+    }
+
+    private func performMediaAction(kind: MediaExportKind) {
+        guard let action = pendingMediaAction, let asset = playbackManager.currentAsset else {
+            mediaStatusMessage = "没有可保存或分享的视频。"
+            pendingMediaAction = nil
+            return
+        }
+
+        pendingMediaAction = nil
+        let time = playbackManager.currentTime
+        let drawingsForFrame = drawings.filter { $0.shouldShow(at: time) }
+        isExporting = true
+
+        Task {
+            do {
+                let exportURL = try await MediaExportService.export(
+                    kind: kind,
+                    asset: asset,
+                    time: time,
+                    drawings: kind == .frame ? drawingsForFrame : drawings
+                )
+
+                switch action {
+                case .save:
+                    try await MediaExportService.saveToPhotoLibrary(exportURL, kind: kind)
+                    mediaStatusMessage = kind == .frame ? "当前帧已保存到相册。" : "标注视频已保存到相册。"
+                case .share:
+                    sharePayload = SharePayload(url: exportURL)
+                }
+            } catch {
+                mediaStatusMessage = error.localizedDescription
+            }
+            isExporting = false
         }
     }
     

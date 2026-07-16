@@ -269,14 +269,14 @@ git commit -m "fix: show only completed AI analysis in workspace"
 - 输入：当前 `AVAsset`、当前时间、输出类型（`frame` 或 `annotatedVideo`）。
 - 输出：可保存到相册或传给 `UIActivityViewController` 的临时文件 `URL`。
 
-- [ ] **步骤 1：写输出类型失败测试**
+- [x] **步骤 1：写输出类型失败测试**
 
 ```swift
 precondition(MediaExportKind.frame.fileExtension == "jpg")
 precondition(MediaExportKind.annotatedVideo.fileExtension == "mov")
 ```
 
-- [ ] **步骤 2：确认失败**
+- [x] **步骤 2：确认失败**
 
 ```bash
 swiftc Tests/MediaExportFormatSmoke.swift -o /tmp/media-export-test && /tmp/media-export-test
@@ -284,7 +284,7 @@ swiftc Tests/MediaExportFormatSmoke.swift -o /tmp/media-export-test && /tmp/medi
 
 预期：因 `MediaExportKind` 不存在而失败。
 
-- [ ] **步骤 3：实现最小导出类型与服务边界**
+- [x] **步骤 3：实现最小导出类型与服务边界**
 
 ```swift
 enum MediaExportKind: CaseIterable {
@@ -297,7 +297,7 @@ enum MediaExportKind: CaseIterable {
 
 `MediaExportService.saveFrame` 通过 `AVAssetImageGenerator` 在当前时间生成 JPEG 临时文件。`MediaExportService.exportAnnotatedVideo` 通过 `AVAssetExportSession` 和 `AVVideoCompositionCoreAnimationTool` 输出带手工标注和已选体态叠层的 MOV 文件。`ShareSheet` 使用 `UIActivityViewController(activityItems: [url], applicationActivities: nil)`。
 
-- [ ] **步骤 4：实现只有两项的菜单**
+- [x] **步骤 4：实现只有两项的菜单**
 
 ```swift
 Menu {
@@ -310,7 +310,7 @@ Menu {
 
 用户选择“保存”或“分享”后，才出现第二层“当前帧 / 标注视频”。禁止把重命名、替换、删除、直接导出或手动项目保存加回此菜单。
 
-- [ ] **步骤 5：验证导出并签名安装真机**
+- [x] **步骤 5：验证导出并签名安装真机**
 
 ```bash
 swiftc SwingArc/Services/MediaExportService.swift Tests/MediaExportFormatSmoke.swift -o /tmp/media-export-test && /tmp/media-export-test
@@ -325,7 +325,7 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcrun devicectl de
 
 真机验收：点击“保存”后可选择类型并产生文件；点击“分享”后对所选文件打开 iPhone 原生分享面板。
 
-- [ ] **步骤 6：提交本任务**
+- [x] **步骤 6：提交本任务**
 
 ```bash
 git add SwingArc/Services/MediaExportService.swift SwingArc/Views/ShareSheet.swift SwingArc/Views/ContentView.swift Tests/MediaExportFormatSmoke.swift

@@ -19,6 +19,7 @@ class VideoPlaybackManager: ObservableObject {
     @Published private(set) var analysisFailure: AnalysisFailure? = nil
     
     var player: AVPlayer?
+    var currentAsset: AVAsset? { player?.currentItem?.asset }
     private var videoOutput: AVPlayerItemVideoOutput?
     private var displayLink: CADisplayLink?
     private var timeObserver: Any?
