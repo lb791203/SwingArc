@@ -342,6 +342,20 @@ enum VideoFramePolicy {
     }
 }
 
+enum MediaLoadState: Equatable {
+    case idle
+    case ready
+    case missing
+}
+
+enum MediaLoadPolicy {
+    static let missingMessage = "视频文件缺失"
+
+    static func state(fileExists: Bool) -> MediaLoadState {
+        fileExists ? .ready : .missing
+    }
+}
+
 enum LocalProjectStatus: String, Codable, Equatable {
     case pending
     case analyzed

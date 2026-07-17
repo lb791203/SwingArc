@@ -298,6 +298,13 @@ struct VideoCanvasView: View {
                 .onTapGesture(count: 2) {
                     resetZoom()
                 }
+            } else if playbackManager.mediaLoadState == .missing {
+                ContentUnavailableView(
+                    MediaLoadPolicy.missingMessage,
+                    systemImage: "video.slash",
+                    description: Text("视频文件已被删除或无法恢复，项目标注仍会保留。")
+                )
+                .foregroundStyle(.white)
             } else {
                 ProgressView("正在载入视频")
                     .tint(.white)

@@ -48,6 +48,10 @@ struct WorkspaceModelsSmoke {
         precondition(StageStripPolicy.indicator(for: .unresolved) == .hollowCircle)
         precondition(StageStripPolicy.indicator(for: .manual) == .lock)
 
+        precondition(MediaLoadPolicy.state(fileExists: true) == .ready)
+        precondition(MediaLoadPolicy.state(fileExists: false) == .missing)
+        precondition(MediaLoadPolicy.missingMessage == "视频文件缺失")
+
         precondition(abs(VideoFramePolicy.frameDuration(sourceFrameRate: 120) - (1.0 / 120.0)) < 0.000001)
         precondition(VideoFramePolicy.frameDuration(sourceFrameRate: 0) == (1.0 / 60.0))
     }

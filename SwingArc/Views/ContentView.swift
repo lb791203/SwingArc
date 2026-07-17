@@ -167,7 +167,7 @@ struct ContentView: View {
         showGrid = false
         saveStatus = .idle
 
-        playbackManager.loadVideo(url: url)
+        let didLoad = playbackManager.loadVideo(url: url)
 
         if let saved = LocalProjectStore.load(for: url) {
             drawings = saved.drawings
@@ -187,8 +187,10 @@ struct ContentView: View {
                 duration: playbackManager.duration,
                 sourceFrameRate: playbackManager.sourceFrameRate
             )
-        summary.duration = playbackManager.duration
-        summary.sourceFrameRate = playbackManager.sourceFrameRate
+        if didLoad {
+            summary.duration = playbackManager.duration
+            summary.sourceFrameRate = playbackManager.sourceFrameRate
+        }
         summary.modifiedAt = Date()
         summary.status = projectStatus
         LocalProjectStore.upsertSummary(summary)

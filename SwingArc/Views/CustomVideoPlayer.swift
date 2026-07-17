@@ -16,6 +16,7 @@ class VideoPlaybackManager: ObservableObject {
     @Published var scanProgress: Double = 0.0
     @Published var analysisProgressPhase: AnalysisProgressPhase = .preparing
     @Published var sourceFrameRate: Double = 60
+    @Published private(set) var mediaLoadState: MediaLoadState = .idle
     @Published private(set) var analysisState: SwingAnalysisState = .idle
     @Published private(set) var analysisResult: SwingAnalysisResult? = nil
     @Published private(set) var analysisFailure: AnalysisFailure? = nil
@@ -42,7 +43,14 @@ class VideoPlaybackManager: ObservableObject {
     }
     
     /// 加载本地或沙盒视频文件
-    func loadVideo(url: URL) {
+    @discardableResult
+    func loadVideo(url: URL, fileManager: FileManager = .default) -> Bool {
+        guard !url.isFileURL || fileManager.fileExists(atPath: url.path) else {
+            unloadVideo()
+            mediaLoadState = .missing
+            return false
+        }
+
         cancelAnalysis()
         isPlaying = false
         stopDisplayLink()
@@ -54,6 +62,7 @@ class VideoPlaybackManager: ObservableObject {
         analysisProgressPhase = .preparing
         currentPose = nil
         isPoseDetectionInFlight = false
+        mediaLoadState = .ready
         
         let asset = AVAsset(url: url)
         
@@ -121,6 +130,7 @@ class VideoPlaybackManager: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             self.processCurrentFramePose()
         }
+        return true
     }
 
     func unloadVideo() {
@@ -137,6 +147,7 @@ class VideoPlaybackManager: ObservableObject {
         analysisResult = nil
         analysisFailure = nil
         analysisState = .idle
+        mediaLoadState = .idle
     }
     
     @objc private func playerDidFinishPlaying() {
