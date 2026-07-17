@@ -174,6 +174,26 @@ struct SwingFeatureGeometrySmoke {
         precondition(ambiguousTimeline.allSatisfy { $0.frame.leadArmExtension == nil })
         precondition(ambiguousTimeline.allSatisfy { $0.qualityFlags.contains(.missingLeadArm) })
 
+        let ballInformedFrames = (0..<7).map { index in
+            SwingFrameSample(
+                sourceFrameIndex: 220 + index,
+                time: Double(index) / 30,
+                pose: ambiguousPose,
+                objectEvidence: SwingObjectEvidence(
+                    shaft: nil,
+                    ball: nil,
+                    stableBall: CGPoint(x: 0.35, y: 0.82),
+                    ballLocalChange: 0
+                )
+            )
+        }
+        let ballInformedEvidence = SwingFeatureExtractor.extract(frames: ballInformedFrames)
+        precondition(
+            ballInformedEvidence.allSatisfy { $0.leadArm == .left },
+            "Stable ball position must resolve an otherwise symmetric run-wide lead arm"
+        )
+        precondition(ballInformedEvidence.allSatisfy { $0.leadArmAngle != nil })
+
         let occludedLeft = SwingPoseSample(
             time: pose.time,
             leftWrist: pose.leftWrist,

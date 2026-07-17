@@ -1045,17 +1045,28 @@ enum SwingFeatureExtractor {
     private static func resolveLeadArm(frames: [SwingFrameSample]) -> LeadArmSide {
         var leftScore = 0.0
         var rightScore = 0.0
+        var ballSideBalance = 0
         for frame in frames {
             guard let pose = frame.pose else { continue }
             leftScore += armScore(shoulder: pose.leftShoulder, elbow: pose.leftElbow, wrist: pose.leftWrist)
             rightScore += armScore(shoulder: pose.rightShoulder, elbow: pose.rightElbow, wrist: pose.rightWrist)
             if let ball = frame.objectEvidence.stableBall,
                let hips = SwingGeometry.center(pose.leftHip, pose.rightHip) {
-                if ball.x < hips.x { leftScore += 2 } else { rightScore += 2 }
+                if ball.x < hips.x {
+                    leftScore += 2
+                    ballSideBalance += 1
+                } else {
+                    rightScore += 2
+                    ballSideBalance -= 1
+                }
             }
         }
         let separation = abs(leftScore - rightScore)
-        guard separation >= max(2, max(leftScore, rightScore) * 0.03) else { return .unknown }
+        guard separation >= max(2, max(leftScore, rightScore) * 0.03) else {
+            if ballSideBalance > 0 { return .left }
+            if ballSideBalance < 0 { return .right }
+            return .unknown
+        }
         return leftScore > rightScore ? .left : .right
     }
 
