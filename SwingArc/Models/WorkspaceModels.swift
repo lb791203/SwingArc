@@ -356,6 +356,13 @@ enum MediaLoadPolicy {
     }
 }
 
+enum FullscreenPlaybackPolicy {
+    static let autoHideDelay: TimeInterval = 2.5
+    static let minimumTouchTarget: CGFloat = 44
+    static let allowsDrawing = false
+    static let showsWorkspaceChrome = false
+}
+
 enum LocalProjectStatus: String, Codable, Equatable {
     case pending
     case analyzed

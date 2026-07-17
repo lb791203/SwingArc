@@ -52,6 +52,11 @@ struct WorkspaceModelsSmoke {
         precondition(MediaLoadPolicy.state(fileExists: false) == .missing)
         precondition(MediaLoadPolicy.missingMessage == "视频文件缺失")
 
+        precondition(FullscreenPlaybackPolicy.autoHideDelay == 2.5)
+        precondition(FullscreenPlaybackPolicy.minimumTouchTarget == 44)
+        precondition(!FullscreenPlaybackPolicy.allowsDrawing)
+        precondition(!FullscreenPlaybackPolicy.showsWorkspaceChrome)
+
         precondition(abs(VideoFramePolicy.frameDuration(sourceFrameRate: 120) - (1.0 / 120.0)) < 0.000001)
         precondition(VideoFramePolicy.frameDuration(sourceFrameRate: 0) == (1.0 / 60.0))
     }

@@ -13,6 +13,7 @@ struct DrawingOverlay: View {
     @Binding var selectedColor: Color
     @Binding var strokeWidth: CGFloat
     @Binding var isKeyframeMode: Bool
+    var videoRect: CGRect? = nil
     var isInteractionEnabled: Bool = true
     
     @State private var currentPoints: [CGPoint] = []
@@ -33,7 +34,7 @@ struct DrawingOverlay: View {
     var body: some View {
         GeometryReader { geometry in
             let rect = DrawingCanvasGeometry.interactionRect(
-                videoRect: playbackManager.videoRect,
+                videoRect: videoRect ?? playbackManager.videoRect,
                 canvasSize: geometry.size
             )
 

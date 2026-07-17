@@ -28,6 +28,7 @@ struct AnalysisWorkspaceView: View {
     @State private var showsInspector = true
     @State private var showsResultsSheet = false
     @State private var adjustmentStage: SwingStage?
+    @State private var showsFullscreenPlayback = false
 
     private var presentation: AnalysisWorkspacePresentation {
         AnalysisWorkspacePresentation(state: playbackManager.analysisState)
@@ -103,6 +104,18 @@ struct AnalysisWorkspaceView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        .fullScreenCover(isPresented: $showsFullscreenPlayback) {
+            FullscreenVideoPlaybackView(
+                playbackManager: playbackManager,
+                drawings: $drawings,
+                isKeyframeMode: $isKeyframeMode,
+                showPoseSkeleton: showPoseSkeleton,
+                showHeadStability: showHeadStability,
+                showSpineAngle: showSpineAngle,
+                showGrid: showGrid,
+                onDismiss: { showsFullscreenPlayback = false }
+            )
+        }
         .onChange(of: playbackManager.analysisState) { _, state in
             if case .completed = state, horizontalSizeClass != .regular {
                 showsResultsSheet = true
@@ -139,7 +152,9 @@ struct AnalysisWorkspaceView: View {
                 showHeadStability: showHeadStability,
                 showSpineAngle: showSpineAngle,
                 showGrid: showGrid,
-                interactionMode: interactionMode
+                interactionMode: interactionMode,
+                showsFullscreenButton: true,
+                onEnterFullscreen: { showsFullscreenPlayback = true }
             )
             .overlay(alignment: .trailing) {
                 if interactionMode == .drawing {
@@ -247,6 +262,147 @@ struct AnalysisWorkspaceView: View {
 
 }
 
+struct FullscreenVideoPlaybackView: View {
+    @ObservedObject var playbackManager: VideoPlaybackManager
+    @Binding var drawings: [DrawingElement]
+    @Binding var isKeyframeMode: Bool
+    let showPoseSkeleton: Bool
+    let showHeadStability: Bool
+    let showSpineAngle: Bool
+    let showGrid: Bool
+    let onDismiss: () -> Void
+
+    @State private var controlsVisible = true
+    @State private var hideTask: Task<Void, Never>?
+    @State private var inertTool: DrawingTool = .line
+    @State private var inertColor: Color = .white
+    @State private var inertWidth: CGFloat = 3
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VideoCanvasView(
+                playbackManager: playbackManager,
+                drawings: $drawings,
+                activeTool: $inertTool,
+                selectedColor: $inertColor,
+                strokeWidth: $inertWidth,
+                isKeyframeMode: $isKeyframeMode,
+                showPoseSkeleton: showPoseSkeleton,
+                showHeadStability: showHeadStability,
+                showSpineAngle: showSpineAngle,
+                showGrid: showGrid,
+                interactionMode: .idle,
+                showsFullscreenButton: false,
+                onEnterFullscreen: {}
+            )
+
+            if controlsVisible {
+                controls
+                    .transition(.opacity)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            setControlsVisible(!controlsVisible)
+        }
+        .onAppear {
+            scheduleAutoHide()
+        }
+        .onDisappear {
+            hideTask?.cancel()
+        }
+        .onChange(of: playbackManager.isPlaying) { _, isPlaying in
+            if isPlaying {
+                scheduleAutoHide()
+            } else {
+                hideTask?.cancel()
+                setControlsVisible(true, schedulesHide: false)
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var controls: some View {
+        VStack {
+            HStack {
+                Spacer()
+                controlButton("xmark", label: "退出全屏", action: onDismiss)
+                    .background(.black.opacity(0.55), in: Circle())
+            }
+
+            Spacer()
+
+            HStack(spacing: 20) {
+                controlButton("backward.frame.fill", label: "前一帧") {
+                    playbackManager.stepFrame(forward: false)
+                    setControlsVisible(true, schedulesHide: false)
+                }
+
+                controlButton(
+                    playbackManager.isPlaying ? "pause.fill" : "play.fill",
+                    label: playbackManager.isPlaying ? "暂停" : "播放"
+                ) {
+                    if playbackManager.isPlaying {
+                        playbackManager.pause()
+                    } else {
+                        playbackManager.play()
+                    }
+                }
+
+                controlButton("forward.frame.fill", label: "后一帧") {
+                    playbackManager.stepFrame(forward: true)
+                    setControlsVisible(true, schedulesHide: false)
+                }
+            }
+            .padding(10)
+            .background(.ultraThinMaterial, in: Capsule())
+        }
+        .padding()
+    }
+
+    private func controlButton(
+        _ systemName: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 19, weight: .semibold))
+                .frame(
+                    minWidth: FullscreenPlaybackPolicy.minimumTouchTarget,
+                    minHeight: FullscreenPlaybackPolicy.minimumTouchTarget
+                )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .accessibilityLabel(label)
+    }
+
+    private func setControlsVisible(_ visible: Bool, schedulesHide: Bool = true) {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            controlsVisible = visible
+        }
+        hideTask?.cancel()
+        if visible && schedulesHide {
+            scheduleAutoHide()
+        }
+    }
+
+    private func scheduleAutoHide() {
+        hideTask?.cancel()
+        guard playbackManager.isPlaying else { return }
+        hideTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(FullscreenPlaybackPolicy.autoHideDelay))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.18)) {
+                controlsVisible = false
+            }
+        }
+    }
+}
+
 struct VideoCanvasView: View {
     @ObservedObject var playbackManager: VideoPlaybackManager
     @Binding var drawings: [DrawingElement]
@@ -259,8 +415,11 @@ struct VideoCanvasView: View {
     let showSpineAngle: Bool
     let showGrid: Bool
     let interactionMode: WorkspaceInteractionMode
+    let showsFullscreenButton: Bool
+    let onEnterFullscreen: () -> Void
 
     @State private var committedScale: CGFloat = 1
+    @State private var renderedVideoRect: CGRect = .zero
     @GestureState private var gestureScale: CGFloat = 1
 
     private var scale: CGFloat {
@@ -273,11 +432,14 @@ struct VideoCanvasView: View {
             if let player = playbackManager.player {
                 ZStack {
                     PlayerViewRepresentable(player: player) { rect in
-                        playbackManager.videoRect = rect
+                        renderedVideoRect = rect
+                        if showsFullscreenButton {
+                            playbackManager.videoRect = rect
+                        }
                     }
 
                     if showGrid {
-                        GridView(rect: playbackManager.videoRect)
+                        GridView(rect: renderedVideoRect)
                             .allowsHitTesting(false)
                     }
 
@@ -288,6 +450,7 @@ struct VideoCanvasView: View {
                         selectedColor: $selectedColor,
                         strokeWidth: $strokeWidth,
                         isKeyframeMode: $isKeyframeMode,
+                        videoRect: renderedVideoRect,
                         isInteractionEnabled: interactionMode == .drawing,
                         showPoseSkeleton: showPoseSkeleton,
                         showHeadStability: showHeadStability,
@@ -315,6 +478,21 @@ struct VideoCanvasView: View {
         .clipped()
         .contentShape(Rectangle())
         .simultaneousGesture(magnificationGesture, including: .all)
+        .overlay(alignment: .topTrailing) {
+            if showsFullscreenButton,
+               interactionMode == .idle,
+               playbackManager.mediaLoadState == .ready {
+                Button(action: onEnterFullscreen) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                        .background(.black.opacity(0.55), in: Circle())
+                }
+                .foregroundStyle(.white)
+                .padding(12)
+                .accessibilityLabel("全屏播放")
+            }
+        }
     }
 
     private func resetZoom() {
