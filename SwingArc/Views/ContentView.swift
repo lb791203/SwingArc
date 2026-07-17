@@ -139,7 +139,7 @@ struct ContentView: View {
         pickerItem.loadTransferable(type: Data.self) { result in
             switch result {
             case .success(let data?):
-                let videoURL = persistentVideoDirectory()
+                let videoURL = LocalProjectStore.videoDirectory()
                     .appendingPathComponent("imported-\(UUID().uuidString).mp4")
                 do {
                     try data.write(to: videoURL, options: .atomic)
@@ -241,7 +241,7 @@ struct ContentView: View {
 
     private func deleteProject(_ project: LocalProjectSummary) {
         LocalProjectStore.remove(project.id)
-        let directory = persistentVideoDirectory()
+        let directory = LocalProjectStore.videoDirectory()
         if project.videoURL.isFileURL && project.videoURL.path.hasPrefix(directory.path) {
             try? FileManager.default.removeItem(at: project.videoURL)
         }
@@ -298,7 +298,7 @@ struct ContentView: View {
 
     private func persistVideoIfNeeded(_ sourceURL: URL) -> URL {
         guard sourceURL.isFileURL else { return sourceURL }
-        let directory = persistentVideoDirectory()
+        let directory = LocalProjectStore.videoDirectory()
         guard !sourceURL.path.hasPrefix(directory.path) else { return sourceURL }
         let pathExtension = sourceURL.pathExtension.isEmpty ? "mov" : sourceURL.pathExtension
         let destination = directory.appendingPathComponent("recorded-\(UUID().uuidString).\(pathExtension)")
@@ -309,13 +309,6 @@ struct ContentView: View {
             statusMessage = "录制视频保存失败：\(error.localizedDescription)"
             return sourceURL
         }
-    }
-
-    private func persistentVideoDirectory() -> URL {
-        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("SwingArcVideos", isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
     }
 
     private func defaultProjectName() -> String {
