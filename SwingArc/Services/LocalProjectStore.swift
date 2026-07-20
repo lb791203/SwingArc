@@ -8,6 +8,70 @@ struct LocalAnalysisProject: Codable, Equatable {
     var showHeadStability: Bool
     var showSpineAngle: Bool
     var showGrid: Bool
+    /// Per-video user corrections are retained as truth for this project.
+    /// They are optional in stored payloads so projects saved before this
+    /// feature continue to decode unchanged.
+    var stageCorrections: [StageCorrection]
+
+    init(
+        drawings: [DrawingElement],
+        keyframes: [KeyframeMarker],
+        isKeyframeMode: Bool,
+        showPoseSkeleton: Bool,
+        showHeadStability: Bool,
+        showSpineAngle: Bool,
+        showGrid: Bool,
+        stageCorrections: [StageCorrection] = []
+    ) {
+        self.drawings = drawings
+        self.keyframes = keyframes
+        self.isKeyframeMode = isKeyframeMode
+        self.showPoseSkeleton = showPoseSkeleton
+        self.showHeadStability = showHeadStability
+        self.showSpineAngle = showSpineAngle
+        self.showGrid = showGrid
+        self.stageCorrections = stageCorrections
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case drawings
+        case keyframes
+        case isKeyframeMode
+        case showPoseSkeleton
+        case showHeadStability
+        case showSpineAngle
+        case showGrid
+        case stageCorrections
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            drawings: try container.decode([DrawingElement].self, forKey: .drawings),
+            keyframes: try container.decode([KeyframeMarker].self, forKey: .keyframes),
+            isKeyframeMode: try container.decode(Bool.self, forKey: .isKeyframeMode),
+            showPoseSkeleton: try container.decode(Bool.self, forKey: .showPoseSkeleton),
+            showHeadStability: try container.decode(Bool.self, forKey: .showHeadStability),
+            showSpineAngle: try container.decode(Bool.self, forKey: .showSpineAngle),
+            showGrid: try container.decode(Bool.self, forKey: .showGrid),
+            stageCorrections: try container.decodeIfPresent(
+                [StageCorrection].self,
+                forKey: .stageCorrections
+            ) ?? []
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(drawings, forKey: .drawings)
+        try container.encode(keyframes, forKey: .keyframes)
+        try container.encode(isKeyframeMode, forKey: .isKeyframeMode)
+        try container.encode(showPoseSkeleton, forKey: .showPoseSkeleton)
+        try container.encode(showHeadStability, forKey: .showHeadStability)
+        try container.encode(showSpineAngle, forKey: .showSpineAngle)
+        try container.encode(showGrid, forKey: .showGrid)
+        try container.encode(stageCorrections, forKey: .stageCorrections)
+    }
 }
 
 private struct StoredProjectSummary: Codable, Equatable {
