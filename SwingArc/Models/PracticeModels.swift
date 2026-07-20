@@ -123,20 +123,45 @@ enum PracticePresentationPolicy {
     static func remoteStatus(for state: PracticeSessionState) -> String {
         switch state {
         case .aligning:
-            return "请站入取景框"
+            return "ALIGNMENT"
         case .readyToStart:
-            return "站姿已锁定"
+            return "READY"
         case let .waitingForImpact(_, swingCount):
-            return swingCount == 0 ? "等待第一球击球声" : "等待下一球 · 已完成 \(swingCount) 球"
+            return "WAITING · SHOT \(shotNumber(swingCount + 1))"
         case let .processing(_, swingCount):
-            return "第 \(swingCount) 球分析中"
-        case let .resultRibbon(_, swingCount, feedback):
-            return "第 \(swingCount) 球：\(feedbackTitle(feedback))"
+            return "ANALYSING · SHOT \(shotNumber(swingCount))"
+        case let .resultRibbon(_, swingCount, _):
+            return "RESULT · SHOT \(shotNumber(swingCount))"
         case let .paused(_, swingCount):
-            return "已暂停 · 已完成 \(swingCount) 球"
+            return "PAUSED · SHOT \(shotNumber(swingCount))"
+        case .degraded:
+            return "CHECK CAMERA"
+        case .failed:
+            return "SESSION STOPPED"
+        }
+    }
+
+    static func remoteDetail(for state: PracticeSessionState) -> String? {
+        switch state {
+        case .aligning:
+            return "全身与球位进入取景框"
+        case .readyToStart:
+            return "站姿已锁定 · 可开始自动练习"
+        case .waitingForImpact:
+            return "已监听击球声"
+        case .processing:
+            return "本机动作解算中"
+        case let .resultRibbon(_, _, feedback):
+            return feedbackTitle(feedback)
+        case .paused:
+            return "自动练习已暂停"
         case let .degraded(_, message), let .failed(_, message):
             return message
         }
+    }
+
+    private static func shotNumber(_ value: Int) -> String {
+        String(format: "%02d", max(value, 0))
     }
 
     static func feedbackTitle(_ feedback: PriorityFeedback) -> String {

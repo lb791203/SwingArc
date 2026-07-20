@@ -10,5 +10,12 @@ struct ProTourPresentationSmoke {
                 for: .waitingForImpact(view: .downTheLine, swingCount: 0)
             ) == .pause
         )
+        precondition(
+            PracticePresentationPolicy.remoteStatus(for: .readyToStart(view: .faceOn)) == "READY"
+        )
+        precondition(
+            PracticePresentationPolicy.remoteStatus(for: .processing(view: .downTheLine, swingCount: 3))
+                == "ANALYSING · SHOT 03"
+        )
     }
 }
