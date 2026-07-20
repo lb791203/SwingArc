@@ -42,7 +42,12 @@ enum PracticePreviewConfiguration {
     }
 
     static func showsLibrary(for arguments: [String]) -> Bool {
-        arguments.contains("-swingarc-preview-library")
+        arguments.contains("-swingarc-preview-library") ||
+            arguments.contains("-swingarc-preview-new-project")
+    }
+
+    static func showsNewProject(for arguments: [String]) -> Bool {
+        arguments.contains("-swingarc-preview-new-project")
     }
 
     static func showsManualCapture(for arguments: [String]) -> Bool {

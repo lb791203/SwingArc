@@ -67,5 +67,10 @@ struct ProTourPresentationSmoke {
                 for: ["-swingarc-preview-manual-capture"]
             )
         )
+        precondition(
+            PracticePreviewConfiguration.showsNewProject(
+                for: ["-swingarc-preview-new-project"]
+            )
+        )
     }
 }

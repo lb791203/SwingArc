@@ -52,6 +52,15 @@ struct ProjectLibraryView: View {
         }
         .tint(AnalysisTheme.proTourSignal)
         .preferredColorScheme(.dark)
+        .onAppear {
+            #if DEBUG
+            if PracticePreviewConfiguration.showsNewProject(
+                for: ProcessInfo.processInfo.arguments
+            ) {
+                showsNewProjectSheet = true
+            }
+            #endif
+        }
         .sheet(isPresented: $showsNewProjectSheet) {
             NewProjectSheet(
                 onImport: {

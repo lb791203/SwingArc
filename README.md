@@ -28,7 +28,7 @@ SwingArc 是一款专为 iOS 设备开发的**原生高尔夫挥杆分析与画�
 2. 点击 Run (▶) 编译并启动。
 3. 真机阶段仅在模拟器 UI 验收完成、且另行确认后执行；届时需启用 Developer Mode，并授予相机、麦克风和相册权限。
 
-开发构建仅提供模拟器画面检查参数：`-swingarc-preview-dtl`、`-swingarc-preview-ready`、`-swingarc-preview-face-on`、`-swingarc-preview-face-on-ready`、`-swingarc-preview-waiting`、`-swingarc-preview-paused`、`-swingarc-preview-manual-capture`、`-swingarc-preview-library`，以及配合本地测试影片的 `-swingarc-preview-import` / `-swingarc-preview-analysis`。它们被 `#if DEBUG` 隔离，不会进入发布构建或改变真机正常流程。
+开发构建仅提供模拟器画面检查参数：`-swingarc-preview-dtl`、`-swingarc-preview-ready`、`-swingarc-preview-face-on`、`-swingarc-preview-face-on-ready`、`-swingarc-preview-waiting`、`-swingarc-preview-paused`、`-swingarc-preview-manual-capture`、`-swingarc-preview-library`、`-swingarc-preview-new-project`，以及配合本地测试影片的 `-swingarc-preview-import` / `-swingarc-preview-analysis`。它们被 `#if DEBUG` 隔离，不会进入发布构建或改变真机正常流程。
 
 ---
 
