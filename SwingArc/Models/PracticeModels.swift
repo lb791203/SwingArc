@@ -1,5 +1,17 @@
 import Foundation
 
+enum PracticeHomeAction: Equatable {
+    case downTheLine
+    case faceOn
+    case importVideo
+    case history
+}
+
+enum PracticeHomePresentation {
+    static let modeOrder: [PracticeHomeAction] = [.downTheLine, .faceOn]
+    static let secondaryActions: [PracticeHomeAction] = [.importVideo, .history]
+}
+
 enum PracticePrimaryControl: Equatable {
     case start
     case pause

@@ -1,6 +1,17 @@
 import SwiftUI
 
 enum AnalysisTheme {
+    // Modern professional-tour system. Signal is reserved for an action the
+    // golfer can take now, never used as decorative accent colour.
+    static let proTourBackground = Color(red: 0.035, green: 0.051, blue: 0.047)
+    static let proTourSurface = Color(red: 0.075, green: 0.098, blue: 0.091)
+    static let proTourRaisedSurface = Color(red: 0.116, green: 0.145, blue: 0.134)
+    static let proTourGreen = Color(red: 0.12, green: 0.37, blue: 0.27)
+    static let proTourSignal = Color(red: 0.78, green: 0.94, blue: 0.22)
+    static let proTourPaused = Color(red: 0.95, green: 0.49, blue: 0.16)
+    static let proTourPrimaryText = Color(red: 0.95, green: 0.96, blue: 0.93)
+    static let proTourSecondaryText = Color(red: 0.60, green: 0.65, blue: 0.62)
+
     static let libraryBackground = Color(red: 0.965, green: 0.957, blue: 0.941)
     static let libraryCard = Color.white
     static let primaryText = Color(red: 0.08, green: 0.09, blue: 0.10)
