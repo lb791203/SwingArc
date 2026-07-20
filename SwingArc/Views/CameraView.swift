@@ -418,12 +418,6 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
                 session.addInput(input)
                 audioInput = input
             }
-            audioOutput.audioSettings = [
-                AVFormatIDKey: kAudioFormatLinearPCM,
-                AVLinearPCMBitDepthKey: 16,
-                AVLinearPCMIsFloatKey: false,
-                AVLinearPCMIsBigEndianKey: false
-            ]
             audioOutput.setSampleBufferDelegate(self, queue: audioQueue)
             if session.canAddOutput(audioOutput) {
                 session.addOutput(audioOutput)

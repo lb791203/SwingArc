@@ -525,6 +525,11 @@ final class SwingObjectDetector {
 
 struct SwingVideoAnalysisOutput: Equatable {
     let result: SwingAnalysisResult
+    /// The exact fine-frame pose inputs used to resolve the P1–P8 path. This
+    /// lets downstream, evidence-backed technique checks reuse the completed
+    /// Vision pass instead of decoding and detecting the same video twice.
+    let poseSamples: [SwingPoseSample]
+    let leadArm: LeadArmSide
     let adaptiveWindow: SwingWindow
     let sourceFrameRate: Double
     let elapsedSeconds: Double
@@ -1044,6 +1049,10 @@ final class SwingVideoAnalysisEngine: Sendable {
         guard gate.isActive(runID) else { return .cancelled }
         return .completed(SwingVideoAnalysisOutput(
             result: result,
+            poseSamples: mergedFrames.compactMap(\.pose),
+            leadArm: finalTimeline
+                .map(\.frame.leadArm)
+                .first(where: { $0 != .unknown }) ?? .unknown,
             adaptiveWindow: window,
             sourceFrameRate: nominalFrameRate,
             elapsedSeconds: ProcessInfo.processInfo.systemUptime - startedAt
