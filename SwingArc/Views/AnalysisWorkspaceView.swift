@@ -339,14 +339,14 @@ struct FullscreenVideoPlaybackView: View {
                 onEnterFullscreen: {}
             )
 
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture(perform: togglePlaybackFromVideo)
+
             if controlsVisible {
                 controls
                     .transition(.opacity)
             }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            togglePlaybackFromVideo()
         }
         .onAppear {
             scheduleAutoHide()
