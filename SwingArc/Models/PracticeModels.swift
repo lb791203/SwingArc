@@ -12,6 +12,29 @@ enum PracticeHomePresentation {
     static let secondaryActions: [PracticeHomeAction] = [.importVideo, .history]
 }
 
+/// Keeps simulator-only screenshot launch arguments in one place so they
+/// cannot accidentally change the normal practice entry flow.
+enum PracticePreviewConfiguration {
+    static func view(for arguments: [String]) -> PracticeCameraView? {
+        if arguments.contains("-swingarc-preview-face-on") ||
+            arguments.contains("-swingarc-preview-face-on-ready") {
+            return .faceOn
+        }
+
+        if arguments.contains("-swingarc-preview-dtl") ||
+            arguments.contains("-swingarc-preview-ready") {
+            return .downTheLine
+        }
+
+        return nil
+    }
+
+    static func startsReady(for arguments: [String]) -> Bool {
+        arguments.contains("-swingarc-preview-ready") ||
+            arguments.contains("-swingarc-preview-face-on-ready")
+    }
+}
+
 enum PracticePrimaryControl: Equatable {
     case start
     case pause

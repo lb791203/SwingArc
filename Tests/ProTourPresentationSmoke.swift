@@ -17,5 +17,20 @@ struct ProTourPresentationSmoke {
             PracticePresentationPolicy.remoteStatus(for: .processing(view: .downTheLine, swingCount: 3))
                 == "ANALYSING · SHOT 03"
         )
+        precondition(
+            PracticePreviewConfiguration.view(
+                for: ["-swingarc-preview-face-on"]
+            ) == .faceOn
+        )
+        precondition(
+            PracticePreviewConfiguration.view(
+                for: ["-swingarc-preview-face-on-ready"]
+            ) == .faceOn
+        )
+        precondition(
+            PracticePreviewConfiguration.startsReady(
+                for: ["-swingarc-preview-face-on-ready"]
+            )
+        )
     }
 }

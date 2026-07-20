@@ -43,8 +43,8 @@ struct ContentView: View {
     init() {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-swingarc-preview-dtl") || arguments.contains("-swingarc-preview-ready") {
-            _selectedPracticeView = State(initialValue: .downTheLine)
+        if let previewView = PracticePreviewConfiguration.view(for: arguments) {
+            _selectedPracticeView = State(initialValue: previewView)
         }
         #endif
     }

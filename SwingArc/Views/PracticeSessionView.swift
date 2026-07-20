@@ -71,7 +71,7 @@ struct PracticeSessionView: View {
             cameraState.setupSession()
             sessionEngine.begin(view: view)
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-swingarc-preview-ready") {
+            if PracticePreviewConfiguration.startsReady(for: ProcessInfo.processInfo.arguments) {
                 sessionEngine.confirmAlignment()
             }
             #endif
