@@ -45,6 +45,10 @@ enum PracticePreviewConfiguration {
         arguments.contains("-swingarc-preview-library")
     }
 
+    static func showsManualCapture(for arguments: [String]) -> Bool {
+        arguments.contains("-swingarc-preview-manual-capture")
+    }
+
     static func importPath(for arguments: [String]) -> String? {
         guard let marker = arguments.firstIndex(of: "-swingarc-preview-import") else {
             return nil

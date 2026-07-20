@@ -62,5 +62,10 @@ struct ProTourPresentationSmoke {
                 for: .paused(view: .downTheLine, swingCount: 0)
             ) == "PAUSED"
         )
+        precondition(
+            PracticePreviewConfiguration.showsManualCapture(
+                for: ["-swingarc-preview-manual-capture"]
+            )
+        )
     }
 }

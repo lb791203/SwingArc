@@ -50,6 +50,9 @@ struct ContentView: View {
         if PracticePreviewConfiguration.showsLibrary(for: arguments) {
             _showProjectLibrary = State(initialValue: true)
         }
+        if PracticePreviewConfiguration.showsManualCapture(for: arguments) {
+            _showCameraView = State(initialValue: true)
+        }
         #endif
     }
 

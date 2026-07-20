@@ -6,166 +6,46 @@ import Combine
 struct CameraView: View {
     @Environment(\.presentationMode) var presentationMode
     let onRecordCompleted: (URL) -> Void
-    
+
     @State private var isRecording = false
     @State private var countdownValue = 0
     @State private var isCountingDown = false
     @State private var useFrontCamera = false
     @State private var timer: Timer? = nil
-    
+
     @StateObject private var cameraState = CameraStateModel()
-    
+
     var body: some View {
         ZStack {
-            // 1. 原生相机画面预览
             CameraPreviewRepresentable(cameraState: cameraState, useFrontCamera: useFrontCamera)
                 .ignoresSafeArea()
-            
-            // 2. 高尔夫站姿引导参考网格 (Golfer Stance Guide Grid)
-            GeometryReader { geo in
-                ZStack {
-                    // 头部定位盒
-                    Circle()
-                        .stroke(Color.green.opacity(0.6), lineWidth: 2)
-                        .frame(width: geo.size.width * 0.2, height: geo.size.width * 0.2)
-                        .position(x: geo.size.width * 0.5, y: geo.size.height * 0.25)
-                    
-                    // 站姿定位线 (矩形和斜线)
-                    Path { path in
-                        // 地面基准线
-                        path.move(to: CGPoint(x: 20, y: geo.size.height * 0.8))
-                        path.addLine(to: CGPoint(x: geo.size.width - 20, y: geo.size.height * 0.8))
-                        
-                        // 身体站位左右限位线
-                        path.move(to: CGPoint(x: geo.size.width * 0.35, y: geo.size.height * 0.35))
-                        path.addLine(to: CGPoint(x: geo.size.width * 0.35, y: geo.size.height * 0.8))
-                        
-                        path.move(to: CGPoint(x: geo.size.width * 0.65, y: geo.size.height * 0.35))
-                        path.addLine(to: CGPoint(x: geo.size.width * 0.65, y: geo.size.height * 0.8))
-                    }
-                    .stroke(Color.green.opacity(0.4), style: StrokeStyle(lineWidth: 1.5, dash: [5, 5]))
-                    
-                    // 文字提示
-                    Text("请对齐头部与身体框架")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.green)
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 10)
-                        .background(Color.black.opacity(0.6))
-                        .cornerRadius(6)
-                        .position(
-                            x: geo.size.width * 0.5,
-                            y: CameraCaptureLayout.instructionVerticalPosition(containerHeight: geo.size.height)
-                        )
-                }
-            }
+
+            Color.black.opacity(0.26).ignoresSafeArea().allowsHitTesting(false)
+            LinearGradient(
+                colors: [
+                    AnalysisTheme.proTourBackground.opacity(0.94),
+                    .clear,
+                    AnalysisTheme.proTourBackground.opacity(0.98)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
             .ignoresSafeArea()
-            
-            // 3. 控制与浮层
-            VStack {
-                // 顶部关闭与摄像头切换
-                HStack {
-                    Button(action: {
-                        presentationMode.wrappedValue.dismiss()
-                    }) {
-                        Image(systemName: "xmark")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .padding(12)
-                            .background(Color.black.opacity(0.5))
-                            .clipShape(Circle())
-                    }
-                    
-                    Spacer()
-                    
-                    Text("120 FPS 慢动作录像")
-                        .font(.subheadline)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.red.opacity(0.8))
-                        .cornerRadius(20)
-                    
-                    Spacer()
-                    
-                    Button(action: {
-                        useFrontCamera.toggle()
-                        cameraState.toggleCamera(useFront: useFrontCamera)
-                    }) {
-                        Image(systemName: "camera.rotate")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .padding(12)
-                            .background(Color.black.opacity(0.5))
-                            .clipShape(Circle())
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.top, 50)
-                
-                Spacer()
-                
-                // 巨大的倒计时显示
-                if isCountingDown {
-                    Text("\(countdownValue)")
-                        .font(.system(size: 120, weight: .black, design: .rounded))
-                        .foregroundColor(.yellow)
-                        .shadow(color: .black, radius: 10)
-                        .transition(.scale)
-                }
-                
-                // 录制指示字样
-                if isRecording {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 8, height: 8)
-                        Text("录制中 (6秒自动停止)")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.white)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.7))
-                    .cornerRadius(15)
-                }
-                
-                Spacer()
-                
-                // 录像控制大按钮
-                HStack {
-                    Spacer()
-                    
-                    Button(action: {
-                        if isRecording {
-                            stopRecording()
-                        } else {
-                            startCountdown()
-                        }
-                    }) {
-                        ZStack {
-                            Circle()
-                                .stroke(Color.white, lineWidth: 4)
-                                .frame(width: 76, height: 76)
-                            
-                            if isRecording {
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(Color.red)
-                                    .frame(width: 32, height: 32)
-                            } else {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 60, height: 60)
-                            }
-                        }
-                    }
-                    
-                    Spacer()
-                }
-                .padding(.bottom, 40)
+            .allowsHitTesting(false)
+
+            captureGuide
+
+            VStack(spacing: 0) {
+                header
+                Spacer(minLength: 24)
+                captureStatus
+                Spacer(minLength: 24)
+                captureControl
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
         }
+        .preferredColorScheme(.dark)
         .onAppear {
             cameraState.setupSession()
         }
@@ -180,17 +60,155 @@ struct CameraView: View {
             }
         }
     }
-    
-    // MARK: - 录制逻辑
-    
+
+    private var header: some View {
+        HStack {
+            Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 17, weight: .bold))
+                    .frame(width: 48, height: 48)
+                    .background(AnalysisTheme.proTourSurface.opacity(0.9), in: Circle())
+                    .overlay(Circle().stroke(AnalysisTheme.proTourRaisedSurface))
+            }
+            .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+            .accessibilityLabel("关闭录制")
+
+            Spacer()
+
+            VStack(spacing: 3) {
+                Text("MANUAL CAPTURE")
+                    .font(.system(size: 11, weight: .black, design: .monospaced))
+                    .tracking(1.2)
+                Text("120 FPS · LOCAL")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+            }
+            .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
+            .background(AnalysisTheme.proTourSurface.opacity(0.9), in: Capsule())
+            .overlay(Capsule().stroke(AnalysisTheme.proTourRaisedSurface))
+
+            Spacer()
+
+            Button {
+                useFrontCamera.toggle()
+                cameraState.toggleCamera(useFront: useFrontCamera)
+            } label: {
+                Image(systemName: "camera.rotate")
+                    .font(.system(size: 17, weight: .bold))
+                    .frame(width: 48, height: 48)
+                    .background(AnalysisTheme.proTourSurface.opacity(0.9), in: Circle())
+                    .overlay(Circle().stroke(AnalysisTheme.proTourRaisedSurface))
+            }
+            .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+            .accessibilityLabel("切换前后镜头")
+        }
+    }
+
+    private var captureGuide: some View {
+        GeometryReader { geometry in
+            ZStack {
+                RoundedRectangle(cornerRadius: 34, style: .continuous)
+                    .stroke(
+                        AnalysisTheme.proTourSignal.opacity(isRecording ? 0.2 : 0.94),
+                        style: StrokeStyle(lineWidth: 3, dash: [12, 10])
+                    )
+                    .frame(width: geometry.size.width * 0.62, height: geometry.size.height * 0.52)
+                    .position(x: geometry.size.width / 2, y: geometry.size.height * 0.48)
+
+                if !isRecording && !isCountingDown {
+                    Text("FULL BODY + BALL IN FRAME")
+                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .tracking(1.0)
+                        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 11)
+                        .background(AnalysisTheme.proTourBackground.opacity(0.9), in: Capsule())
+                        .overlay(Capsule().stroke(AnalysisTheme.proTourRaisedSurface))
+                        .position(x: geometry.size.width / 2, y: geometry.size.height * 0.76)
+                }
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private var captureStatus: some View {
+        if isCountingDown {
+            Text("\(countdownValue)")
+                .font(.system(size: 132, weight: .black, design: .rounded))
+                .foregroundStyle(AnalysisTheme.proTourSignal)
+                .shadow(color: .black.opacity(0.7), radius: 16)
+                .accessibilityLabel("倒计时 \(countdownValue)")
+        } else {
+            VStack(spacing: 11) {
+                HStack(spacing: 9) {
+                    Circle()
+                        .fill(isRecording ? AnalysisTheme.proTourPaused : AnalysisTheme.proTourSignal)
+                        .frame(width: 10, height: 10)
+                    Text(isRecording ? "RECORDING" : "READY TO CAPTURE")
+                        .font(.system(size: 12, weight: .black, design: .monospaced))
+                        .tracking(1.2)
+                        .foregroundStyle(isRecording ? AnalysisTheme.proTourPaused : AnalysisTheme.proTourSignal)
+                }
+                Text(isRecording ? "RECORDING" : "READY")
+                    .font(.system(size: 42, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                Text(isRecording ? "录制将在 6 秒后自动停止" : "架好手机后开始 3 秒倒计时")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+            }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 20)
+            .background(AnalysisTheme.proTourBackground.opacity(0.82), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(AnalysisTheme.proTourRaisedSurface))
+        }
+    }
+
+    private var captureControl: some View {
+        Button {
+            if isRecording {
+                stopRecording()
+            } else if !isCountingDown {
+                startCountdown()
+            }
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: isRecording ? "stop.fill" : "record.circle")
+                    .font(.system(size: 20, weight: .bold))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(isRecording ? "结束录制" : "开始倒计时")
+                        .font(.system(size: 20, weight: .black))
+                    Text(isRecording ? "保存当前挥杆影片" : "3 秒后自动录制")
+                        .font(.system(size: 13, weight: .bold))
+                        .opacity(0.68)
+                }
+                Spacer()
+            }
+            .foregroundStyle(isRecording ? AnalysisTheme.proTourPrimaryText : AnalysisTheme.proTourBackground)
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity, minHeight: 84)
+            .background(
+                isRecording ? AnalysisTheme.proTourPaused : AnalysisTheme.proTourSignal,
+                in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isCountingDown)
+        .opacity(isCountingDown ? 0.55 : 1)
+    }
+
     private func startCountdown() {
         isCountingDown = true
-        countdownValue = 3 // 3 秒倒计时准备挥杆
-        
+        countdownValue = 3
+
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { t in
             if countdownValue > 1 {
                 countdownValue -= 1
-                // 播放滴答警告音 (可选)
             } else {
                 t.invalidate()
                 isCountingDown = false
@@ -202,8 +220,7 @@ struct CameraView: View {
     private func startRecording() {
         isRecording = true
         cameraState.startRecording()
-        
-        // 自动录制 6 秒停止（捕获完整高尔夫挥杆的最佳时长）
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
             if self.isRecording {
                 self.stopRecording()
