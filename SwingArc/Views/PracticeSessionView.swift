@@ -70,6 +70,11 @@ struct PracticeSessionView: View {
         .onAppear {
             cameraState.setupSession()
             sessionEngine.begin(view: view)
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-swingarc-preview-ready") {
+                sessionEngine.confirmAlignment()
+            }
+            #endif
         }
         .onDisappear {
             sessionEngine.pause()

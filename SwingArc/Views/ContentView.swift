@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import Foundation
 
 private enum MediaAction {
     case save
@@ -38,6 +39,15 @@ struct ContentView: View {
     @State private var sharePayload: SharePayload?
     @State private var isExporting = false
     @State private var statusMessage: String?
+
+    init() {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-swingarc-preview-dtl") || arguments.contains("-swingarc-preview-ready") {
+            _selectedPracticeView = State(initialValue: .downTheLine)
+        }
+        #endif
+    }
 
     var body: some View {
         Group {

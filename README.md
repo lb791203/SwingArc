@@ -14,7 +14,25 @@ SwingArc 是一款专为 iOS 设备开发的**原生高尔夫挥杆分析与画�
 
 ---
 
-## 🛠️ Xcode 项目导入与运行指南
+## 🛠️ 当前 Xcode 项目与验收状态
+
+请直接打开现有工程 [SwingArcProject.xcodeproj](/Users/liangbo/Documents/SwingArcProject/SwingArcProject.xcodeproj)，它引用本仓库内的 `SwingArc` 源码目录；无需新建工程或删除默认文件。
+
+截至 2026-07-20，已在 iPhone 17 模拟器以实际 SwiftUI 程序完成并确认：专业巡回赛风格首页、DTL 相机对齐、站姿锁定 READY 画面。模拟器的相机预览为黑色属正常现象，尚未进行真机安装或声学击球触发测试。
+
+完整范围、已验证项目与真机前待测项见 [Pro Tour 模拟器验收记录](docs/validation/pro-tour-simulator-review.md)。
+
+### 编译运行
+
+1. 在 Xcode 27 beta 打开上述工程，选择 `iPhone 17` 模拟器。
+2. 点击 Run (▶) 编译并启动。
+3. 真机阶段仅在模拟器 UI 验收完成、且另行确认后执行；届时需启用 Developer Mode，并授予相机、麦克风和相册权限。
+
+开发构建仅提供两条模拟器画面检查参数：`-swingarc-preview-dtl` 与 `-swingarc-preview-ready`。它们被 `#if DEBUG` 隔离，不会进入发布构建或改变真机正常流程。
+
+---
+
+## 历史说明：从零导入源码（当前无需执行）
 
 本工作区已为您生成了完整的 Swift 与 SwiftUI 核心源代码文件。请按照以下步骤在您的 Mac 电脑上编译运行：
 
