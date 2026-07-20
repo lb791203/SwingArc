@@ -12,6 +12,9 @@
 | 主色与操作层级 | 已确认 | 石墨黑为基底，荧光黄绿仅用于主操作/已确认状态，橙色保留给暂停/中断。 |
 | 正面视角 | 已确认 | 实际 SwiftUI 模拟器画面已覆盖 `FACE-ON` 的 `ALIGNMENT` 与 `READY`；与 DTL 保持同一单一主操作流程。 |
 | 导入影片 | 入口保留，待媒体流程验证 | 首页入口已确认；尚未在模拟器导入实拍素材。 |
+| 影片分析工作台 | 已确认 | 使用本地 3 秒测试影片启动真实 SwiftUI 播放器、时间轴、P1–P8 与逐帧/画线/分析控制。 |
+| 无人体证据的分析中断 | 已确认 | 测试影片不含球员；本地分析正确提示无法锁定主球员，未生成伪造 P 点、诊断或处方。 |
+| 历史档案 | 已确认 | 已以实际本地项目验证空档案与有项目状态；影片时长、帧率与状态标签可见。 |
 | 自动等待、暂停、结果、回看片段 | 待交互验证 | 已完成视觉/状态策略，仍需以可触发的相机与音讯流程逐项验证。 |
 | AI 证据卡与 P 点标注 | 逻辑验证，待实拍素材验证 | 无可信姿态/P 点证据时不显示诊断与处方；已通过 smoke test，待用真实导入影片复核。 |
 | 真机安装、相机、麦克风、阳光/热控 | 未执行 | 按当前决定，模拟器验收完成后再安排。 |
@@ -20,9 +23,9 @@
 
 - 实际工程：[SwingArcProject.xcodeproj](/Users/liangbo/Documents/SwingArcProject/SwingArcProject.xcodeproj)
 - 实际 App bundle：`com.liangbo.swingarc`
-- 本轮截图：`/tmp/swingarc-pro-tour-home.png`、`/tmp/swingarc-pro-tour-alignment-2.png`、`/tmp/swingarc-pro-tour-ready-2.png`、`/tmp/swingarc-pro-tour-face-on-alignment.png`、`/tmp/swingarc-pro-tour-face-on-ready.png`
+- 本轮截图：`/tmp/swingarc-pro-tour-home.png`、`/tmp/swingarc-pro-tour-alignment-2.png`、`/tmp/swingarc-pro-tour-ready-2.png`、`/tmp/swingarc-pro-tour-face-on-alignment.png`、`/tmp/swingarc-pro-tour-face-on-ready.png`、`/tmp/swingarc-pro-tour-library.png`、`/tmp/swingarc-pro-tour-library-projects.png`、`/tmp/swingarc-pro-tour-workspace.png`、`/tmp/swingarc-pro-tour-analysis-interruption.png`
 - 已放入模拟器相册的导入流程测试媒体：`/tmp/swingarc-import-fixture.mp4`；尚待从系统影片选择器完成一次端到端选择。
-- 仅用于开发构建的预览参数：`-swingarc-preview-dtl`、`-swingarc-preview-ready`、`-swingarc-preview-face-on`、`-swingarc-preview-face-on-ready`；实现均在 `#if DEBUG` 中，发布构建不受影响。
+- 仅用于开发构建的预览参数：`-swingarc-preview-dtl`、`-swingarc-preview-ready`、`-swingarc-preview-face-on`、`-swingarc-preview-face-on-ready`、`-swingarc-preview-library`，以及配合本地路径的 `-swingarc-preview-import` / `-swingarc-preview-analysis`；实现均在 `#if DEBUG` 中，发布构建不受影响。
 
 ## 进入真机阶段前的检查顺序
 

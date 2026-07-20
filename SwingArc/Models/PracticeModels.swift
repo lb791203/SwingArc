@@ -33,6 +33,24 @@ enum PracticePreviewConfiguration {
         arguments.contains("-swingarc-preview-ready") ||
             arguments.contains("-swingarc-preview-face-on-ready")
     }
+
+    static func showsLibrary(for arguments: [String]) -> Bool {
+        arguments.contains("-swingarc-preview-library")
+    }
+
+    static func importPath(for arguments: [String]) -> String? {
+        guard let marker = arguments.firstIndex(of: "-swingarc-preview-import") else {
+            return nil
+        }
+
+        let pathIndex = arguments.index(after: marker)
+        guard pathIndex < arguments.endIndex else { return nil }
+        return arguments[pathIndex]
+    }
+
+    static func autoAnalyzes(for arguments: [String]) -> Bool {
+        arguments.contains("-swingarc-preview-analysis")
+    }
 }
 
 enum PracticePrimaryControl: Equatable {

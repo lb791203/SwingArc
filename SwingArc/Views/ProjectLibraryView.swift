@@ -26,12 +26,14 @@ struct ProjectLibraryView: View {
                     projectCollection
                 }
             }
-            .background(AnalysisTheme.libraryBackground.ignoresSafeArea())
-            .navigationTitle("分析项目")
+            .background(AnalysisTheme.proTourBackground.ignoresSafeArea())
+            .navigationTitle("挥杆档案")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if let onClose {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("练习") { onClose() }
+                            .font(.system(size: 14, weight: .bold, design: .monospaced))
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -40,15 +42,16 @@ struct ProjectLibraryView: View {
                     } label: {
                         Image(systemName: "plus")
                             .fontWeight(.semibold)
-                            .frame(width: 32, height: 32)
-                            .foregroundStyle(.white)
-                            .background(AnalysisTheme.primaryText, in: Circle())
+                            .frame(width: 42, height: 42)
+                            .foregroundStyle(AnalysisTheme.proTourBackground)
+                            .background(AnalysisTheme.proTourSignal, in: Circle())
                     }
                     .accessibilityLabel("新建分析项目")
                 }
             }
         }
-        .tint(AnalysisTheme.primaryText)
+        .tint(AnalysisTheme.proTourSignal)
+        .preferredColorScheme(.dark)
         .sheet(isPresented: $showsNewProjectSheet) {
             NewProjectSheet(
                 onImport: {
@@ -60,7 +63,7 @@ struct ProjectLibraryView: View {
                     onRecord()
                 }
             )
-            .presentationDetents([.height(250)])
+            .presentationDetents([.height(280)])
             .presentationDragIndicator(.visible)
         }
         .alert("重命名项目", isPresented: Binding(
@@ -97,64 +100,150 @@ struct ProjectLibraryView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 18) {
-            Spacer()
-            Image(systemName: "rectangle.stack.badge.play")
-                .font(.system(size: 52, weight: .light))
-                .foregroundStyle(AnalysisTheme.secondaryText)
-                .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 0) {
+            Text("SWING LIBRARY")
+                .font(.system(size: 14, weight: .black, design: .monospaced))
+                .tracking(2.2)
+                .foregroundStyle(AnalysisTheme.proTourSignal)
+                .padding(.top, 22)
 
-            VStack(spacing: 6) {
-                Text("开始第一次视频分析")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(AnalysisTheme.primaryText)
-                Text("导入或录制一段挥杆视频开始分析")
-                    .font(.subheadline)
-                    .foregroundStyle(AnalysisTheme.secondaryText)
-                    .multilineTextAlignment(.center)
+            Text("挥杆档案")
+                .font(.system(size: 42, weight: .black, design: .rounded))
+                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                .padding(.top, 10)
+
+            Text("导入一段影片，逐帧定位你的 P1–P8。")
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+                .padding(.top, 8)
+
+            Spacer(minLength: 36)
+
+            VStack(alignment: .leading, spacing: 14) {
+                Image(systemName: "film.stack")
+                    .font(.system(size: 36, weight: .medium))
+                    .foregroundStyle(AnalysisTheme.proTourSignal)
+                    .frame(width: 76, height: 76)
+                    .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+
+                Text("还没有分析影片")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+
+                Text("所有影片与标注仅保存在这台设备。")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(AnalysisTheme.proTourSecondaryText)
             }
 
-            VStack(spacing: 10) {
-                Button(action: onImport) {
-                    Label("导入视频", systemImage: "photo.on.rectangle")
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(AnalysisTheme.primaryText)
-
-                Button(action: onRecord) {
-                    Label("录制视频", systemImage: "video")
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                }
-                .buttonStyle(.bordered)
-            }
-            .frame(maxWidth: 360)
             Spacer()
+
+            VStack(spacing: 12) {
+                LibraryActionButton(
+                    title: "导入影片分析",
+                    detail: "慢动作 · P1–P8 · 手动画线",
+                    systemImage: "arrow.down.to.line.compact",
+                    isPrimary: true,
+                    action: onImport
+                )
+                LibraryActionButton(
+                    title: "录制新影片",
+                    detail: "使用本机高速相机",
+                    systemImage: "video",
+                    isPrimary: false,
+                    action: onRecord
+                )
+            }
+            .padding(.bottom, 12)
         }
-        .padding(24)
+        .padding(.horizontal, 24)
     }
 
     private var projectCollection: some View {
         ScrollView {
-            LazyVGrid(
-                columns: horizontalSizeClass == .regular
-                    ? [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 16)]
-                    : [GridItem(.flexible())],
-                spacing: 14
-            ) {
-                ForEach(projects) { project in
-                    ProjectCard(project: project) {
-                        onOpen(project)
-                    } onRename: {
-                        renameText = project.name
-                        projectToRename = project
-                    } onDelete: {
-                        projectToDelete = project
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("ANALYSIS ARCHIVE")
+                        .font(.system(size: 12, weight: .black, design: .monospaced))
+                        .tracking(1.8)
+                        .foregroundStyle(AnalysisTheme.proTourSignal)
+                    Text("已保存影片")
+                        .font(.system(size: 30, weight: .black, design: .rounded))
+                        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                    Text("\(projects.count) 段本地挥杆记录")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+                }
+
+                LazyVGrid(
+                    columns: horizontalSizeClass == .regular
+                        ? [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 16)]
+                        : [GridItem(.flexible())],
+                    spacing: 14
+                ) {
+                    ForEach(projects) { project in
+                        ProjectCard(project: project) {
+                            onOpen(project)
+                        } onRename: {
+                            renameText = project.name
+                            projectToRename = project
+                        } onDelete: {
+                            projectToDelete = project
+                        }
                     }
                 }
             }
-            .padding(16)
+            .padding(24)
+            .padding(.top, 22)
         }
+    }
+}
+
+private struct LibraryActionButton: View {
+    let title: String
+    let detail: String
+    let systemImage: String
+    let isPrimary: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 20, weight: .bold))
+                    .frame(width: 48, height: 48)
+                    .foregroundStyle(isPrimary ? AnalysisTheme.proTourBackground : AnalysisTheme.proTourSignal)
+                    .background(
+                        isPrimary ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourRaisedSurface,
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 18, weight: .bold))
+                    Text(detail)
+                        .font(.system(size: 13, weight: .medium))
+                        .opacity(0.7)
+                }
+
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 16, weight: .bold))
+            }
+            .foregroundStyle(isPrimary ? AnalysisTheme.proTourBackground : AnalysisTheme.proTourPrimaryText)
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 76)
+            .background(
+                isPrimary ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourSurface,
+                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+            )
+            .overlay {
+                if !isPrimary {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(AnalysisTheme.proTourRaisedSurface)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -185,6 +274,7 @@ struct NewProjectSheet: View {
                 .buttonStyle(.plain)
             }
             .padding(16)
+            .background(AnalysisTheme.proTourBackground.ignoresSafeArea())
             .navigationTitle("新建项目")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -193,6 +283,7 @@ struct NewProjectSheet: View {
                 }
             }
         }
+        .preferredColorScheme(.dark)
     }
 }
 
@@ -206,20 +297,21 @@ private struct NewProjectActionLabel: View {
             Image(systemName: systemImage)
                 .font(.title3)
                 .frame(width: 44, height: 44)
-                .background(AnalysisTheme.libraryBackground, in: RoundedRectangle(cornerRadius: 12))
+                .foregroundStyle(AnalysisTheme.proTourSignal)
+                .background(AnalysisTheme.proTourRaisedSurface, in: RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.headline)
-                Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+                Text(subtitle).font(.subheadline).foregroundStyle(AnalysisTheme.proTourSecondaryText)
             }
             Spacer()
             Image(systemName: "chevron.right")
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(AnalysisTheme.proTourSecondaryText)
         }
-        .foregroundStyle(AnalysisTheme.primaryText)
+        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
         .padding(14)
         .frame(maxWidth: .infinity, minHeight: 72)
-        .background(.white, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.black.opacity(0.07)))
+        .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(AnalysisTheme.proTourRaisedSurface))
     }
 }
 
@@ -238,24 +330,29 @@ private struct ProjectCard: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
 
                     VStack(alignment: .leading, spacing: 7) {
+                        Text("VIDEO ANALYSIS")
+                            .font(.system(size: 10, weight: .black, design: .monospaced))
+                            .tracking(1.0)
+                            .foregroundStyle(AnalysisTheme.proTourSecondaryText)
                         Text(project.name)
-                            .font(.headline)
-                            .foregroundStyle(AnalysisTheme.primaryText)
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                             .lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
                         Text("\(formatDuration(project.duration)) · \(formatFrameRate(project.sourceFrameRate))")
                             .font(.subheadline.monospacedDigit())
-                            .foregroundStyle(AnalysisTheme.secondaryText)
+                            .foregroundStyle(AnalysisTheme.proTourSecondaryText)
 
                         HStack(spacing: 6) {
                             Image(systemName: project.status.systemImage)
                             Text(project.status.label)
-                            Text("·")
-                            Text(project.modifiedAt, format: .relative(presentation: .named))
                         }
-                        .font(.caption)
-                        .foregroundStyle(AnalysisTheme.secondaryText)
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(project.status.proTourColor)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(project.status.proTourColor.opacity(0.12), in: Capsule())
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -272,11 +369,11 @@ private struct ProjectCard: View {
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
-            .foregroundStyle(AnalysisTheme.secondaryText)
+            .foregroundStyle(AnalysisTheme.proTourSecondaryText)
         }
         .padding(12)
-        .background(AnalysisTheme.libraryCard, in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(.black.opacity(0.07)))
+        .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(AnalysisTheme.proTourRaisedSurface))
     }
 
     private func formatDuration(_ duration: Double) -> String {
@@ -336,6 +433,13 @@ private extension LocalProjectStatus {
         case .pending: return "clock"
         case .analyzed: return "checkmark.circle"
         case .annotated: return "pencil.and.outline"
+        }
+    }
+
+    var proTourColor: Color {
+        switch self {
+        case .pending: return AnalysisTheme.proTourSecondaryText
+        case .analyzed, .annotated: return AnalysisTheme.proTourSignal
         }
     }
 }

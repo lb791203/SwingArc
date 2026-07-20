@@ -75,7 +75,7 @@ struct AnalysisWorkspaceView: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
-            .background(AnalysisTheme.canvasBackground)
+            .background(AnalysisTheme.proTourBackground)
             .animation(.easeInOut(duration: 0.2), value: showsProjectSidebar)
             .animation(.easeInOut(duration: 0.2), value: showsInspector)
             .onChange(of: isRegularLayout) { _, regular in
@@ -126,6 +126,16 @@ struct AnalysisWorkspaceView: View {
             if case .completed = state, horizontalSizeClass != .regular {
                 showsResultsSheet = true
             }
+        }
+        .task(id: project.id) {
+            #if DEBUG
+            guard PracticePreviewConfiguration.autoAnalyzes(
+                for: ProcessInfo.processInfo.arguments
+            ) else { return }
+
+            try? await Task.sleep(for: .milliseconds(250))
+            onAnalyze()
+            #endif
         }
         .preferredColorScheme(.dark)
     }

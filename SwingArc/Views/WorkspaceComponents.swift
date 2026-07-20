@@ -14,10 +14,11 @@ struct WorkspaceHeaderView: View {
     let onExport: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Button(action: onBack) {
                 Image(systemName: "chevron.left")
                     .frame(width: 44, height: 44)
+                    .background(AnalysisTheme.proTourSurface, in: Circle())
             }
             .accessibilityLabel("返回项目库")
 
@@ -30,13 +31,17 @@ struct WorkspaceHeaderView: View {
             }
 
             VStack(alignment: .leading, spacing: 1) {
+                Text("ANALYSIS ROOM")
+                    .font(.system(size: 9, weight: .black, design: .monospaced))
+                    .tracking(1.0)
+                    .foregroundStyle(AnalysisTheme.proTourSecondaryText)
                 Text(projectName)
-                    .font(.headline)
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
                     .lineLimit(1)
                 if !saveStatus.label.isEmpty {
                     Label(saveStatus.label, systemImage: saveStatus == .failed ? "exclamationmark.circle" : "checkmark")
                         .font(.caption2)
-                        .foregroundStyle(saveStatus == .failed ? Color.red : Color.white.opacity(0.58))
+                        .foregroundStyle(saveStatus == .failed ? AnalysisTheme.proTourPaused : AnalysisTheme.proTourSignal)
                         .transition(.opacity)
                 }
             }
@@ -54,6 +59,7 @@ struct WorkspaceHeaderView: View {
             Button(action: onExport) {
                 Image(systemName: "square.and.arrow.up")
                     .frame(width: 44, height: 44)
+                    .background(AnalysisTheme.proTourSurface, in: Circle())
             }
             .accessibilityLabel("导出")
 
@@ -66,10 +72,10 @@ struct WorkspaceHeaderView: View {
             }
         }
         .fontWeight(.semibold)
-        .foregroundStyle(.white)
-        .padding(.horizontal, 8)
-        .frame(minHeight: 52)
-        .background(AnalysisTheme.chrome)
+        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+        .padding(.horizontal, 14)
+        .frame(minHeight: 64)
+        .background(AnalysisTheme.proTourBackground)
     }
 }
 
@@ -90,12 +96,12 @@ struct StageTimelineView: View {
                     ),
                     in: 0...max(playbackManager.duration, 0.001)
                 )
-                .tint(AnalysisTheme.current)
+                .tint(AnalysisTheme.proTourSignal)
                 .accessibilityLabel("视频时间轴")
                 Text(formatTime(playbackManager.duration))
             }
             .font(.caption.monospacedDigit())
-            .foregroundStyle(.white.opacity(0.72))
+            .foregroundStyle(AnalysisTheme.proTourSecondaryText)
 
             HStack(spacing: 3) {
                 ForEach(SwingStage.allCases) { stage in
@@ -112,7 +118,7 @@ struct StageTimelineView: View {
                         VStack(spacing: 3) {
                             Text(stage.pNumber)
                                 .font(.caption2.weight(.bold))
-                                .foregroundStyle(.white.opacity(0.84))
+                                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                             Image(
                                 systemName: StageStripPolicy
                                     .indicator(for: descriptor.resultState)
@@ -123,11 +129,18 @@ struct StageTimelineView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .frame(height: StageStripPolicy.buttonHeight)
-                        .background(AnalysisTheme.raisedChrome, in: RoundedRectangle(cornerRadius: 8))
+                        .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(
+                                    descriptor.isCurrent ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourRaisedSurface,
+                                    lineWidth: descriptor.isCurrent ? 1.5 : 1
+                                )
+                        }
                         .overlay(alignment: .bottom) {
                             if descriptor.isCurrent {
                                 Capsule()
-                                    .fill(AnalysisTheme.current)
+                                    .fill(AnalysisTheme.proTourSignal)
                                     .frame(height: 3)
                                     .padding(.horizontal, 5)
                                     .padding(.bottom, 2)
@@ -140,10 +153,10 @@ struct StageTimelineView: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .frame(maxHeight: StageStripPolicy.maximumTotalHeight)
-        .background(AnalysisTheme.chrome)
+        .background(AnalysisTheme.proTourBackground)
     }
 
     private func formatTime(_ time: Double) -> String {
@@ -165,7 +178,7 @@ struct PlaybackControlsView: View {
     let onShowResults: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Menu {
                 ForEach(PlaybackRate.allCases) { rate in
                     Button(rate.label) { playbackManager.setSpeed(rate.value) }
@@ -174,7 +187,7 @@ struct PlaybackControlsView: View {
                 Text(speedLabel)
                     .font(.caption.weight(.bold).monospacedDigit())
                     .frame(minWidth: 48, minHeight: 44)
-                    .background(AnalysisTheme.raisedChrome, in: Capsule())
+                    .background(AnalysisTheme.proTourSurface, in: Capsule())
             }
             .accessibilityLabel("播放速度，当前 \(speedLabel)")
 
@@ -194,7 +207,7 @@ struct PlaybackControlsView: View {
                     .font(.title3.weight(.bold))
                     .frame(width: 54, height: 54)
                     .foregroundStyle(.black)
-                    .background(AnalysisTheme.confirmed, in: Circle())
+                    .background(AnalysisTheme.proTourSignal, in: Circle())
             }
             .accessibilityLabel(playbackManager.isPlaying ? "暂停" : "播放")
 
@@ -206,31 +219,34 @@ struct PlaybackControlsView: View {
                 Image(systemName: "pencil.tip")
                     .frame(width: 44, height: 44)
                     .background(
-                        interactionMode == .drawing ? AnalysisTheme.current : AnalysisTheme.raisedChrome,
+                        interactionMode == .drawing ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourSurface,
                         in: RoundedRectangle(cornerRadius: 12)
                     )
-                    .foregroundStyle(interactionMode == .drawing ? .black : .white)
+                .foregroundStyle(interactionMode == .drawing ? AnalysisTheme.proTourBackground : AnalysisTheme.proTourPrimaryText)
             }
             .accessibilityLabel(interactionMode == .drawing ? "结束画线" : "画线")
 
             Button(action: hasResults ? onShowResults : onAnalyze) {
                 VStack(spacing: 1) {
                     Image(systemName: hasResults ? "list.bullet.rectangle" : "sparkles")
-                    Text(hasResults ? "结果" : "AI")
+                    Text(hasResults ? "结果" : "分析")
                         .font(.caption2.weight(.semibold))
                 }
                 .frame(width: 50, height: 44)
-                .background(AnalysisTheme.raisedChrome, in: RoundedRectangle(cornerRadius: 12))
-                .foregroundStyle(AnalysisTheme.pose)
+                .background(
+                    hasResults ? AnalysisTheme.proTourSurface : AnalysisTheme.proTourSignal,
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
+                .foregroundStyle(hasResults ? AnalysisTheme.proTourPrimaryText : AnalysisTheme.proTourBackground)
             }
             .disabled(playbackManager.isScanning)
             .accessibilityLabel(hasResults ? "查看分析结果" : "开始 AI 分析")
         }
         .frame(maxWidth: .infinity)
-        .foregroundStyle(.white)
+        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
-        .background(AnalysisTheme.canvasBackground)
+        .background(AnalysisTheme.proTourBackground)
     }
 
     private var speedLabel: String {
@@ -242,7 +258,7 @@ struct PlaybackControlsView: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .frame(width: 44, height: 44)
-                .background(AnalysisTheme.raisedChrome, in: RoundedRectangle(cornerRadius: 12))
+                .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .accessibilityLabel(label)
     }
@@ -449,7 +465,7 @@ struct AnalysisProgressCard: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(presentation.title).font(.subheadline.weight(.semibold))
-                    Text(presentation.detail).font(.caption).foregroundStyle(.secondary)
+                    Text(presentation.detail).font(.caption).foregroundStyle(AnalysisTheme.proTourSecondaryText)
                 }
                 Spacer()
                 Text("\(presentation.percentage)%")
@@ -458,12 +474,12 @@ struct AnalysisProgressCard: View {
                     .font(.caption.weight(.semibold))
             }
             ProgressView(value: min(max(progress, 0), 1))
-                .tint(AnalysisTheme.confirmed)
+                .tint(AnalysisTheme.proTourSignal)
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
         .padding(12)
-        .background(AnalysisTheme.raisedChrome, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.08)))
+        .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(AnalysisTheme.proTourRaisedSurface))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(presentation.title)，\(presentation.percentage)%")
     }
@@ -475,13 +491,21 @@ struct AnalysisFailureBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(AnalysisTheme.proTourPaused)
             Text(AnalysisFailurePresentation(failure: failure).message)
-                .font(.caption)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .foregroundStyle(AnalysisTheme.current)
-        .padding(10)
-        .background(AnalysisTheme.chrome)
+        .padding(14)
+        .background(AnalysisTheme.proTourSurface)
+        .overlay(alignment: .leading) {
+            Capsule()
+                .fill(AnalysisTheme.proTourPaused)
+                .frame(width: 4)
+                .padding(.vertical, 10)
+                .padding(.leading, 5)
+        }
         .accessibilityElement(children: .combine)
     }
 }

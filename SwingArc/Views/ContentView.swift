@@ -39,12 +39,16 @@ struct ContentView: View {
     @State private var sharePayload: SharePayload?
     @State private var isExporting = false
     @State private var statusMessage: String?
+    @State private var didLoadPreviewImport = false
 
     init() {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         if let previewView = PracticePreviewConfiguration.view(for: arguments) {
             _selectedPracticeView = State(initialValue: previewView)
+        }
+        if PracticePreviewConfiguration.showsLibrary(for: arguments) {
+            _showProjectLibrary = State(initialValue: true)
         }
         #endif
     }
@@ -98,6 +102,17 @@ struct ContentView: View {
             guard let item else { return }
             loadSelectedVideo(from: item)
             selectedPickerItem = nil
+        }
+        .onAppear {
+            #if DEBUG
+            guard !didLoadPreviewImport,
+                  let path = PracticePreviewConfiguration.importPath(
+                    for: ProcessInfo.processInfo.arguments
+                  ) else { return }
+
+            didLoadPreviewImport = true
+            loadVideoFromURL(URL(fileURLWithPath: path))
+            #endif
         }
         .onChange(of: drawings) { _, _ in persistCurrentProject() }
         .onChange(of: keyframes) { _, _ in persistCurrentProject() }

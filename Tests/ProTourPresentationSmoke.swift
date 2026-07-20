@@ -32,5 +32,20 @@ struct ProTourPresentationSmoke {
                 for: ["-swingarc-preview-face-on-ready"]
             )
         )
+        precondition(
+            PracticePreviewConfiguration.showsLibrary(
+                for: ["-swingarc-preview-library"]
+            )
+        )
+        precondition(
+            PracticePreviewConfiguration.importPath(
+                for: ["-swingarc-preview-import", "/tmp/sample.mp4"]
+            ) == "/tmp/sample.mp4"
+        )
+        precondition(
+            PracticePreviewConfiguration.autoAnalyzes(
+                for: ["-swingarc-preview-analysis"]
+            )
+        )
     }
 }
