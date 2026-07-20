@@ -237,6 +237,7 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
     private var practiceRecordingStartedAt: Date?
     private var practiceImpactDetectedAt: Date?
     private var practiceClipCompletion: ((Result<URL, PracticeSessionError>) -> Void)?
+    private var discardsNextRecording = false
     
     func setupSession() {
         guard session.inputs.isEmpty else { return }
@@ -309,12 +310,26 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
         window: PracticeClipWindow = .standard,
         completion: @escaping (Result<URL, PracticeSessionError>) -> Void
     ) {
-        guard !movieOutput.isRecording else { return }
+        guard !movieOutput.isRecording else {
+            DispatchQueue.main.async { completion(.failure(.recordingFailed)) }
+            return
+        }
         practiceWindow = window
         practiceRecordingStartedAt = nil
         practiceImpactDetectedAt = nil
         practiceClipCompletion = completion
         startRecording()
+    }
+
+    func cancelAutomaticPracticeRecording() {
+        guard practiceWindow != nil || practiceClipCompletion != nil else { return }
+        practiceWindow = nil
+        practiceClipCompletion = nil
+        practiceRecordingStartedAt = nil
+        practiceImpactDetectedAt = nil
+        discardsNextRecording = movieOutput.isRecording
+        stopImpactMonitoring()
+        stopRecording()
     }
     
     /// 切换前后摄像头
@@ -512,6 +527,12 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
             )
             return
         }
+
+        if discardsNextRecording {
+            discardsNextRecording = false
+            try? FileManager.default.removeItem(at: outputFileURL)
+            return
+        }
         
         // 传递录制结果
         DispatchQueue.main.async {
@@ -562,6 +583,19 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
                 completion(.success(destination))
             }
         }
+    }
+}
+
+extension CameraStateModel: PracticeClipRecording {
+    func requestClip(
+        window: PracticeClipWindow,
+        completion: @escaping (Result<URL, PracticeSessionError>) -> Void
+    ) {
+        startAutomaticPracticeRecording(window: window, completion: completion)
+    }
+
+    func cancelPendingClip() {
+        cancelAutomaticPracticeRecording()
     }
 }
 

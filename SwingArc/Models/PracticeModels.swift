@@ -1,5 +1,11 @@
 import Foundation
 
+enum PracticePrimaryControl: Equatable {
+    case start
+    case pause
+    case none
+}
+
 enum PriorityFeedback: Equatable {
     case finding(TechniqueFinding)
     case unresolved
@@ -87,5 +93,55 @@ enum PracticeSessionReducer {
         default:
             return state
         }
+    }
+}
+
+enum PracticePresentationPolicy {
+    static func primaryControl(for state: PracticeSessionState) -> PracticePrimaryControl {
+        switch state {
+        case .readyToStart, .paused:
+            return .start
+        case .waitingForImpact, .resultRibbon:
+            return .pause
+        case .aligning, .processing, .degraded, .failed:
+            return .none
+        }
+    }
+
+    static func remoteStatus(for state: PracticeSessionState) -> String {
+        switch state {
+        case .aligning:
+            return "请站入取景框"
+        case .readyToStart:
+            return "站姿已锁定"
+        case let .waitingForImpact(_, swingCount):
+            return swingCount == 0 ? "等待第一球击球声" : "等待下一球 · 已完成 \(swingCount) 球"
+        case let .processing(_, swingCount):
+            return "第 \(swingCount) 球分析中"
+        case let .resultRibbon(_, swingCount, feedback):
+            return "第 \(swingCount) 球：\(feedbackTitle(feedback))"
+        case let .paused(_, swingCount):
+            return "已暂停 · 已完成 \(swingCount) 球"
+        case let .degraded(_, message), let .failed(_, message):
+            return message
+        }
+    }
+
+    static func feedbackTitle(_ feedback: PriorityFeedback) -> String {
+        switch feedback {
+        case let .finding(finding):
+            switch finding.kind {
+            case .postureLoss: return "上杆时身体有起身趋势"
+            case .overTheTop: return "下杆略偏外"
+            case .chickenWing: return "送杆手臂略收紧"
+            }
+        case .unresolved:
+            return "本球证据不足，暂未判定"
+        }
+    }
+
+    static func drill(for feedback: PriorityFeedback) -> DrillRecommendation? {
+        guard case let .finding(finding) = feedback else { return nil }
+        return DrillRecommendation.forFinding(finding)
     }
 }

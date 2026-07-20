@@ -12,12 +12,13 @@ struct PracticeSessionEngineSmoke {
         engine.start()
         precondition(engine.state == .waitingForImpact(view: .faceOn, swingCount: 0))
 
-        engine.ingestImpact(time: 12.4)
+        engine.armNextCapture()
         precondition(recorder.requestedWindows == [PracticeClipWindow(preImpact: 2, postImpact: 1)])
-        precondition(engine.state == .processing(view: .faceOn, swingCount: 1))
+        precondition(engine.state == .waitingForImpact(view: .faceOn, swingCount: 0))
 
         recorder.complete(url: URL(fileURLWithPath: "/tmp/swing.mp4"))
         precondition(analyzer.urls == [URL(fileURLWithPath: "/tmp/swing.mp4")])
+        precondition(engine.state == .processing(view: .faceOn, swingCount: 1))
         analyzer.complete(feedback: .unresolved)
         precondition(engine.state == .resultRibbon(view: .faceOn, swingCount: 1, feedback: .unresolved))
 

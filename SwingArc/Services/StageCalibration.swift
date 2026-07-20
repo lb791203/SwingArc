@@ -103,9 +103,11 @@ enum StageBaselineComparator {
     }
 }
 
-enum PracticeCameraView: String, Codable, Equatable {
+enum PracticeCameraView: String, Codable, Equatable, Identifiable {
     case downTheLine
     case faceOn
+
+    var id: String { rawValue }
 }
 
 /// A user-confirmed replacement for an automatically selected source frame.

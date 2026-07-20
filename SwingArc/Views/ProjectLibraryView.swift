@@ -9,6 +9,7 @@ struct ProjectLibraryView: View {
     let onRecord: () -> Void
     let onRename: (LocalProjectSummary, String) -> Void
     let onDelete: (LocalProjectSummary) -> Void
+    var onClose: (() -> Void)? = nil
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showsNewProjectSheet = false
@@ -28,6 +29,11 @@ struct ProjectLibraryView: View {
             .background(AnalysisTheme.libraryBackground.ignoresSafeArea())
             .navigationTitle("分析项目")
             .toolbar {
+                if let onClose {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("练习") { onClose() }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showsNewProjectSheet = true

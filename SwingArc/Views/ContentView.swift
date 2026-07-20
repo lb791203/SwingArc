@@ -28,6 +28,8 @@ struct ContentView: View {
     @State private var showGrid = false
 
     @State private var showCameraView = false
+    @State private var selectedPracticeView: PracticeCameraView?
+    @State private var showProjectLibrary = false
     @State private var showVideoPicker = false
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var showExportActions = false
@@ -57,14 +59,21 @@ struct ContentView: View {
                     onCancelAnalysis: playbackManager.cancelAnalysis,
                     onSetManualStage: saveManualStage
                 )
-            } else {
+            } else if showProjectLibrary {
                 ProjectLibraryView(
                     projects: projects,
                     onOpen: openProject,
                     onImport: { showVideoPicker = true },
                     onRecord: { showCameraView = true },
                     onRename: renameProject,
-                    onDelete: deleteProject
+                    onDelete: deleteProject,
+                    onClose: { showProjectLibrary = false }
+                )
+            } else {
+                PracticeHomeView(
+                    onStartPractice: { selectedPracticeView = $0 },
+                    onImport: { showVideoPicker = true },
+                    onOpenLibrary: { showProjectLibrary = true }
                 )
             }
         }
@@ -86,6 +95,19 @@ struct ContentView: View {
                 showCameraView = false
                 loadVideoFromURL(persistVideoIfNeeded(recordedURL))
             }
+        }
+        .fullScreenCover(item: $selectedPracticeView) { practiceView in
+            PracticeSessionView(
+                view: practiceView,
+                onClose: {
+                    selectedPracticeView = nil
+                    projects = LocalProjectStore.projects()
+                },
+                onOpenLastClip: { clipURL in
+                    selectedPracticeView = nil
+                    loadVideoFromURL(clipURL)
+                }
+            )
         }
         .sheet(item: $sharePayload) { payload in
             ShareSheet(items: [payload.url])
