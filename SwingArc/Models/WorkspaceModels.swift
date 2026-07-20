@@ -361,6 +361,53 @@ enum FullscreenPlaybackPolicy {
     static let minimumTouchTarget: CGFloat = 44
     static let allowsDrawing = false
     static let showsWorkspaceChrome = false
+    static let showsTimeLabels = false
+    static let showsTransportButtons = false
+}
+
+enum FullscreenReplayTap: Equatable {
+    case video
+    case feedbackPill
+    case phase(SwingStage)
+    case dismiss
+}
+
+enum FullscreenReplayAction: Equatable {
+    case togglePlayback
+    case openFeedback
+    case seek(SwingStage)
+    case dismiss
+}
+
+enum FullscreenReplayPolicy {
+    static func action(for tap: FullscreenReplayTap) -> FullscreenReplayAction {
+        switch tap {
+        case .video: return .togglePlayback
+        case .feedbackPill: return .openFeedback
+        case let .phase(stage): return .seek(stage)
+        case .dismiss: return .dismiss
+        }
+    }
+}
+
+enum SwingPhaseAppearance: Equatable {
+    case confirmed
+    case subdued
+    case hidden
+}
+
+enum SwingPhaseRailPolicy {
+    static func appearance(
+        for state: StageResultState,
+        hasMarker: Bool
+    ) -> SwingPhaseAppearance {
+        guard hasMarker else { return .hidden }
+        switch state {
+        case .confirmed, .manual: return .confirmed
+        case .review: return .subdued
+        case .unresolved: return .hidden
+        }
+    }
 }
 
 enum FeedbackMetric: String, CaseIterable, Codable, Equatable, Identifiable {
