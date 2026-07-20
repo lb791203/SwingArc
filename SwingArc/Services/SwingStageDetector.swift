@@ -314,6 +314,7 @@ enum SwingEvidenceTimeline {
 
     private static let handStabilityThreshold = 0.18
     private static let takeawayOnsetSpeedThreshold = 0.08
+    private static let isolatedVisionJitterSpeedThreshold = 0.20
     private static let takeawayConfirmationDisplacement = 0.05
     private static let takeawayConfirmationWindow = 0.75
     private static let maximumAddressHandHipDistance = 0.14
@@ -605,12 +606,32 @@ enum SwingEvidenceTimeline {
         guard windowSpans(history, duration: stableWindow, evidence: evidence) else {
             return false
         }
-        let quietCount = history.filter { historyIndex in
+        let trustedHistory = history.filter {
+            !isIsolatedVisionHandJitter(at: $0, evidence: evidence)
+        }
+        guard !trustedHistory.isEmpty else { return false }
+        let quietCount = trustedHistory.filter { historyIndex in
             let velocity = evidence[historyIndex].handVelocity
             return hypot(Double(velocity.x), Double(velocity.y))
                 < takeawayOnsetSpeedThreshold
         }.count
-        return Double(quietCount) / Double(history.count) > stableVoteRatio
+        return Double(quietCount) / Double(trustedHistory.count) > stableVoteRatio
+    }
+
+    private static func isIsolatedVisionHandJitter(
+        at index: Int,
+        evidence: [SwingFrameEvidence]
+    ) -> Bool {
+        guard index > evidence.startIndex,
+              index < evidence.index(before: evidence.endIndex) else { return false }
+        let speed = handSpeed(evidence[index])
+        guard speed >= isolatedVisionJitterSpeedThreshold else { return false }
+        return handSpeed(evidence[index - 1]) < takeawayOnsetSpeedThreshold
+            && handSpeed(evidence[index + 1]) < takeawayOnsetSpeedThreshold
+    }
+
+    private static func handSpeed(_ frame: SwingFrameEvidence) -> Double {
+        hypot(Double(frame.handVelocity.x), Double(frame.handVelocity.y))
     }
 
     private static func sustainedStabilityBegins(
