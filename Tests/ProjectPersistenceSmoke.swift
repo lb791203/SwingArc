@@ -48,6 +48,7 @@ struct ProjectPersistenceSmoke {
         precondition(restored.stageCorrections == original.stageCorrections)
         precondition(restored.showPoseSkeleton)
         precondition(restored.showSpineAngle)
+        precondition(restored.feedbackConfiguration == nil)
 
         let configuration = FeedbackConfiguration.defaultValue(for: .downTheLine)
         let configured = LocalAnalysisProject(

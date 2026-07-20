@@ -1,5 +1,252 @@
 import SwiftUI
 
+struct SwingFeedbackConfigurationView: View {
+    @Binding var practiceCameraView: PracticeCameraView?
+    @Binding var configuration: FeedbackConfiguration?
+    let analysisState: SwingAnalysisState
+    let sourceFrameRate: Double
+    let onDismiss: () -> Void
+
+    private var profile: FeedbackProfile? {
+        practiceCameraView.map(SwingFeedbackProfiles.profile(for:))
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    viewSelector
+
+                    if let profile {
+                        ForEach(Array(profile.groups.enumerated()), id: \.offset) { _, group in
+                            groupSection(group, view: profile.view)
+                        }
+                    } else {
+                        ContentUnavailableView(
+                            "选择拍摄视角",
+                            systemImage: "camera.viewfinder",
+                            description: Text("请选择目标线视角或正面视角后配置分析参数。")
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 280)
+                    }
+                }
+                .padding(16)
+            }
+            .background(AnalysisTheme.proTourBackground)
+            .navigationTitle("挥杆反馈")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭", action: onDismiss)
+                        .accessibilityLabel("关闭挥杆反馈")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("帮助") {}
+                        .accessibilityLabel("挥杆反馈帮助")
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var viewSelector: some View {
+        HStack(spacing: 8) {
+            viewButton(.downTheLine, title: "目标线视角", abbreviation: "DTL")
+            viewButton(.faceOn, title: "正面视角", abbreviation: "FO")
+        }
+        .padding(4)
+        .background(AnalysisTheme.proTourSurface, in: Capsule())
+    }
+
+    private func viewButton(
+        _ view: PracticeCameraView,
+        title: String,
+        abbreviation: String
+    ) -> some View {
+        Button {
+            select(view)
+        } label: {
+            VStack(spacing: 2) {
+                Text(title)
+                    .font(.system(size: 14, weight: .bold))
+                Text(abbreviation)
+                    .font(.system(size: 9, weight: .black, design: .monospaced))
+            }
+            .foregroundStyle(practiceCameraView == view ? .white : AnalysisTheme.proTourSecondaryText)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .background(
+                practiceCameraView == view ? AnalysisTheme.proTourSignal : .clear,
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+
+    private func groupSection(
+        _ group: FeedbackGroup,
+        view: PracticeCameraView
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(group.title)
+                .font(.system(size: 21, weight: .bold, design: .rounded))
+                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+
+            ForEach(group.metrics, id: \.metric) { definition in
+                metricRow(definition, view: view)
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func metricRow(
+        _ definition: FeedbackMetricDefinition,
+        view: PracticeCameraView
+    ) -> some View {
+        let availability = FeedbackAvailability.resolve(
+            metric: definition.metric,
+            analysis: analysisState,
+            sourceFrameRate: sourceFrameRate
+        )
+        let isSelected = selectedConfiguration(for: view).activeMetric == definition.metric
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Button {
+                select(definition.metric, for: view)
+            } label: {
+                HStack(spacing: 8) {
+                    Text(definition.title)
+                        .font(.system(size: 17, weight: .semibold))
+                    Spacer()
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(AnalysisTheme.proTourSignal)
+                    }
+                }
+                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                .padding(.horizontal, 14)
+                .frame(minHeight: 48)
+                .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(isSelected ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourRaisedSurface, lineWidth: isSelected ? 1.5 : 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("选择\(definition.title)")
+
+            switch availability {
+            case .available:
+                checkpointChips(definition, view: view)
+            case let .unavailable(reason):
+                Text(reason)
+                    .font(.footnote)
+                    .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+                    .padding(.horizontal, 4)
+            }
+        }
+    }
+
+    private func checkpointChips(
+        _ definition: FeedbackMetricDefinition,
+        view: PracticeCameraView
+    ) -> some View {
+        FlowLayout(spacing: 8) {
+            ForEach(definition.stages) { stage in
+                let checkpoint = FeedbackCheckpoint(metric: definition.metric, stage: stage)
+                let isEnabled = selectedConfiguration(for: view).enabledCheckpoints.contains(checkpoint)
+                Button {
+                    toggle(checkpoint, for: view)
+                } label: {
+                    Text(stage.shortName.replacingOccurrences(of: "P[0-9] ", with: "", options: .regularExpression))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(isEnabled ? .black : AnalysisTheme.proTourPrimaryText)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .background(isEnabled ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(AnalysisTheme.proTourRaisedSurface))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(definition.title) \(stage.shortName)")
+            }
+        }
+    }
+
+    private func selectedConfiguration(for view: PracticeCameraView) -> FeedbackConfiguration {
+        let candidate = configuration ?? FeedbackConfiguration.defaultValue(for: view)
+        return SwingFeedbackProfiles.profile(for: view).contains(candidate.activeMetric)
+            ? candidate
+            : FeedbackConfiguration.defaultValue(for: view)
+    }
+
+    private func select(_ view: PracticeCameraView) {
+        practiceCameraView = view
+        configuration = selectedConfiguration(for: view)
+    }
+
+    private func select(_ metric: FeedbackMetric, for view: PracticeCameraView) {
+        var value = selectedConfiguration(for: view)
+        value.activeMetric = metric
+        configuration = value
+    }
+
+    private func toggle(_ checkpoint: FeedbackCheckpoint, for view: PracticeCameraView) {
+        var value = selectedConfiguration(for: view)
+        if value.enabledCheckpoints.contains(checkpoint) {
+            value.enabledCheckpoints.remove(checkpoint)
+        } else {
+            value.enabledCheckpoints.insert(checkpoint)
+        }
+        configuration = value
+    }
+}
+
+private struct FlowLayout: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let width = proposal.width ?? 0
+        var cursor = CGPoint.zero
+        var maxHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if cursor.x > 0, cursor.x + size.width > width {
+                cursor.x = 0
+                cursor.y += maxHeight + spacing
+                maxHeight = 0
+            }
+            cursor.x += size.width + spacing
+            maxHeight = max(maxHeight, size.height)
+        }
+        return CGSize(width: width, height: cursor.y + maxHeight)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        var cursor = bounds.origin
+        var lineHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if cursor.x > bounds.minX, cursor.x + size.width > bounds.maxX {
+                cursor.x = bounds.minX
+                cursor.y += lineHeight + spacing
+                lineHeight = 0
+            }
+            subview.place(at: cursor, proposal: ProposedViewSize(size))
+            cursor.x += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
+    }
+}
+
 struct WorkspaceHeaderView: View {
     let projectName: String
     let saveStatus: WorkspaceSaveStatus

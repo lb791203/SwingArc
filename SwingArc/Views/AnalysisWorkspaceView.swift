@@ -11,6 +11,8 @@ struct AnalysisWorkspaceView: View {
     @Binding var showHeadStability: Bool
     @Binding var showSpineAngle: Bool
     @Binding var showGrid: Bool
+    @Binding var practiceCameraView: PracticeCameraView?
+    @Binding var feedbackConfiguration: FeedbackConfiguration?
     let saveStatus: WorkspaceSaveStatus
     let onBack: () -> Void
     let onSelectProject: (LocalProjectSummary) -> Void
@@ -119,6 +121,8 @@ struct AnalysisWorkspaceView: View {
                 showHeadStability: showHeadStability,
                 showSpineAngle: showSpineAngle,
                 showGrid: showGrid,
+                practiceCameraView: $practiceCameraView,
+                feedbackConfiguration: $feedbackConfiguration,
                 onDismiss: { showsFullscreenPlayback = false }
             )
         }
@@ -302,6 +306,8 @@ struct FullscreenVideoPlaybackView: View {
     let showHeadStability: Bool
     let showSpineAngle: Bool
     let showGrid: Bool
+    @Binding var practiceCameraView: PracticeCameraView?
+    @Binding var feedbackConfiguration: FeedbackConfiguration?
     let onDismiss: () -> Void
 
     @State private var controlsVisible = true
