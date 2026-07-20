@@ -19,6 +19,7 @@ class VideoPlaybackManager: ObservableObject {
     @Published private(set) var mediaLoadState: MediaLoadState = .idle
     @Published private(set) var analysisState: SwingAnalysisState = .idle
     @Published private(set) var analysisResult: SwingAnalysisResult? = nil
+    @Published private(set) var analysisOutput: SwingVideoAnalysisOutput? = nil
     @Published private(set) var analysisFailure: AnalysisFailure? = nil
     
     var player: AVPlayer?
@@ -57,6 +58,7 @@ class VideoPlaybackManager: ObservableObject {
         removeObservers()
         analysisState = .idle
         analysisResult = nil
+        analysisOutput = nil
         analysisFailure = nil
         scanProgress = 0
         analysisProgressPhase = .preparing
@@ -145,6 +147,7 @@ class VideoPlaybackManager: ObservableObject {
         videoRect = .zero
         sourceFrameRate = 60
         analysisResult = nil
+        analysisOutput = nil
         analysisFailure = nil
         analysisState = .idle
         mediaLoadState = .idle
@@ -327,6 +330,7 @@ class VideoPlaybackManager: ObservableObject {
         scanProgress = 0.0
         analysisProgressPhase = .preparing
         analysisResult = nil
+        analysisOutput = nil
         analysisFailure = nil
         analysisState = .scanning(progress: 0)
         analysisQueue.async { [weak self] in
@@ -359,6 +363,7 @@ class VideoPlaybackManager: ObservableObject {
                         self.scanProgress = 1
                         self.sourceFrameRate = output.sourceFrameRate
                         self.analysisResult = output.result
+                        self.analysisOutput = output
                         self.analysisFailure = nil
                         self.analysisState = .completed(output.result)
                     }
@@ -371,6 +376,7 @@ class VideoPlaybackManager: ObservableObject {
                         self.isScanning = false
                         self.scanProgress = 0
                         self.analysisResult = nil
+                        self.analysisOutput = nil
                         self.analysisFailure = reason
                         self.analysisState = .failed(reason)
                     }
@@ -386,6 +392,7 @@ class VideoPlaybackManager: ObservableObject {
                 self.analysisFailure = .analysisCancelled
                 self.analysisState = .failed(.analysisCancelled)
                 self.analysisResult = nil
+                self.analysisOutput = nil
             }
         }
         analysisRunID = nil
@@ -395,6 +402,7 @@ class VideoPlaybackManager: ObservableObject {
         if !wasScanning {
             analysisState = .idle
             analysisResult = nil
+            analysisOutput = nil
             analysisFailure = nil
         }
     }
@@ -410,9 +418,32 @@ class VideoPlaybackManager: ObservableObject {
         scanProgress = 0
         analysisProgressPhase = .preparing
         analysisResult = result
+        analysisOutput = nil
         analysisFailure = failure
         analysisState = .failed(failure)
         completion(result)
+    }
+
+    func priorityFeedback(
+        view: PracticeCameraView?,
+        manualMarkers: [KeyframeMarker]
+    ) -> PriorityFeedback? {
+        guard let output = analysisOutput else { return nil }
+        // Imported legacy videos may not carry a declared camera angle. Do
+        // not turn that missing context into a false technique diagnosis.
+        guard let view else { return nil }
+        let detections = ManualStageDetectionPolicy.applying(
+            manualMarkers: manualMarkers,
+            sourceFrameRate: output.sourceFrameRate,
+            automatic: output.result.detections,
+            availablePoseSamples: output.poseSamples
+        )
+        return .select(from: SwingTechniqueEvaluator.evaluate(
+            samples: output.poseSamples,
+            stages: detections,
+            view: view,
+            leadArm: output.leadArm
+        ))
     }
 }
 

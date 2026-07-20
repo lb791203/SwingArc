@@ -8,6 +8,10 @@ struct LocalAnalysisProject: Codable, Equatable {
     var showHeadStability: Bool
     var showSpineAngle: Bool
     var showGrid: Bool
+    /// The selected camera angle is explicit evidence context. Imported
+    /// projects may leave it nil, which intentionally withholds view-specific
+    /// technique findings until the user has recorded through a practice mode.
+    var practiceCameraView: PracticeCameraView?
     /// Per-video user corrections are retained as truth for this project.
     /// They are optional in stored payloads so projects saved before this
     /// feature continue to decode unchanged.
@@ -21,6 +25,7 @@ struct LocalAnalysisProject: Codable, Equatable {
         showHeadStability: Bool,
         showSpineAngle: Bool,
         showGrid: Bool,
+        practiceCameraView: PracticeCameraView? = nil,
         stageCorrections: [StageCorrection] = []
     ) {
         self.drawings = drawings
@@ -30,6 +35,7 @@ struct LocalAnalysisProject: Codable, Equatable {
         self.showHeadStability = showHeadStability
         self.showSpineAngle = showSpineAngle
         self.showGrid = showGrid
+        self.practiceCameraView = practiceCameraView
         self.stageCorrections = stageCorrections
     }
 
@@ -41,6 +47,7 @@ struct LocalAnalysisProject: Codable, Equatable {
         case showHeadStability
         case showSpineAngle
         case showGrid
+        case practiceCameraView
         case stageCorrections
     }
 
@@ -54,6 +61,7 @@ struct LocalAnalysisProject: Codable, Equatable {
             showHeadStability: try container.decode(Bool.self, forKey: .showHeadStability),
             showSpineAngle: try container.decode(Bool.self, forKey: .showSpineAngle),
             showGrid: try container.decode(Bool.self, forKey: .showGrid),
+            practiceCameraView: try container.decodeIfPresent(PracticeCameraView.self, forKey: .practiceCameraView),
             stageCorrections: try container.decodeIfPresent(
                 [StageCorrection].self,
                 forKey: .stageCorrections
@@ -70,6 +78,7 @@ struct LocalAnalysisProject: Codable, Equatable {
         try container.encode(showHeadStability, forKey: .showHeadStability)
         try container.encode(showSpineAngle, forKey: .showSpineAngle)
         try container.encode(showGrid, forKey: .showGrid)
+        try container.encodeIfPresent(practiceCameraView, forKey: .practiceCameraView)
         try container.encode(stageCorrections, forKey: .stageCorrections)
     }
 }

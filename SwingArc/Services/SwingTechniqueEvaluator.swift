@@ -23,6 +23,95 @@ struct TechniqueFinding: Equatable {
     let evidence: TechniqueEvidence
 }
 
+struct TechniqueFeedbackPresentation: Equatable {
+    let title: String
+    let detail: String
+    let evidenceStages: [SwingStage]
+    let drill: DrillRecommendation?
+    let showsEvidence: Bool
+
+    static func make(
+        feedback: PriorityFeedback,
+        analysis: SwingAnalysisResult
+    ) -> TechniqueFeedbackPresentation {
+        switch feedback {
+        case let .finding(finding):
+            let title: String
+            let detail: String
+            switch finding.kind {
+            case .postureLoss:
+                title = "上杆时身体有起身趋势"
+                detail = "请先保持头部与躯干角度稳定，再提高挥杆速度。"
+            case .overTheTop:
+                title = "下杆略偏外"
+                detail = "先让手臂从身体内侧落下，避免急着把杆推向目标线。"
+            case .chickenWing:
+                title = "送杆手臂略收紧"
+                detail = "让引导手臂在击球后自然伸展，再完成转身。"
+            }
+            let showsEvidence = finding.evidence.stages.allSatisfy { stage in
+                analysis.detections.contains {
+                    $0.stage == stage && $0.status == .confirmed && $0.sourceFrameIndex != nil
+                }
+            }
+            return TechniqueFeedbackPresentation(
+                title: title,
+                detail: detail,
+                evidenceStages: finding.evidence.stages,
+                drill: showsEvidence ? DrillRecommendation.forFinding(finding) : nil,
+                showsEvidence: showsEvidence
+            )
+        case .unresolved:
+            let missing = analysis.unresolvedStages
+                .sorted { $0.rawValue < $1.rawValue }
+                .first
+                .map { "P\((SwingStage.allCases.firstIndex(of: $0) ?? 0) + 1)" } ?? "关键帧"
+            return TechniqueFeedbackPresentation(
+                title: "本球未能判定",
+                detail: "\(missing) 的人体或动作证据不足；不会给出猜测性的纠错建议。",
+                evidenceStages: [],
+                drill: nil,
+                showsEvidence: false
+            )
+        }
+    }
+}
+
+/// Manual P-point edits are the truth for the current video. A corrected
+/// source frame may participate in technique evaluation only when that exact
+/// Vision sample exists; otherwise its low-confidence state intentionally
+/// withholds the diagnosis rather than borrowing a neighbouring frame.
+enum ManualStageDetectionPolicy {
+    static func applying(
+        manualMarkers: [KeyframeMarker],
+        sourceFrameRate: Double,
+        automatic: [SwingStageDetection],
+        availablePoseSamples: [SwingPoseSample]
+    ) -> [SwingStageDetection] {
+        guard sourceFrameRate.isFinite, sourceFrameRate > 0 else { return automatic }
+        var manualByStage: [SwingStage: KeyframeMarker] = [:]
+        for marker in manualMarkers where marker.source == .manual {
+            guard let stage = SwingStage(rawValue: marker.stage) else { continue }
+            manualByStage[stage] = marker
+        }
+        let availableFrames = Set(availablePoseSamples.compactMap(\.sourceFrameIndex))
+        return automatic.map { detection in
+            guard let marker = manualByStage[detection.stage] else { return detection }
+            let frame = Int((marker.time * sourceFrameRate).rounded())
+            return SwingStageDetection(
+                stage: detection.stage,
+                time: marker.time,
+                sourceFrameIndex: frame,
+                confidence: availableFrames.contains(frame) ? 1 : 0,
+                status: availableFrames.contains(frame) ? .confirmed : .lowConfidence,
+                hasClubEvidence: detection.hasClubEvidence,
+                hasBallEvidence: detection.hasBallEvidence,
+                hasBallChangeEvidence: detection.hasBallChangeEvidence
+            )
+        }
+    }
+}
+
 /// Conservative, pure geometry checks. The evaluator never invents a finding:
 /// missing confirmed stages, low pose confidence, or an unsupported camera view
 /// produce no result and are presented as unresolved by the caller.

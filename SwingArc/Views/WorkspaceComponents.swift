@@ -486,6 +486,80 @@ struct AnalysisFailureBanner: View {
     }
 }
 
+struct TechniqueFeedbackCard: View {
+    let presentation: TechniqueFeedbackPresentation
+    let onSelectEvidence: (SwingStage) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 9) {
+                Image(systemName: presentation.showsEvidence ? "scope" : "questionmark.circle")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(presentation.showsEvidence ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourSecondaryText)
+                Text(presentation.showsEvidence ? "PRIORITY FEEDBACK" : "EVIDENCE PENDING")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .tracking(1.1)
+                    .foregroundStyle(presentation.showsEvidence ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourSecondaryText)
+                Spacer(minLength: 0)
+                Text(presentation.showsEvidence ? "CONFIRMED" : "NO PRESCRIPTION")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(0.7)
+                    .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+            }
+
+            Text(presentation.title)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+            Text(presentation.detail)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+
+            if presentation.showsEvidence {
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("CONFIRMED P-STAGES")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .tracking(0.9)
+                        .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+                    HStack(spacing: 8) {
+                        ForEach(presentation.evidenceStages) { stage in
+                            Button(stage.pNumber) { onSelectEvidence(stage) }
+                                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                .foregroundStyle(AnalysisTheme.proTourBackground)
+                                .frame(minWidth: 44, minHeight: 36)
+                                .background(AnalysisTheme.proTourSignal, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+
+            if let drill = presentation.drill {
+                HStack(spacing: 10) {
+                    Image(systemName: "figure.strengthtraining.traditional")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(AnalysisTheme.proTourSignal)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("DRILL")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .tracking(0.9)
+                            .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+                        Text(drill.title)
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(16)
+        .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(AnalysisTheme.proTourRaisedSurface, lineWidth: 1)
+        )
+    }
+}
+
 struct StageInspectorView: View {
     let presentation: AnalysisWorkspacePresentation
     let keyframes: [KeyframeMarker]

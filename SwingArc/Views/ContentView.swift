@@ -17,10 +17,12 @@ struct ContentView: View {
     @State private var projects = LocalProjectStore.projects()
     @State private var activeProject: LocalProjectSummary?
     @State private var currentProjectURL: URL?
+    @State private var practiceCameraView: PracticeCameraView?
     @State private var saveStatus: WorkspaceSaveStatus = .idle
 
     @State private var drawings: [DrawingElement] = []
     @State private var keyframes: [KeyframeMarker] = []
+    @State private var stageCorrections: [StageCorrection] = []
     @State private var isKeyframeMode = false
     @State private var showPoseSkeleton = false
     @State private var showHeadStability = false
@@ -57,7 +59,11 @@ struct ContentView: View {
                     onExport: { showExportActions = true },
                     onAnalyze: runAISwingAnalysis,
                     onCancelAnalysis: playbackManager.cancelAnalysis,
-                    onSetManualStage: saveManualStage
+                    onSetManualStage: saveManualStage,
+                    feedback: playbackManager.priorityFeedback(
+                        view: practiceCameraView,
+                        manualMarkers: keyframes
+                    )
                 )
             } else if showProjectLibrary {
                 ProjectLibraryView(
@@ -85,6 +91,7 @@ struct ContentView: View {
         }
         .onChange(of: drawings) { _, _ in persistCurrentProject() }
         .onChange(of: keyframes) { _, _ in persistCurrentProject() }
+        .onChange(of: stageCorrections) { _, _ in persistCurrentProject() }
         .onChange(of: isKeyframeMode) { _, _ in persistCurrentProject() }
         .onChange(of: showPoseSkeleton) { _, _ in persistCurrentProject() }
         .onChange(of: showHeadStability) { _, _ in persistCurrentProject() }
@@ -105,7 +112,7 @@ struct ContentView: View {
                 },
                 onOpenLastClip: { clipURL in
                     selectedPracticeView = nil
-                    loadVideoFromURL(clipURL)
+                    loadVideoFromURL(clipURL, practiceView: practiceView)
                 }
             )
         }
@@ -153,6 +160,8 @@ struct ContentView: View {
         playbackManager.unloadVideo()
         activeProject = nil
         currentProjectURL = nil
+        practiceCameraView = nil
+        stageCorrections = []
         saveStatus = .idle
         projects = LocalProjectStore.projects()
     }
@@ -177,11 +186,16 @@ struct ContentView: View {
         }
     }
 
-    private func loadVideoFromURL(_ url: URL, existingSummary: LocalProjectSummary? = nil) {
+    private func loadVideoFromURL(
+        _ url: URL,
+        existingSummary: LocalProjectSummary? = nil,
+        practiceView: PracticeCameraView? = nil
+    ) {
         playbackManager.unloadVideo()
         currentProjectURL = nil
         drawings = []
         keyframes = []
+        stageCorrections = []
         isKeyframeMode = false
         showPoseSkeleton = false
         showHeadStability = false
@@ -199,6 +213,10 @@ struct ContentView: View {
             showHeadStability = saved.showHeadStability
             showSpineAngle = saved.showSpineAngle
             showGrid = saved.showGrid
+            self.practiceCameraView = practiceView ?? saved.practiceCameraView
+            stageCorrections = saved.stageCorrections
+        } else {
+            self.practiceCameraView = practiceView
         }
 
         var summary = existingSummary
@@ -234,7 +252,9 @@ struct ContentView: View {
                 showPoseSkeleton: showPoseSkeleton,
                 showHeadStability: showHeadStability,
                 showSpineAngle: showSpineAngle,
-                showGrid: showGrid
+                showGrid: showGrid,
+                practiceCameraView: practiceCameraView,
+                stageCorrections: stageCorrections
             ),
             for: videoURL
         )
@@ -284,6 +304,18 @@ struct ContentView: View {
         keyframes.removeAll { $0.stage == stage.rawValue }
         keyframes.append(marker)
         keyframes.sort { $0.time < $1.time }
+        guard let view = practiceCameraView,
+              let automaticFrame = playbackManager.analysisOutput?.result.detections
+                .first(where: { $0.stage == stage })?.sourceFrameIndex,
+              playbackManager.sourceFrameRate > 0 else { return }
+        let manualFrame = Int((playbackManager.currentTime * playbackManager.sourceFrameRate).rounded())
+        stageCorrections.removeAll { $0.stage == stage && $0.view == view }
+        stageCorrections.append(StageCorrection(
+            stage: stage,
+            view: view,
+            automaticFrameIndex: automaticFrame,
+            manualFrameIndex: manualFrame
+        ))
     }
 
     private func performMediaAction(_ action: MediaAction, kind: MediaExportKind) {

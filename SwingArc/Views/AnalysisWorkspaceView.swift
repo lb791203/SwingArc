@@ -18,6 +18,7 @@ struct AnalysisWorkspaceView: View {
     let onAnalyze: () -> Void
     let onCancelAnalysis: () -> Void
     let onSetManualStage: (SwingStage) -> Void
+    let feedback: PriorityFeedback?
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var interactionMode: WorkspaceInteractionMode = .idle
@@ -32,6 +33,11 @@ struct AnalysisWorkspaceView: View {
 
     private var presentation: AnalysisWorkspacePresentation {
         AnalysisWorkspacePresentation(state: playbackManager.analysisState)
+    }
+
+    private var techniquePresentation: TechniqueFeedbackPresentation? {
+        guard let feedback, let analysis = playbackManager.analysisResult else { return nil }
+        return TechniqueFeedbackPresentation.make(feedback: feedback, analysis: analysis)
     }
 
     var body: some View {
@@ -172,6 +178,22 @@ struct AnalysisWorkspaceView: View {
             }
             .frame(maxHeight: .infinity)
             .animation(.easeInOut(duration: 0.2), value: interactionMode)
+
+            if let techniquePresentation {
+                TechniqueFeedbackCard(
+                    presentation: techniquePresentation,
+                    onSelectEvidence: { stage in
+                        if let marker = keyframes.first(where: { $0.stage == stage.rawValue }) {
+                            playbackManager.seek(to: marker.time)
+                        } else if let time = presentation.detection(for: stage)?.time {
+                            playbackManager.seek(to: time)
+                        }
+                    }
+                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(AnalysisTheme.chrome)
+            }
 
             if !isRegularLayout && playbackManager.isScanning {
                 AnalysisProgressCard(
