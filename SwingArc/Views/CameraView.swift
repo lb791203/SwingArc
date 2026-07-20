@@ -219,12 +219,20 @@ struct CameraView: View {
 
 // MARK: - 相机状态模型类
 
-class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecordingDelegate {
+class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecordingDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
     @Published var session = AVCaptureSession()
     @Published var recordedVideoURL: URL? = nil
+    @Published private(set) var lastImpactTime: TimeInterval? = nil
     
     private var movieOutput = AVCaptureMovieFileOutput()
     private var activeVideoInput: AVCaptureDeviceInput?
+    private var audioInput: AVCaptureDeviceInput?
+    private let audioOutput = AVCaptureAudioDataOutput()
+    private let audioQueue = DispatchQueue(label: "com.liangbo.swingarc.impact-audio", qos: .userInitiated)
+    private var impactTrigger = ImpactTriggerPolicy()
+    private var audioTimeOrigin: CMTime?
+    private var isImpactMonitoring = false
+    var onImpactDetected: ((TimeInterval) -> Void)?
     
     func setupSession() {
         guard session.inputs.isEmpty else { return }
@@ -254,6 +262,8 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
             if session.canAddOutput(movieOutput) {
                 session.addOutput(movieOutput)
             }
+
+            configureImpactAudio()
             
             session.commitConfiguration()
             
@@ -271,6 +281,21 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
         if session.isRunning {
             session.stopRunning()
         }
+    }
+
+    /// The caller arms this only after the user has explicitly started an
+    /// automatic practice session. Preview audio alone must never create clips.
+    func startImpactMonitoring(onImpactDetected: @escaping (TimeInterval) -> Void) {
+        impactTrigger = ImpactTriggerPolicy()
+        audioTimeOrigin = nil
+        self.onImpactDetected = onImpactDetected
+        isImpactMonitoring = true
+    }
+
+    func stopImpactMonitoring() {
+        isImpactMonitoring = false
+        onImpactDetected = nil
+        audioTimeOrigin = nil
     }
     
     /// 切换前后摄像头
@@ -363,6 +388,66 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
     func stopRecording() {
         guard movieOutput.isRecording else { return }
         movieOutput.stopRecording()
+    }
+
+    private func configureImpactAudio() {
+        guard audioInput == nil,
+              let microphone = AVCaptureDevice.default(for: .audio) else { return }
+        do {
+            let input = try AVCaptureDeviceInput(device: microphone)
+            if session.canAddInput(input) {
+                session.addInput(input)
+                audioInput = input
+            }
+            audioOutput.audioSettings = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false
+            ]
+            audioOutput.setSampleBufferDelegate(self, queue: audioQueue)
+            if session.canAddOutput(audioOutput) {
+                session.addOutput(audioOutput)
+            }
+        } catch {
+            print("Impact audio setup error: \(error)")
+        }
+    }
+
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        guard output === audioOutput, isImpactMonitoring,
+              let rms = audioRMS(from: sampleBuffer) else { return }
+        let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        guard timestamp.isValid else { return }
+        if audioTimeOrigin == nil { audioTimeOrigin = timestamp }
+        let elapsed = CMTimeGetSeconds(CMTimeSubtract(timestamp, audioTimeOrigin ?? timestamp))
+        guard elapsed.isFinite else { return }
+        if impactTrigger.ingest(rms: rms, at: elapsed) {
+            DispatchQueue.main.async {
+                self.lastImpactTime = elapsed
+                self.onImpactDetected?(elapsed)
+            }
+        }
+    }
+
+    private func audioRMS(from sampleBuffer: CMSampleBuffer) -> Double? {
+        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return nil }
+        let byteCount = CMBlockBufferGetDataLength(blockBuffer)
+        guard byteCount >= MemoryLayout<Int16>.size else { return nil }
+        var samples = [Int16](repeating: 0, count: byteCount / MemoryLayout<Int16>.size)
+        let copyStatus = samples.withUnsafeMutableBytes {
+            CMBlockBufferCopyDataBytes(blockBuffer, atOffset: 0, dataLength: byteCount, destination: $0.baseAddress!)
+        }
+        guard copyStatus == kCMBlockBufferNoErr else { return nil }
+        let meanSquare = samples.reduce(0.0) { partial, sample in
+            let normalized = Double(sample) / Double(Int16.max)
+            return partial + normalized * normalized
+        } / Double(samples.count)
+        return sqrt(meanSquare)
     }
     
     // MARK: - AVCaptureFileOutputRecordingDelegate
