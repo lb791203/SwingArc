@@ -233,6 +233,10 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
     private var audioTimeOrigin: CMTime?
     private var isImpactMonitoring = false
     var onImpactDetected: ((TimeInterval) -> Void)?
+    private var practiceWindow: PracticeClipWindow?
+    private var practiceRecordingStartedAt: Date?
+    private var practiceImpactDetectedAt: Date?
+    private var practiceClipCompletion: ((Result<URL, PracticeSessionError>) -> Void)?
     
     func setupSession() {
         guard session.inputs.isEmpty else { return }
@@ -296,6 +300,21 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
         isImpactMonitoring = false
         onImpactDetected = nil
         audioTimeOrigin = nil
+    }
+
+    /// Starts one continuous source recording. The microphone detector arms
+    /// only after the file output confirms recording has begun; the resulting
+    /// callback receives a trimmed 2-second-before / 1-second-after clip.
+    func startAutomaticPracticeRecording(
+        window: PracticeClipWindow = .standard,
+        completion: @escaping (Result<URL, PracticeSessionError>) -> Void
+    ) {
+        guard !movieOutput.isRecording else { return }
+        practiceWindow = window
+        practiceRecordingStartedAt = nil
+        practiceImpactDetectedAt = nil
+        practiceClipCompletion = completion
+        startRecording()
     }
     
     /// 切换前后摄像头
@@ -454,16 +473,100 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
     
     func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {
         print("Camera recording started: \(fileURL)")
+        guard let window = practiceWindow else { return }
+        practiceRecordingStartedAt = Date()
+        startImpactMonitoring { [weak self] elapsed in
+            guard let self,
+                  self.practiceImpactDetectedAt == nil,
+                  elapsed >= window.preImpact else { return }
+            self.practiceImpactDetectedAt = Date()
+            self.stopImpactMonitoring()
+            DispatchQueue.main.asyncAfter(deadline: .now() + window.postImpact + 0.12) {
+                self.stopRecording()
+            }
+        }
     }
     
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
         if let error = error {
             print("Camera recording error: \(error.localizedDescription)")
         }
+
+        if let window = practiceWindow {
+            stopImpactMonitoring()
+            let completion = practiceClipCompletion
+            let recordingStartedAt = practiceRecordingStartedAt
+            let impactDetectedAt = practiceImpactDetectedAt
+            practiceWindow = nil
+            practiceClipCompletion = nil
+            practiceRecordingStartedAt = nil
+            practiceImpactDetectedAt = nil
+            guard error == nil,
+                  let completion,
+                  let recordingStartedAt,
+                  let impactDetectedAt else {
+                DispatchQueue.main.async {
+                    completion?(.failure(.recordingFailed))
+                }
+                return
+            }
+            exportPracticeClip(
+                sourceURL: outputFileURL,
+                impactTime: impactDetectedAt.timeIntervalSince(recordingStartedAt),
+                window: window,
+                completion: completion
+            )
+            return
+        }
         
         // 传递录制结果
         DispatchQueue.main.async {
             self.recordedVideoURL = outputFileURL
+        }
+    }
+
+    private func exportPracticeClip(
+        sourceURL: URL,
+        impactTime: TimeInterval,
+        window: PracticeClipWindow,
+        completion: @escaping (Result<URL, PracticeSessionError>) -> Void
+    ) {
+        let asset = AVURLAsset(url: sourceURL)
+        let duration = CMTimeGetSeconds(asset.duration)
+        guard let range = PracticeClipRangePolicy.resolve(
+            impactTime: impactTime,
+            sourceDuration: duration,
+            window: window
+        ) else {
+            DispatchQueue.main.async { completion(.failure(.recordingFailed)) }
+            return
+        }
+        guard let export = AVAssetExportSession(
+            asset: asset,
+            presetName: AVAssetExportPresetHighestQuality
+        ) else {
+            DispatchQueue.main.async { completion(.failure(.recordingFailed)) }
+            return
+        }
+        let destination = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("practice_clip_\(UUID().uuidString).mp4")
+        try? FileManager.default.removeItem(at: destination)
+        export.outputURL = destination
+        export.outputFileType = .mp4
+        export.timeRange = CMTimeRange(
+            start: CMTime(seconds: range.start, preferredTimescale: 600),
+            duration: CMTime(seconds: range.duration, preferredTimescale: 600)
+        )
+        export.exportAsynchronously { [weak self] in
+            DispatchQueue.main.async {
+                guard export.status == .completed else {
+                    completion(.failure(.recordingFailed))
+                    return
+                }
+                try? FileManager.default.removeItem(at: sourceURL)
+                self?.lastImpactTime = nil
+                completion(.success(destination))
+            }
         }
     }
 }

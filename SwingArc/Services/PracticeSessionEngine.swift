@@ -7,6 +7,30 @@ struct PracticeClipWindow: Equatable {
     static let standard = PracticeClipWindow(preImpact: 2, postImpact: 1)
 }
 
+struct PracticeClipRange: Equatable {
+    let start: TimeInterval
+    let duration: TimeInterval
+}
+
+enum PracticeClipRangePolicy {
+    static func resolve(
+        impactTime: TimeInterval,
+        sourceDuration: TimeInterval,
+        window: PracticeClipWindow
+    ) -> PracticeClipRange? {
+        guard impactTime.isFinite,
+              sourceDuration.isFinite,
+              window.preImpact >= 0,
+              window.postImpact >= 0 else {
+            return nil
+        }
+        let start = impactTime - window.preImpact
+        let end = impactTime + window.postImpact
+        guard start >= 0, end <= sourceDuration else { return nil }
+        return PracticeClipRange(start: start, duration: end - start)
+    }
+}
+
 enum PracticeSessionError: Error, Equatable {
     case recordingFailed
     case analysisFailed
