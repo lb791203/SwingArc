@@ -363,6 +363,214 @@ enum FullscreenPlaybackPolicy {
     static let showsWorkspaceChrome = false
 }
 
+enum FeedbackMetric: String, CaseIterable, Codable, Equatable, Identifiable {
+    case alignment
+    case hipBend
+    case hipDepth
+    case kneeFlex
+    case handPosition
+    case swingPlane
+    case handPath
+    case spineStability
+    case headPosition
+    case hipPosition
+    case chestPosition
+    case stanceWidth
+    case clubRelease
+    case spineTilt
+    case leadShoulder
+    case leadHip
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .alignment: return "瞄准"
+        case .hipBend: return "髋部前倾"
+        case .hipDepth: return "髋部深度"
+        case .kneeFlex: return "膝屈"
+        case .handPosition: return "手位"
+        case .swingPlane: return "挥杆平面"
+        case .handPath: return "手部路径"
+        case .spineStability: return "脊柱稳定"
+        case .headPosition: return "头部位置"
+        case .hipPosition: return "髋位"
+        case .chestPosition: return "胸位"
+        case .stanceWidth: return "站距"
+        case .clubRelease: return "释放"
+        case .spineTilt: return "脊柱侧倾"
+        case .leadShoulder: return "前导肩"
+        case .leadHip: return "前导髋"
+        }
+    }
+}
+
+enum FeedbackEvidenceRequirement: Equatable {
+    case pose
+    case clubAndImpact
+}
+
+struct FeedbackMetricDefinition: Equatable {
+    let metric: FeedbackMetric
+    let stages: [SwingStage]
+    let evidence: FeedbackEvidenceRequirement
+
+    var title: String { metric.title }
+}
+
+struct FeedbackGroup: Equatable {
+    let title: String
+    let metrics: [FeedbackMetricDefinition]
+}
+
+struct FeedbackProfile: Equatable {
+    let view: PracticeCameraView
+    let groups: [FeedbackGroup]
+
+    func metric(_ metric: FeedbackMetric) -> FeedbackMetricDefinition? {
+        groups.lazy.flatMap(\.metrics).first { $0.metric == metric }
+    }
+
+    func contains(_ metric: FeedbackMetric) -> Bool {
+        self.metric(metric) != nil
+    }
+}
+
+struct FeedbackCheckpoint: Codable, Hashable, Equatable {
+    let metric: FeedbackMetric
+    let stage: SwingStage
+}
+
+struct FeedbackConfiguration: Codable, Equatable {
+    var activeMetric: FeedbackMetric
+    var enabledCheckpoints: Set<FeedbackCheckpoint>
+
+    static func defaultValue(for view: PracticeCameraView) -> FeedbackConfiguration {
+        switch view {
+        case .downTheLine:
+            return FeedbackConfiguration(
+                activeMetric: .swingPlane,
+                enabledCheckpoints: [
+                    FeedbackCheckpoint(metric: .swingPlane, stage: .takeaway),
+                    FeedbackCheckpoint(metric: .swingPlane, stage: .leadArmParallelDownswing)
+                ]
+            )
+        case .faceOn:
+            return FeedbackConfiguration(
+                activeMetric: .spineTilt,
+                enabledCheckpoints: [
+                    FeedbackCheckpoint(metric: .spineTilt, stage: .top),
+                    FeedbackCheckpoint(metric: .spineTilt, stage: .impact)
+                ]
+            )
+        }
+    }
+}
+
+enum FeedbackAvailability: Equatable {
+    case available
+    case unavailable(String)
+
+    static func resolve(
+        metric: FeedbackMetric,
+        analysis: SwingAnalysisState,
+        sourceFrameRate: Double
+    ) -> FeedbackAvailability {
+        guard metric == .clubRelease else {
+            guard case let .completed(result) = analysis,
+                  result.detections.contains(where: { $0.status == .confirmed }),
+                  sourceFrameRate > 0 else {
+                return .unavailable("当前画面证据不足")
+            }
+            return .available
+        }
+
+        guard case let .completed(result) = analysis,
+              sourceFrameRate >= 120,
+              let impact = result.detections.first(where: { $0.stage == .impact }),
+              impact.status == .confirmed,
+              impact.hasClubEvidence,
+              impact.hasBallEvidence || impact.hasBallChangeEvidence else {
+            return .unavailable("需要可靠的杆头与击球证据")
+        }
+        return .available
+    }
+}
+
+enum SwingFeedbackProfiles {
+    private static let setupDTL: [FeedbackMetricDefinition] = [
+        .init(metric: .alignment, stages: [.address], evidence: .pose),
+        .init(metric: .hipBend, stages: [.address], evidence: .pose),
+        .init(metric: .hipDepth, stages: [.address], evidence: .pose),
+        .init(metric: .kneeFlex, stages: [.address], evidence: .pose),
+        .init(metric: .handPosition, stages: [.address], evidence: .pose)
+    ]
+
+    private static let setupFaceOn: [FeedbackMetricDefinition] = [
+        .init(metric: .hipPosition, stages: [.address], evidence: .pose),
+        .init(metric: .chestPosition, stages: [.address], evidence: .pose),
+        .init(metric: .handPosition, stages: [.address], evidence: .pose),
+        .init(metric: .stanceWidth, stages: [.address], evidence: .pose)
+    ]
+
+    private static let movementStages: [SwingStage] = [
+        .takeaway,
+        .leadArmParallelBackswing,
+        .top,
+        .leadArmParallelDownswing,
+        .impact,
+        .followThrough
+    ]
+
+    static func profile(for view: PracticeCameraView) -> FeedbackProfile {
+        switch view {
+        case .downTheLine:
+            return FeedbackProfile(view: view, groups: [
+                FeedbackGroup(title: "准备姿势", metrics: setupDTL),
+                FeedbackGroup(title: "挥杆平面", metrics: [
+                    .init(metric: .swingPlane, stages: [
+                        .takeaway,
+                        .leadArmParallelBackswing,
+                        .leadArmParallelDownswing,
+                        .followThrough
+                    ], evidence: .pose)
+                ]),
+                FeedbackGroup(title: "手部路径", metrics: [
+                    .init(metric: .handPath, stages: movementStages, evidence: .pose)
+                ]),
+                FeedbackGroup(title: "脊柱稳定", metrics: [
+                    .init(metric: .spineStability, stages: movementStages, evidence: .pose)
+                ]),
+                FeedbackGroup(title: "头部位置", metrics: [
+                    .init(metric: .headPosition, stages: Array(SwingStage.allCases.dropLast()), evidence: .pose)
+                ])
+            ])
+        case .faceOn:
+            return FeedbackProfile(view: view, groups: [
+                FeedbackGroup(title: "准备姿势", metrics: setupFaceOn),
+                FeedbackGroup(title: "释放", metrics: [
+                    .init(metric: .clubRelease, stages: [
+                        .leadArmParallelDownswing,
+                        .impact
+                    ], evidence: .clubAndImpact)
+                ]),
+                FeedbackGroup(title: "脊柱侧倾", metrics: [
+                    .init(metric: .spineTilt, stages: movementStages, evidence: .pose)
+                ]),
+                FeedbackGroup(title: "前导肩", metrics: [
+                    .init(metric: .leadShoulder, stages: [.top, .impact], evidence: .pose)
+                ]),
+                FeedbackGroup(title: "前导髋", metrics: [
+                    .init(metric: .leadHip, stages: movementStages, evidence: .pose)
+                ]),
+                FeedbackGroup(title: "头部位置", metrics: [
+                    .init(metric: .headPosition, stages: Array(SwingStage.allCases.dropLast()), evidence: .pose)
+                ])
+            ])
+        }
+    }
+}
+
 enum LocalProjectStatus: String, Codable, Equatable {
     case pending
     case analyzed
