@@ -71,7 +71,14 @@ struct PracticeSessionView: View {
             cameraState.setupSession()
             sessionEngine.begin(view: view)
             #if DEBUG
-            if PracticePreviewConfiguration.startsReady(for: ProcessInfo.processInfo.arguments) {
+            let arguments = ProcessInfo.processInfo.arguments
+            if let preview = PracticePreviewConfiguration.sessionPreview(for: arguments) {
+                sessionEngine.confirmAlignment()
+                sessionEngine.start()
+                if preview == .paused {
+                    sessionEngine.pause()
+                }
+            } else if PracticePreviewConfiguration.startsReady(for: arguments) {
                 sessionEngine.confirmAlignment()
             }
             #endif

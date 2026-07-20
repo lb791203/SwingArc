@@ -15,6 +15,11 @@ enum PracticeHomePresentation {
 /// Keeps simulator-only screenshot launch arguments in one place so they
 /// cannot accidentally change the normal practice entry flow.
 enum PracticePreviewConfiguration {
+    enum SessionPreview: Equatable {
+        case waiting
+        case paused
+    }
+
     static func view(for arguments: [String]) -> PracticeCameraView? {
         if arguments.contains("-swingarc-preview-face-on") ||
             arguments.contains("-swingarc-preview-face-on-ready") {
@@ -22,7 +27,9 @@ enum PracticePreviewConfiguration {
         }
 
         if arguments.contains("-swingarc-preview-dtl") ||
-            arguments.contains("-swingarc-preview-ready") {
+            arguments.contains("-swingarc-preview-ready") ||
+            arguments.contains("-swingarc-preview-waiting") ||
+            arguments.contains("-swingarc-preview-paused") {
             return .downTheLine
         }
 
@@ -50,6 +57,16 @@ enum PracticePreviewConfiguration {
 
     static func autoAnalyzes(for arguments: [String]) -> Bool {
         arguments.contains("-swingarc-preview-analysis")
+    }
+
+    static func sessionPreview(for arguments: [String]) -> SessionPreview? {
+        if arguments.contains("-swingarc-preview-paused") {
+            return .paused
+        }
+        if arguments.contains("-swingarc-preview-waiting") {
+            return .waiting
+        }
+        return nil
     }
 }
 
@@ -173,8 +190,8 @@ enum PracticePresentationPolicy {
             return "ANALYSING · SHOT \(shotNumber(swingCount))"
         case let .resultRibbon(_, swingCount, _):
             return "RESULT · SHOT \(shotNumber(swingCount))"
-        case let .paused(_, swingCount):
-            return "PAUSED · SHOT \(shotNumber(swingCount))"
+        case .paused:
+            return "PAUSED"
         case .degraded:
             return "CHECK CAMERA"
         case .failed:

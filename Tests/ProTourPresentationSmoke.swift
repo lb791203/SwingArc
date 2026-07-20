@@ -47,5 +47,20 @@ struct ProTourPresentationSmoke {
                 for: ["-swingarc-preview-analysis"]
             )
         )
+        precondition(
+            PracticePreviewConfiguration.sessionPreview(
+                for: ["-swingarc-preview-waiting"]
+            ) == .waiting
+        )
+        precondition(
+            PracticePreviewConfiguration.sessionPreview(
+                for: ["-swingarc-preview-paused"]
+            ) == .paused
+        )
+        precondition(
+            PracticePresentationPolicy.remoteStatus(
+                for: .paused(view: .downTheLine, swingCount: 0)
+            ) == "PAUSED"
+        )
     }
 }
