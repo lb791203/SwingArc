@@ -1104,6 +1104,130 @@ struct GridView: View {
     }
 }
 
+struct SwingPhaseRailView: View {
+    let keyframes: [KeyframeMarker]
+    let presentation: AnalysisWorkspacePresentation
+    let currentTime: Double
+    let frameDuration: Double
+    let duration: Double
+    let onSelect: (Double) -> Void
+    let onScrub: (Double) -> Void
+
+    var body: some View {
+        VStack(spacing: 5) {
+            Slider(
+                value: Binding(
+                    get: { min(max(currentTime, 0), max(duration, 0.001)) },
+                    set: onScrub
+                ),
+                in: 0...max(duration, 0.001)
+            )
+            .tint(AnalysisTheme.proTourSignal)
+            .accessibilityLabel("挥杆进度")
+
+            HStack(spacing: 0) {
+                ForEach(visibleDescriptors, id: \.stage) { descriptor in
+                    Button {
+                        if let marker = descriptor.marker {
+                            onSelect(marker.time)
+                        }
+                    } label: {
+                        SwingPhaseSilhouette(
+                            stage: descriptor.stage,
+                            isCurrent: descriptor.isCurrent,
+                            resultState: descriptor.resultState
+                        )
+                        .frame(maxWidth: .infinity, minHeight: FullscreenPlaybackPolicy.minimumTouchTarget)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(descriptor.accessibilityLabel)
+                    .accessibilityHint("跳到该挥杆位置")
+                }
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 5)
+        .padding(.bottom, 2)
+        .background(.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var visibleDescriptors: [StageDisplayDescriptor] {
+        SwingStage.allCases.compactMap { stage in
+            let descriptor = StageDisplayDescriptor(
+                stage: stage,
+                keyframes: keyframes,
+                presentation: presentation,
+                currentTime: currentTime,
+                frameDuration: frameDuration
+            )
+            guard descriptor.marker != nil,
+                  SwingPhaseRailPolicy.appearance(
+                    for: descriptor.resultState,
+                    hasMarker: true
+                  ) != .hidden
+            else {
+                return nil
+            }
+            return descriptor
+        }
+    }
+}
+
+private struct SwingPhaseSilhouette: View {
+    let stage: SwingStage
+    let isCurrent: Bool
+    let resultState: StageResultState
+
+    private var clubAngle: Angle {
+        switch stage {
+        case .address: .degrees(-20)
+        case .takeaway: .degrees(-48)
+        case .leadArmParallelBackswing: .degrees(-72)
+        case .top: .degrees(-112)
+        case .leadArmParallelDownswing: .degrees(38)
+        case .impact: .degrees(18)
+        case .followThrough: .degrees(66)
+        case .finish: .degrees(105)
+        }
+    }
+
+    private var accent: Color {
+        if isCurrent { return .white }
+        switch resultState {
+        case .confirmed, .manual: return AnalysisTheme.proTourSignal
+        case .review: return AnalysisTheme.current.opacity(0.45)
+        case .unresolved: return .white.opacity(0.28)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(isCurrent ? .white : .clear, lineWidth: 1.5)
+                .frame(width: 36, height: 36)
+
+            Circle()
+                .fill(accent)
+                .frame(width: 5.5, height: 5.5)
+                .offset(y: -11)
+
+            Capsule()
+                .fill(accent)
+                .frame(width: 3.5, height: 15)
+                .offset(y: -2)
+
+            Capsule()
+                .fill(accent)
+                .frame(width: 2.5, height: 13)
+                .rotationEffect(clubAngle)
+                .offset(x: 6, y: -2)
+        }
+        .frame(width: 40, height: 40)
+        .contentShape(Circle())
+        .accessibilityHidden(true)
+    }
+}
+
 private struct StageDisplayDescriptor {
     let stage: SwingStage
     let marker: KeyframeMarker?

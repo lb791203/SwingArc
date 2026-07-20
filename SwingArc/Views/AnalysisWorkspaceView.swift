@@ -121,6 +121,7 @@ struct AnalysisWorkspaceView: View {
                 showHeadStability: showHeadStability,
                 showSpineAngle: showSpineAngle,
                 showGrid: showGrid,
+                keyframes: keyframes,
                 practiceCameraView: $practiceCameraView,
                 feedbackConfiguration: $feedbackConfiguration,
                 onDismiss: { showsFullscreenPlayback = false }
@@ -306,12 +307,14 @@ struct FullscreenVideoPlaybackView: View {
     let showHeadStability: Bool
     let showSpineAngle: Bool
     let showGrid: Bool
+    let keyframes: [KeyframeMarker]
     @Binding var practiceCameraView: PracticeCameraView?
     @Binding var feedbackConfiguration: FeedbackConfiguration?
     let onDismiss: () -> Void
 
     @State private var controlsVisible = true
     @State private var hideTask: Task<Void, Never>?
+    @State private var showsFeedbackConfiguration = false
     @State private var inertTool: DrawingTool = .line
     @State private var inertColor: Color = .white
     @State private var inertWidth: CGFloat = 3
@@ -343,13 +346,22 @@ struct FullscreenVideoPlaybackView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            setControlsVisible(!controlsVisible)
+            togglePlaybackFromVideo()
         }
         .onAppear {
             scheduleAutoHide()
         }
         .onDisappear {
             hideTask?.cancel()
+        }
+        .fullScreenCover(isPresented: $showsFeedbackConfiguration) {
+            SwingFeedbackConfigurationView(
+                practiceCameraView: $practiceCameraView,
+                configuration: $feedbackConfiguration,
+                analysisState: playbackManager.analysisState,
+                sourceFrameRate: playbackManager.sourceFrameRate,
+                onDismiss: { showsFeedbackConfiguration = false }
+            )
         }
         .onChange(of: playbackManager.isPlaying) { _, isPlaying in
             if isPlaying {
@@ -365,42 +377,60 @@ struct FullscreenVideoPlaybackView: View {
     private var controls: some View {
         VStack {
             HStack {
+                chromeButton("xmark", label: "退出全屏", action: onDismiss)
                 Spacer()
-                controlButton("xmark", label: "退出全屏", action: onDismiss)
-                    .background(.black.opacity(0.55), in: Circle())
+                chromeButton("questionmark", label: "回放说明", action: {})
             }
 
             Spacer()
 
-            HStack(spacing: 20) {
-                controlButton("backward.frame.fill", label: "前一帧") {
-                    playbackManager.stepFrame(forward: false)
-                    setControlsVisible(true, schedulesHide: false)
+            Button {
+                showsFeedbackConfiguration = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "ear.and.waveform")
+                    Text(activeMetricTitle)
                 }
-
-                controlButton(
-                    playbackManager.isPlaying ? "pause.fill" : "play.fill",
-                    label: playbackManager.isPlaying ? "暂停" : "播放"
-                ) {
-                    if playbackManager.isPlaying {
-                        playbackManager.pause()
-                    } else {
-                        playbackManager.play()
-                    }
-                }
-
-                controlButton("forward.frame.fill", label: "后一帧") {
-                    playbackManager.stepFrame(forward: true)
-                    setControlsVisible(true, schedulesHide: false)
-                }
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .frame(minHeight: FullscreenPlaybackPolicy.minimumTouchTarget)
             }
-            .padding(10)
-            .background(.ultraThinMaterial, in: Capsule())
+            .buttonStyle(.plain)
+            .background(.black.opacity(0.62), in: Capsule())
+            .accessibilityLabel("选择回放分析参数")
+
+            SwingPhaseRailView(
+                keyframes: keyframes,
+                presentation: AnalysisWorkspacePresentation(state: playbackManager.analysisState),
+                currentTime: playbackManager.currentTime,
+                frameDuration: VideoFramePolicy.frameDuration(sourceFrameRate: playbackManager.sourceFrameRate),
+                duration: playbackManager.duration
+            ) { time in
+                playbackManager.pause()
+                playbackManager.seek(to: time)
+                setControlsVisible(true, schedulesHide: false)
+            } onScrub: { time in
+                playbackManager.pause()
+                playbackManager.seek(to: time)
+                setControlsVisible(true, schedulesHide: false)
+            }
         }
-        .padding()
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
     }
 
-    private func controlButton(
+    private var activeMetricTitle: String {
+        guard let practiceCameraView,
+              let feedbackConfiguration,
+              SwingFeedbackProfiles.profile(for: practiceCameraView).contains(feedbackConfiguration.activeMetric)
+        else {
+            return "选择分析视角"
+        }
+        return feedbackConfiguration.activeMetric.title
+    }
+
+    private func chromeButton(
         _ systemName: String,
         label: String,
         action: @escaping () -> Void
@@ -415,7 +445,18 @@ struct FullscreenVideoPlaybackView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
+        .background(.black.opacity(0.55), in: Circle())
         .accessibilityLabel(label)
+    }
+
+    private func togglePlaybackFromVideo() {
+        if playbackManager.isPlaying {
+            playbackManager.pause()
+            setControlsVisible(true, schedulesHide: false)
+        } else {
+            playbackManager.play()
+            setControlsVisible(true)
+        }
     }
 
     private func setControlsVisible(_ visible: Bool, schedulesHide: Bool = true) {
