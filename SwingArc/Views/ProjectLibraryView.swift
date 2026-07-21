@@ -36,6 +36,14 @@ struct ProjectLibraryView: View {
                             .font(.system(size: 14, weight: .bold, design: .monospaced))
                     }
                 }
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 8) {
+                        BrandMarkView(size: 20, showsWordmark: false)
+                        Text("挥杆档案")
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showsNewProjectSheet = true
@@ -129,9 +137,7 @@ struct ProjectLibraryView: View {
             Spacer(minLength: 36)
 
             VStack(alignment: .leading, spacing: 14) {
-                Image(systemName: "film.stack")
-                    .font(.system(size: 36, weight: .medium))
-                    .foregroundStyle(AnalysisTheme.proTourSignal)
+                BrandMarkView(size: 60, showsWordmark: false)
                     .frame(width: 76, height: 76)
                     .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
 

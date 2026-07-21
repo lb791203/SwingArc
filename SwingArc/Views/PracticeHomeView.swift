@@ -71,15 +71,7 @@ struct PracticeHomeView: View {
 
     private var header: some View {
         HStack(alignment: .center) {
-            HStack(spacing: 10) {
-                Image(systemName: "figure.golf")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(AnalysisTheme.proTourSignal)
-                Text("SWINGARC")
-                    .font(.system(size: 16, weight: .black, design: .rounded))
-                    .tracking(1.1)
-                    .foregroundStyle(AnalysisTheme.proTourPrimaryText)
-            }
+            BrandMarkView(size: 30, showsWordmark: true)
 
             Spacer()
 
