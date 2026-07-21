@@ -254,23 +254,55 @@ class VisionPoseDetector {
     }
 }
 
-final class PrimaryGolferTracker {
-    private struct IdentityAnchor {
-        let center: CGPoint
-        let scale: Double
+struct PrimaryGolferIdentity: Equatable {
+    let center: CGPoint
+    let scale: Double
+}
+
+enum PrimaryGolferTrackingPolicy {
+    static func maximumCenterDistance(for anchorScale: Double) -> Double {
+        min(0.34, max(0.24, anchorScale * 0.52))
     }
 
-    private static let maximumAnchorDistance = 0.24
+    static func maximumScaleDelta() -> Double { 0.34 }
+
+    static func matches(
+        candidate: PrimaryGolferIdentity,
+        anchor: PrimaryGolferIdentity
+    ) -> Bool {
+        let distance = hypot(
+            Double(candidate.center.x - anchor.center.x),
+            Double(candidate.center.y - anchor.center.y)
+        )
+        let scaleDelta = abs(candidate.scale - anchor.scale) / max(anchor.scale, 0.10)
+        return distance <= maximumCenterDistance(for: anchor.scale)
+            && scaleDelta <= maximumScaleDelta()
+    }
+
+    static func shouldRetainAnchor(afterConsecutiveMisses misses: Int) -> Bool {
+        misses <= 4
+    }
+}
+
+struct PrimaryGolferTrackingDiagnostics: Codable, Equatable {
+    var acceptedFrames = 0
+    var rejectedOutsideAnchor = 0
+    var rejectedScaleMismatch = 0
+    var noPoseFrames = 0
+}
+
+final class PrimaryGolferTracker {
     private var previousCenter: CGPoint?
-    private var identityAnchor: IdentityAnchor?
+    private var identityAnchor: PrimaryGolferIdentity?
     private var consecutiveMisses = 0
+    private(set) var diagnostics = PrimaryGolferTrackingDiagnostics()
 
     @discardableResult
     func lockIdentityAnchor(to pose: PoseEstimationResult) -> Bool {
         guard let center = bodyCenter(pose) else { return false }
         let scale = bodyScale(pose)
         guard scale > 0 else { return false }
-        identityAnchor = IdentityAnchor(center: center, scale: scale)
+        identityAnchor = PrimaryGolferIdentity(center: center, scale: scale)
         previousCenter = center
         consecutiveMisses = 0
         return true
@@ -278,8 +310,7 @@ final class PrimaryGolferTracker {
 
     func select(from candidates: [PoseEstimationResult], stableBall: CGPoint?) -> PoseEstimationResult? {
         guard !candidates.isEmpty else {
-            consecutiveMisses += 1
-            if consecutiveMisses > 4 { previousCenter = nil }
+            registerMissingPose()
             return nil
         }
 
@@ -288,13 +319,24 @@ final class PrimaryGolferTracker {
             let scale = bodyScale(pose)
             let anchorPreference: Double
             if let identityAnchor {
+                let candidate = PrimaryGolferIdentity(center: center, scale: scale)
                 let anchorDistance = SwingGeometry.distance(center, identityAnchor.center)
-                guard anchorDistance <= Self.maximumAnchorDistance else { return nil }
-                let centerMatch = 1 - min(1, anchorDistance / Self.maximumAnchorDistance)
+                let maximumDistance = PrimaryGolferTrackingPolicy.maximumCenterDistance(
+                    for: identityAnchor.scale
+                )
+                guard anchorDistance <= maximumDistance else {
+                    diagnostics.rejectedOutsideAnchor += 1
+                    return nil
+                }
                 let scaleMatch = 1 - min(
                     1,
                     abs(scale - identityAnchor.scale) / max(identityAnchor.scale, 0.10)
                 )
+                guard PrimaryGolferTrackingPolicy.matches(candidate: candidate, anchor: identityAnchor) else {
+                    diagnostics.rejectedScaleMismatch += 1
+                    return nil
+                }
+                let centerMatch = 1 - min(1, anchorDistance / maximumDistance)
                 anchorPreference = centerMatch * 0.80 + scaleMatch * 0.20
             } else {
                 anchorPreference = 0
@@ -324,7 +366,10 @@ final class PrimaryGolferTracker {
             return (pose, center, score)
         }.sorted { $0.2 > $1.2 }
 
-        guard let best = ranked.first else { return nil }
+        guard let best = ranked.first else {
+            registerMissingPose()
+            return nil
+        }
         if previousCenter == nil,
            ranked.count > 1,
            ranked[1].2 >= best.2 * 0.97 {
@@ -333,7 +378,18 @@ final class PrimaryGolferTracker {
         }
         previousCenter = best.1
         consecutiveMisses = 0
+        diagnostics.acceptedFrames += 1
         return best.0
+    }
+
+    private func registerMissingPose() {
+        diagnostics.noPoseFrames += 1
+        consecutiveMisses += 1
+        if !PrimaryGolferTrackingPolicy.shouldRetainAnchor(
+            afterConsecutiveMisses: consecutiveMisses
+        ) {
+            previousCenter = nil
+        }
     }
 
     private func bodyCenter(_ pose: PoseEstimationResult) -> CGPoint? {
@@ -533,6 +589,25 @@ struct SwingVideoAnalysisOutput: Equatable {
     let adaptiveWindow: SwingWindow
     let sourceFrameRate: Double
     let elapsedSeconds: Double
+    let trackingDiagnostics: PrimaryGolferTrackingDiagnostics
+
+    init(
+        result: SwingAnalysisResult,
+        poseSamples: [SwingPoseSample],
+        leadArm: LeadArmSide,
+        adaptiveWindow: SwingWindow,
+        sourceFrameRate: Double,
+        elapsedSeconds: Double,
+        trackingDiagnostics: PrimaryGolferTrackingDiagnostics = .init()
+    ) {
+        self.result = result
+        self.poseSamples = poseSamples
+        self.leadArm = leadArm
+        self.adaptiveWindow = adaptiveWindow
+        self.sourceFrameRate = sourceFrameRate
+        self.elapsedSeconds = elapsedSeconds
+        self.trackingDiagnostics = trackingDiagnostics
+    }
 }
 
 enum SwingVideoAnalysisOutcome: Equatable {
@@ -689,8 +764,17 @@ final class FineFrameImageCache {
 /// Shared AVFoundation/Vision orchestration for UI and command-line analysis.
 /// The engine is deliberately stateless: one call owns all detectors, caches,
 /// and tracking state, while `AnalysisRunGate` remains the publication authority.
-final class SwingVideoAnalysisEngine: Sendable {
+final class SwingVideoAnalysisEngine: @unchecked Sendable {
     typealias ProgressHandler = @Sendable (SwingAnalysisProgressUpdate) -> Void
+
+    private let diagnosticsLock = NSLock()
+    private var storedTrackingDiagnostics = PrimaryGolferTrackingDiagnostics()
+
+    var latestTrackingDiagnostics: PrimaryGolferTrackingDiagnostics {
+        diagnosticsLock.lock()
+        defer { diagnosticsLock.unlock() }
+        return storedTrackingDiagnostics
+    }
 
     private final class TrackedPoseDetector {
         private struct TimedPose {
@@ -701,6 +785,10 @@ final class SwingVideoAnalysisEngine: Sendable {
         let vision = VisionPoseDetector()
         let golferTracker = PrimaryGolferTracker()
         private var selectedCoarsePoses: [TimedPose] = []
+
+        var diagnostics: PrimaryGolferTrackingDiagnostics {
+            golferTracker.diagnostics
+        }
 
         func selectPose(
             in image: CGImage,
@@ -745,6 +833,8 @@ final class SwingVideoAnalysisEngine: Sendable {
         gate: AnalysisRunGate,
         progress: @escaping ProgressHandler
     ) -> SwingVideoAnalysisOutcome {
+        let trackedPoseDetector = TrackedPoseDetector()
+        defer { storeTrackingDiagnostics(trackedPoseDetector.diagnostics) }
         let startedAt = ProcessInfo.processInfo.systemUptime
         guard gate.isActive(runID) else { return .cancelled }
         publish(.preparing, progress: 0, runID: runID, gate: gate, handler: progress)
@@ -769,7 +859,6 @@ final class SwingVideoAnalysisEngine: Sendable {
 
         // One tracker is intentionally reused for the complete coarse pass and
         // every adaptive block. Expansion must never create a new golfer identity.
-        let trackedPoseDetector = TrackedPoseDetector()
         let coarseTimes = SwingCoreLocator.sampleTimes(duration: duration)
         var coarseSamples: [CoarseSwingSample] = []
         let maximumSourceFrameIndex = SourceFrameBounds.maximumSourceFrameIndex(
@@ -1055,7 +1144,8 @@ final class SwingVideoAnalysisEngine: Sendable {
                 .first(where: { $0 != .unknown }) ?? .unknown,
             adaptiveWindow: window,
             sourceFrameRate: nominalFrameRate,
-            elapsedSeconds: ProcessInfo.processInfo.systemUptime - startedAt
+            elapsedSeconds: ProcessInfo.processInfo.systemUptime - startedAt,
+            trackingDiagnostics: trackedPoseDetector.diagnostics
         ))
     }
 
@@ -1178,6 +1268,12 @@ final class SwingVideoAnalysisEngine: Sendable {
     ) {
         guard gate.isActive(runID) else { return }
         handler(SwingAnalysisProgressUpdate(phase: phase, progress: progress))
+    }
+
+    private func storeTrackingDiagnostics(_ diagnostics: PrimaryGolferTrackingDiagnostics) {
+        diagnosticsLock.lock()
+        storedTrackingDiagnostics = diagnostics
+        diagnosticsLock.unlock()
     }
 
 }
