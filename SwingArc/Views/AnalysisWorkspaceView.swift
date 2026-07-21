@@ -162,22 +162,33 @@ struct AnalysisWorkspaceView: View {
                 onExport: onExport
             )
 
-            VideoCanvasView(
-                playbackManager: playbackManager,
-                drawings: $drawings,
-                activeTool: $activeTool,
-                selectedColor: $selectedColor,
-                strokeWidth: $strokeWidth,
-                isKeyframeMode: $isKeyframeMode,
-                showPoseSkeleton: showPoseSkeleton,
-                showHeadStability: showHeadStability,
-                showSpineAngle: showSpineAngle,
-                showGrid: showGrid,
-                interactionMode: interactionMode,
-                showsFullscreenButton: true,
-                onEnterFullscreen: { showsFullscreenPlayback = true }
-            )
-            .overlay(alignment: .trailing) {
+            ZStack {
+                VideoCanvasView(
+                    playbackManager: playbackManager,
+                    drawings: $drawings,
+                    activeTool: $activeTool,
+                    selectedColor: $selectedColor,
+                    strokeWidth: $strokeWidth,
+                    isKeyframeMode: $isKeyframeMode,
+                    showPoseSkeleton: showPoseSkeleton,
+                    showHeadStability: showHeadStability,
+                    showSpineAngle: showSpineAngle,
+                    showGrid: showGrid,
+                    interactionMode: interactionMode,
+                    showsFullscreenButton: isRegularLayout,
+                    onEnterFullscreen: { showsFullscreenPlayback = true }
+                )
+
+                if interactionMode == .idle, !isRegularLayout {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: toggleWorkspacePlayback)
+                }
+
+                if !isRegularLayout {
+                    mobileReviewChrome
+                }
+
                 if interactionMode == .drawing {
                     DrawingToolRail(
                         activeTool: $activeTool,
@@ -187,6 +198,7 @@ struct AnalysisWorkspaceView: View {
                         onClear: { drawings.removeAll() },
                         onDone: { interactionMode = .idle }
                     )
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.trailing, 10)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
@@ -210,58 +222,118 @@ struct AnalysisWorkspaceView: View {
                 .background(AnalysisTheme.chrome)
             }
 
-            if !isRegularLayout && playbackManager.isScanning {
+            if isRegularLayout {
+                StageTimelineView(
+                    playbackManager: playbackManager,
+                    keyframes: keyframes,
+                    presentation: presentation,
+                    onStageTap: { stage, marker in
+                        if let marker {
+                            playbackManager.seek(to: marker.time)
+                        } else {
+                            openAdjustment(stage)
+                        }
+                    }
+                )
+
+                if let adjustmentStage {
+                    StageAdjustmentBar(
+                        stage: adjustmentStage,
+                        detection: presentation.detection(for: adjustmentStage),
+                        playbackManager: playbackManager,
+                        onCancel: { self.adjustmentStage = nil },
+                        onSetCurrentFrame: {
+                            onSetManualStage(adjustmentStage)
+                            self.adjustmentStage = nil
+                        }
+                    )
+                } else {
+                    PlaybackControlsView(
+                        playbackManager: playbackManager,
+                        interactionMode: $interactionMode,
+                        hasResults: playbackManager.analysisState.hasCompletedResult,
+                        onToggleDrawing: toggleDrawingMode,
+                        onAnalyze: {
+                            interactionMode = .idle
+                            onAnalyze()
+                        },
+                        onShowResults: showResults(isRegularLayout: isRegularLayout)
+                    )
+                }
+            }
+        }
+    }
+
+    private var mobileReviewChrome: some View {
+        VStack {
+            HStack {
+                Spacer()
+                Button { showsFullscreenPlayback = true } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .frame(width: 44, height: 44)
+                        .background(.black.opacity(0.55), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .accessibilityLabel("全屏回放")
+            }
+
+            Spacer()
+
+            if playbackManager.isScanning {
                 AnalysisProgressCard(
                     phase: playbackManager.analysisProgressPhase,
                     progress: playbackManager.scanProgress,
                     onCancel: onCancelAnalysis
                 )
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-                .background(AnalysisTheme.chrome)
-            }
-
-            if !isRegularLayout, let failure = playbackManager.analysisFailure {
+                .frame(maxWidth: 300)
+            } else if let failure = playbackManager.analysisFailure {
                 AnalysisFailureBanner(failure: failure)
+                    .frame(maxWidth: 330)
             }
 
-            StageTimelineView(
-                playbackManager: playbackManager,
-                keyframes: keyframes,
-                presentation: presentation,
-                onStageTap: { stage, marker in
-                    if let marker {
-                        playbackManager.seek(to: marker.time)
-                    } else {
-                        openAdjustment(stage)
-                    }
+            HStack(spacing: 10) {
+                Button(action: toggleDrawingMode) {
+                    Image(systemName: "pencil.tip")
+                        .frame(width: 48, height: 48)
+                        .background(AnalysisTheme.proTourSurface.opacity(0.94), in: Circle())
                 }
-            )
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .accessibilityLabel("画线")
 
-            if let adjustmentStage {
-                StageAdjustmentBar(
-                    stage: adjustmentStage,
-                    detection: presentation.detection(for: adjustmentStage),
-                    playbackManager: playbackManager,
-                    onCancel: { self.adjustmentStage = nil },
-                    onSetCurrentFrame: {
-                        onSetManualStage(adjustmentStage)
-                        self.adjustmentStage = nil
-                    }
-                )
-            } else {
-                PlaybackControlsView(
-                    playbackManager: playbackManager,
-                    interactionMode: $interactionMode,
-                    hasResults: playbackManager.analysisState.hasCompletedResult,
-                    onToggleDrawing: toggleDrawingMode,
-                    onAnalyze: {
-                        interactionMode = .idle
+                Button {
+                    interactionMode = .idle
+                    if playbackManager.analysisState.hasCompletedResult {
+                        showResults(isRegularLayout: false)()
+                    } else {
                         onAnalyze()
-                    },
-                    onShowResults: showResults(isRegularLayout: isRegularLayout)
-                )
+                    }
+                } label: {
+                    Label(
+                        playbackManager.analysisState.hasCompletedResult ? "结果" : "AI 分析",
+                        systemImage: playbackManager.analysisState.hasCompletedResult ? "list.bullet.rectangle" : "sparkles"
+                    )
+                    .font(.system(size: 15, weight: .bold))
+                    .padding(.horizontal, 18)
+                    .frame(minHeight: 48)
+                    .background(AnalysisTheme.proTourSignal, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.black)
+                .disabled(playbackManager.isScanning)
+                .accessibilityLabel(playbackManager.analysisState.hasCompletedResult ? "查看分析结果" : "开始 AI 分析")
             }
+        }
+        .padding(12)
+    }
+
+    private func toggleWorkspacePlayback() {
+        if playbackManager.isPlaying {
+            playbackManager.pause()
+        } else {
+            interactionMode = WorkspaceModeTransition.beginPlayback.mode
+            playbackManager.play()
         }
     }
 
