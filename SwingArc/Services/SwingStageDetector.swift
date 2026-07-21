@@ -3381,6 +3381,98 @@ enum SwingCoreLocator {
     }
 }
 
+/// Finds independent motion windows in a continuous practice video. This is
+/// intentionally body-only: the expensive per-window solver still validates
+/// P1–P8 and object evidence before any attempt can become completed.
+enum SwingAttemptSegmenter {
+    private static let bridgeGapDuration = 0.5
+    private static let padding = AdaptiveSwingWindowPlanner.initialPadding
+    private static let minimumDuration = 0.8
+
+    static func segment(
+        samples rawSamples: [CoarseSwingSample],
+        sourceDuration: Double
+    ) -> [SwingAttempt] {
+        guard sourceDuration.isFinite, sourceDuration > 0 else { return [] }
+        let samples = rawSamples.filter { $0.time.isFinite }.sorted { $0.time < $1.time }
+        guard samples.count >= 5 else { return [] }
+
+        let energies = motionEnergies(samples)
+        let nonZero = energies.filter { $0 > 0.000_1 }.sorted()
+        guard let peak = nonZero.last else { return [] }
+        let median = nonZero[nonZero.count / 2]
+        let threshold = max(0.30, min(peak * 0.45, median * 2.2))
+        let activeIndices = energies.indices.filter { energies[$0] >= threshold }
+        guard !activeIndices.isEmpty else { return [] }
+
+        let intervals = zip(samples, samples.dropFirst()).map { $1.time - $0.time }
+            .filter { $0 > 0 }.sorted()
+        let interval = intervals.isEmpty ? 0.125 : intervals[intervals.count / 2]
+        let maximumIndexGap = max(1, Int(ceil(bridgeGapDuration / interval)))
+        var groups: [[Int]] = []
+        for index in activeIndices {
+            if let groupIndex = groups.indices.last,
+               let previous = groups[groupIndex].last,
+               index - previous <= maximumIndexGap {
+                groups[groupIndex].append(index)
+            } else {
+                groups.append([index])
+            }
+        }
+
+        let windows = groups.compactMap { group -> SwingWindow? in
+            guard let first = group.first, let last = group.last else { return nil }
+            let window = SwingWindow(
+                startTime: max(0, samples[max(0, first - 1)].time - padding),
+                endTime: min(sourceDuration, samples[last].time + padding)
+            )
+            return window.duration >= minimumDuration
+                && window.duration <= AdaptiveSwingWindowPlanner.maximumSpan ? window : nil
+        }
+
+        let merged = windows.sorted { $0.startTime < $1.startTime }.reduce(into: [SwingWindow]()) {
+            partial, candidate in
+            guard let previous = partial.last else {
+                partial.append(candidate)
+                return
+            }
+            guard candidate.startTime <= previous.endTime else {
+                partial.append(candidate)
+                return
+            }
+            partial[partial.count - 1] = SwingWindow(
+                startTime: previous.startTime,
+                endTime: max(previous.endTime, candidate.endTime)
+            )
+        }
+
+        return merged.enumerated().compactMap { index, window in
+            guard window.duration >= minimumDuration,
+                  window.duration <= AdaptiveSwingWindowPlanner.maximumSpan else { return nil }
+            return SwingAttempt(ordinal: index + 1, startTime: window.startTime, endTime: window.endTime)
+        }
+    }
+
+    private static func motionEnergies(_ samples: [CoarseSwingSample]) -> [Double] {
+        guard samples.count > 1 else { return [] }
+        var energies = Array(repeating: 0.0, count: samples.count)
+        for index in 1..<samples.count {
+            guard let previous = samples[index - 1].pose.flatMap(handRelativeToHip),
+                  let current = samples[index].pose.flatMap(handRelativeToHip) else { continue }
+            let elapsed = samples[index].time - samples[index - 1].time
+            guard elapsed > 0 else { continue }
+            energies[index] = SwingGeometry.distance(previous, current) / elapsed
+        }
+        return energies
+    }
+
+    private static func handRelativeToHip(_ sample: SwingPoseSample) -> CGPoint? {
+        guard let hand = SwingGeometry.center(sample.leftWrist, sample.rightWrist) else { return nil }
+        guard let hip = SwingGeometry.center(sample.leftHip, sample.rightHip) else { return hand }
+        return CGPoint(x: hand.x - hip.x, y: hand.y - hip.y)
+    }
+}
+
 /// Temporary compatibility adapter for the production orchestration, which is
 /// migrated to the adaptive planner in a later task.
 enum SwingWindowLocator {

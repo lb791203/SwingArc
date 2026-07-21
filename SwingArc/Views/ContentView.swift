@@ -132,7 +132,10 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showCameraView) {
             CameraView { recordedURL in
                 showCameraView = false
-                loadVideoFromURL(persistVideoIfNeeded(recordedURL))
+                loadVideoFromURL(
+                    persistVideoIfNeeded(recordedURL),
+                    origin: .capturedClipSaved
+                )
             }
         }
         .fullScreenCover(item: $selectedPracticeView) { practiceView in
@@ -144,7 +147,11 @@ struct ContentView: View {
                 },
                 onOpenLastClip: { clipURL in
                     selectedPracticeView = nil
-                    loadVideoFromURL(clipURL, practiceView: practiceView)
+                    loadVideoFromURL(
+                        clipURL,
+                        practiceView: practiceView,
+                        origin: .projectReopened
+                    )
                 }
             )
         }
@@ -184,7 +191,7 @@ struct ContentView: View {
         if currentProjectURL != project.videoURL {
             persistCurrentProject()
         }
-        loadVideoFromURL(project.videoURL, existingSummary: project)
+        loadVideoFromURL(project.videoURL, existingSummary: project, origin: .projectReopened)
     }
 
     private func closeWorkspace() {
@@ -206,7 +213,9 @@ struct ContentView: View {
                     .appendingPathComponent("imported-\(UUID().uuidString).mp4")
                 do {
                     try data.write(to: videoURL, options: .atomic)
-                    DispatchQueue.main.async { loadVideoFromURL(videoURL) }
+                    DispatchQueue.main.async {
+                        loadVideoFromURL(videoURL, origin: .importCompleted)
+                    }
                 } catch {
                     DispatchQueue.main.async { statusMessage = "视频导入失败：\(error.localizedDescription)" }
                 }
@@ -221,7 +230,8 @@ struct ContentView: View {
     private func loadVideoFromURL(
         _ url: URL,
         existingSummary: LocalProjectSummary? = nil,
-        practiceView: PracticeCameraView? = nil
+        practiceView: PracticeCameraView? = nil,
+        origin: VideoLoadOrigin = .importCompleted
     ) {
         playbackManager.unloadVideo()
         currentProjectURL = nil
@@ -273,6 +283,13 @@ struct ContentView: View {
         activeProject = summary
         projects = LocalProjectStore.projects()
         saveStatus = .saved
+
+        if didLoad, AutomaticAnalysisPolicy.shouldAnalyze(event: origin) {
+            DispatchQueue.main.async {
+                guard currentProjectURL == url, playbackManager.analysisState == .idle else { return }
+                runAISwingAnalysis()
+            }
+        }
     }
 
     private func persistCurrentProject() {

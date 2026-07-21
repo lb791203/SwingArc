@@ -624,6 +624,62 @@ enum LocalProjectStatus: String, Codable, Equatable {
     case annotated
 }
 
+enum VideoLoadOrigin: Equatable {
+    case importCompleted
+    case capturedClipSaved
+    case projectReopened
+}
+
+enum AutomaticAnalysisPolicy {
+    static func shouldAnalyze(event: VideoLoadOrigin) -> Bool {
+        switch event {
+        case .importCompleted, .capturedClipSaved:
+            return true
+        case .projectReopened:
+            return false
+        }
+    }
+}
+
+enum SwingAttemptState: String, Codable, Equatable {
+    case queued
+    case analyzing
+    case completed
+    case unavailable
+}
+
+struct AnalysisFailureRecord: Codable, Equatable {
+    let code: String
+    let message: String
+}
+
+struct SwingAttempt: Identifiable, Codable, Equatable {
+    let id: UUID
+    let ordinal: Int
+    let startTime: Double
+    let endTime: Double
+    var state: SwingAttemptState
+    var failure: AnalysisFailureRecord?
+
+    init(
+        id: UUID = UUID(),
+        ordinal: Int,
+        startTime: Double,
+        endTime: Double,
+        state: SwingAttemptState = .queued,
+        failure: AnalysisFailureRecord? = nil
+    ) {
+        self.id = id
+        self.ordinal = ordinal
+        self.startTime = startTime
+        self.endTime = endTime
+        self.state = state
+        self.failure = failure
+    }
+
+    var duration: Double { max(0, endTime - startTime) }
+}
+
 struct LocalProjectSummary: Identifiable, Codable, Equatable {
     let id: UUID
     let videoURL: URL
