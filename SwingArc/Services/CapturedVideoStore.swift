@@ -98,6 +98,7 @@ struct CapturedVideoStore {
         } catch {
             throw CapturedVideoStoreError.finalizeFailed
         }
+        try? fileManager.removeItem(at: sourceURL)
         return RecordedPracticeClip(url: finalURL, quality: quality)
     }
 

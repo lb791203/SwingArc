@@ -40,8 +40,10 @@ struct CapturedVideoStoreSmoke {
         }
 
         let fixture = URL(fileURLWithPath: CommandLine.arguments[1])
+        let source = root.appendingPathComponent("valid-source.mp4")
+        try manager.copyItem(at: fixture, to: source)
         let persisted = try await store.persist(
-            sourceURL: fixture,
+            sourceURL: source,
             prefix: "practice",
             quality: .possibleIncomplete
         )
@@ -49,6 +51,7 @@ struct CapturedVideoStoreSmoke {
         precondition(persisted.url.deletingLastPathComponent() == root)
         precondition(persisted.url.lastPathComponent.hasPrefix("practice-"))
         precondition(manager.fileExists(atPath: persisted.url.path))
+        precondition(!manager.fileExists(atPath: source.path))
         precondition(manager.fileExists(atPath: fixture.path))
     }
 }
