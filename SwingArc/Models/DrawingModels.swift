@@ -57,7 +57,7 @@ enum ArrowGeometry {
 }
 
 /// 挥杆关键帧节点 (高尔夫标准 P 阶段)
-enum SwingStage: String, CaseIterable, Identifiable {
+enum SwingStage: String, CaseIterable, Identifiable, Codable {
     case address = "准备姿势 (Address)"
     case takeaway = "起杆 (Takeaway)"
     case leadArmParallelBackswing = "上杆左臂平行 (Lead Arm Parallel)"

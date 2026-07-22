@@ -28,7 +28,15 @@ struct ProjectPersistenceSmoke {
             showPoseSkeleton: true,
             showHeadStability: false,
             showSpineAngle: true,
-            showGrid: false
+            showGrid: false,
+            stageCorrections: [
+                StageCorrection(
+                    stage: .top,
+                    view: .downTheLine,
+                    automaticFrameIndex: 40,
+                    manualFrameIndex: 43
+                )
+            ]
         )
 
         let restored = try JSONDecoder().decode(LocalAnalysisProject.self, from: JSONEncoder().encode(original))
@@ -37,7 +45,28 @@ struct ProjectPersistenceSmoke {
         precondition(restored.drawings[1].tool == .arrow)
         precondition(restored.keyframes == original.keyframes)
         precondition(restored.keyframes[0].isLocked)
+        precondition(restored.stageCorrections == original.stageCorrections)
         precondition(restored.showPoseSkeleton)
         precondition(restored.showSpineAngle)
+        precondition(restored.feedbackConfiguration == nil)
+
+        let configuration = FeedbackConfiguration.defaultValue(for: .downTheLine)
+        let configured = LocalAnalysisProject(
+            drawings: [],
+            keyframes: [],
+            isKeyframeMode: false,
+            showPoseSkeleton: false,
+            showHeadStability: false,
+            showSpineAngle: false,
+            showGrid: false,
+            practiceCameraView: .downTheLine,
+            stageCorrections: [],
+            feedbackConfiguration: configuration
+        )
+        let configuredRoundTrip = try JSONDecoder().decode(
+            LocalAnalysisProject.self,
+            from: JSONEncoder().encode(configured)
+        )
+        precondition(configuredRoundTrip.feedbackConfiguration == configuration)
     }
 }

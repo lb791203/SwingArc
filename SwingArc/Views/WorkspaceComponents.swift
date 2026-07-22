@@ -1,5 +1,252 @@
 import SwiftUI
 
+struct SwingFeedbackConfigurationView: View {
+    @Binding var practiceCameraView: PracticeCameraView?
+    @Binding var configuration: FeedbackConfiguration?
+    let analysisState: SwingAnalysisState
+    let sourceFrameRate: Double
+    let onDismiss: () -> Void
+
+    private var profile: FeedbackProfile? {
+        practiceCameraView.map(SwingFeedbackProfiles.profile(for:))
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    viewSelector
+
+                    if let profile {
+                        ForEach(Array(profile.groups.enumerated()), id: \.offset) { _, group in
+                            groupSection(group, view: profile.view)
+                        }
+                    } else {
+                        ContentUnavailableView(
+                            "选择拍摄视角",
+                            systemImage: "camera.viewfinder",
+                            description: Text("请选择目标线视角或正面视角后配置分析参数。")
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 280)
+                    }
+                }
+                .padding(16)
+            }
+            .background(AnalysisTheme.proTourBackground)
+            .navigationTitle("挥杆反馈")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭", action: onDismiss)
+                        .accessibilityLabel("关闭挥杆反馈")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("帮助") {}
+                        .accessibilityLabel("挥杆反馈帮助")
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var viewSelector: some View {
+        HStack(spacing: 8) {
+            viewButton(.downTheLine, title: "目标线视角", abbreviation: "DTL")
+            viewButton(.faceOn, title: "正面视角", abbreviation: "FO")
+        }
+        .padding(4)
+        .background(AnalysisTheme.proTourSurface, in: Capsule())
+    }
+
+    private func viewButton(
+        _ view: PracticeCameraView,
+        title: String,
+        abbreviation: String
+    ) -> some View {
+        Button {
+            select(view)
+        } label: {
+            VStack(spacing: 2) {
+                Text(title)
+                    .font(.system(size: 14, weight: .bold))
+                Text(abbreviation)
+                    .font(.system(size: 9, weight: .black, design: .monospaced))
+            }
+            .foregroundStyle(practiceCameraView == view ? .white : AnalysisTheme.proTourSecondaryText)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .background(
+                practiceCameraView == view ? AnalysisTheme.proTourSignal : .clear,
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+
+    private func groupSection(
+        _ group: FeedbackGroup,
+        view: PracticeCameraView
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(group.title)
+                .font(.system(size: 21, weight: .bold, design: .rounded))
+                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+
+            ForEach(group.metrics, id: \.metric) { definition in
+                metricRow(definition, view: view)
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func metricRow(
+        _ definition: FeedbackMetricDefinition,
+        view: PracticeCameraView
+    ) -> some View {
+        let availability = FeedbackAvailability.resolve(
+            metric: definition.metric,
+            analysis: analysisState,
+            sourceFrameRate: sourceFrameRate
+        )
+        let isSelected = selectedConfiguration(for: view).activeMetric == definition.metric
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Button {
+                select(definition.metric, for: view)
+            } label: {
+                HStack(spacing: 8) {
+                    Text(definition.title)
+                        .font(.system(size: 17, weight: .semibold))
+                    Spacer()
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(AnalysisTheme.proTourSignal)
+                    }
+                }
+                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                .padding(.horizontal, 14)
+                .frame(minHeight: 48)
+                .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(isSelected ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourRaisedSurface, lineWidth: isSelected ? 1.5 : 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("选择\(definition.title)")
+
+            switch availability {
+            case .available:
+                checkpointChips(definition, view: view)
+            case let .unavailable(reason):
+                Text(reason)
+                    .font(.footnote)
+                    .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+                    .padding(.horizontal, 4)
+            }
+        }
+    }
+
+    private func checkpointChips(
+        _ definition: FeedbackMetricDefinition,
+        view: PracticeCameraView
+    ) -> some View {
+        FlowLayout(spacing: 8) {
+            ForEach(definition.stages) { stage in
+                let checkpoint = FeedbackCheckpoint(metric: definition.metric, stage: stage)
+                let isEnabled = selectedConfiguration(for: view).enabledCheckpoints.contains(checkpoint)
+                Button {
+                    toggle(checkpoint, for: view)
+                } label: {
+                    Text(stage.shortName.replacingOccurrences(of: "P[0-9] ", with: "", options: .regularExpression))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(isEnabled ? .black : AnalysisTheme.proTourPrimaryText)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .background(isEnabled ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(AnalysisTheme.proTourRaisedSurface))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(definition.title) \(stage.shortName)")
+            }
+        }
+    }
+
+    private func selectedConfiguration(for view: PracticeCameraView) -> FeedbackConfiguration {
+        let candidate = configuration ?? FeedbackConfiguration.defaultValue(for: view)
+        return SwingFeedbackProfiles.profile(for: view).contains(candidate.activeMetric)
+            ? candidate
+            : FeedbackConfiguration.defaultValue(for: view)
+    }
+
+    private func select(_ view: PracticeCameraView) {
+        practiceCameraView = view
+        configuration = selectedConfiguration(for: view)
+    }
+
+    private func select(_ metric: FeedbackMetric, for view: PracticeCameraView) {
+        var value = selectedConfiguration(for: view)
+        value.activeMetric = metric
+        configuration = value
+    }
+
+    private func toggle(_ checkpoint: FeedbackCheckpoint, for view: PracticeCameraView) {
+        var value = selectedConfiguration(for: view)
+        if value.enabledCheckpoints.contains(checkpoint) {
+            value.enabledCheckpoints.remove(checkpoint)
+        } else {
+            value.enabledCheckpoints.insert(checkpoint)
+        }
+        configuration = value
+    }
+}
+
+private struct FlowLayout: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let width = proposal.width ?? 0
+        var cursor = CGPoint.zero
+        var maxHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if cursor.x > 0, cursor.x + size.width > width {
+                cursor.x = 0
+                cursor.y += maxHeight + spacing
+                maxHeight = 0
+            }
+            cursor.x += size.width + spacing
+            maxHeight = max(maxHeight, size.height)
+        }
+        return CGSize(width: width, height: cursor.y + maxHeight)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        var cursor = bounds.origin
+        var lineHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if cursor.x > bounds.minX, cursor.x + size.width > bounds.maxX {
+                cursor.x = bounds.minX
+                cursor.y += lineHeight + spacing
+                lineHeight = 0
+            }
+            subview.place(at: cursor, proposal: ProposedViewSize(size))
+            cursor.x += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
+    }
+}
+
 struct WorkspaceHeaderView: View {
     let projectName: String
     let saveStatus: WorkspaceSaveStatus
@@ -14,10 +261,11 @@ struct WorkspaceHeaderView: View {
     let onExport: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Button(action: onBack) {
                 Image(systemName: "chevron.left")
                     .frame(width: 44, height: 44)
+                    .background(AnalysisTheme.proTourSurface, in: Circle())
             }
             .accessibilityLabel("返回项目库")
 
@@ -30,13 +278,17 @@ struct WorkspaceHeaderView: View {
             }
 
             VStack(alignment: .leading, spacing: 1) {
+                Text("ANALYSIS ROOM")
+                    .font(.system(size: 9, weight: .black, design: .monospaced))
+                    .tracking(1.0)
+                    .foregroundStyle(AnalysisTheme.proTourSecondaryText)
                 Text(projectName)
-                    .font(.headline)
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
                     .lineLimit(1)
                 if !saveStatus.label.isEmpty {
                     Label(saveStatus.label, systemImage: saveStatus == .failed ? "exclamationmark.circle" : "checkmark")
                         .font(.caption2)
-                        .foregroundStyle(saveStatus == .failed ? Color.red : Color.white.opacity(0.58))
+                        .foregroundStyle(saveStatus == .failed ? AnalysisTheme.proTourPaused : AnalysisTheme.proTourSignal)
                         .transition(.opacity)
                 }
             }
@@ -54,6 +306,7 @@ struct WorkspaceHeaderView: View {
             Button(action: onExport) {
                 Image(systemName: "square.and.arrow.up")
                     .frame(width: 44, height: 44)
+                    .background(AnalysisTheme.proTourSurface, in: Circle())
             }
             .accessibilityLabel("导出")
 
@@ -66,10 +319,10 @@ struct WorkspaceHeaderView: View {
             }
         }
         .fontWeight(.semibold)
-        .foregroundStyle(.white)
-        .padding(.horizontal, 8)
-        .frame(minHeight: 52)
-        .background(AnalysisTheme.chrome)
+        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+        .padding(.horizontal, 14)
+        .frame(minHeight: 64)
+        .background(AnalysisTheme.proTourBackground)
     }
 }
 
@@ -90,12 +343,12 @@ struct StageTimelineView: View {
                     ),
                     in: 0...max(playbackManager.duration, 0.001)
                 )
-                .tint(AnalysisTheme.current)
+                .tint(AnalysisTheme.proTourSignal)
                 .accessibilityLabel("视频时间轴")
                 Text(formatTime(playbackManager.duration))
             }
             .font(.caption.monospacedDigit())
-            .foregroundStyle(.white.opacity(0.72))
+            .foregroundStyle(AnalysisTheme.proTourSecondaryText)
 
             HStack(spacing: 3) {
                 ForEach(SwingStage.allCases) { stage in
@@ -112,7 +365,7 @@ struct StageTimelineView: View {
                         VStack(spacing: 3) {
                             Text(stage.pNumber)
                                 .font(.caption2.weight(.bold))
-                                .foregroundStyle(.white.opacity(0.84))
+                                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                             Image(
                                 systemName: StageStripPolicy
                                     .indicator(for: descriptor.resultState)
@@ -123,11 +376,18 @@ struct StageTimelineView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .frame(height: StageStripPolicy.buttonHeight)
-                        .background(AnalysisTheme.raisedChrome, in: RoundedRectangle(cornerRadius: 8))
+                        .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(
+                                    descriptor.isCurrent ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourRaisedSurface,
+                                    lineWidth: descriptor.isCurrent ? 1.5 : 1
+                                )
+                        }
                         .overlay(alignment: .bottom) {
                             if descriptor.isCurrent {
                                 Capsule()
-                                    .fill(AnalysisTheme.current)
+                                    .fill(AnalysisTheme.proTourSignal)
                                     .frame(height: 3)
                                     .padding(.horizontal, 5)
                                     .padding(.bottom, 2)
@@ -140,10 +400,10 @@ struct StageTimelineView: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .frame(maxHeight: StageStripPolicy.maximumTotalHeight)
-        .background(AnalysisTheme.chrome)
+        .background(AnalysisTheme.proTourBackground)
     }
 
     private func formatTime(_ time: Double) -> String {
@@ -165,7 +425,7 @@ struct PlaybackControlsView: View {
     let onShowResults: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Menu {
                 ForEach(PlaybackRate.allCases) { rate in
                     Button(rate.label) { playbackManager.setSpeed(rate.value) }
@@ -174,7 +434,7 @@ struct PlaybackControlsView: View {
                 Text(speedLabel)
                     .font(.caption.weight(.bold).monospacedDigit())
                     .frame(minWidth: 48, minHeight: 44)
-                    .background(AnalysisTheme.raisedChrome, in: Capsule())
+                    .background(AnalysisTheme.proTourSurface, in: Capsule())
             }
             .accessibilityLabel("播放速度，当前 \(speedLabel)")
 
@@ -194,7 +454,7 @@ struct PlaybackControlsView: View {
                     .font(.title3.weight(.bold))
                     .frame(width: 54, height: 54)
                     .foregroundStyle(.black)
-                    .background(AnalysisTheme.confirmed, in: Circle())
+                    .background(AnalysisTheme.proTourSignal, in: Circle())
             }
             .accessibilityLabel(playbackManager.isPlaying ? "暂停" : "播放")
 
@@ -206,31 +466,34 @@ struct PlaybackControlsView: View {
                 Image(systemName: "pencil.tip")
                     .frame(width: 44, height: 44)
                     .background(
-                        interactionMode == .drawing ? AnalysisTheme.current : AnalysisTheme.raisedChrome,
+                        interactionMode == .drawing ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourSurface,
                         in: RoundedRectangle(cornerRadius: 12)
                     )
-                    .foregroundStyle(interactionMode == .drawing ? .black : .white)
+                .foregroundStyle(interactionMode == .drawing ? AnalysisTheme.proTourBackground : AnalysisTheme.proTourPrimaryText)
             }
             .accessibilityLabel(interactionMode == .drawing ? "结束画线" : "画线")
 
             Button(action: hasResults ? onShowResults : onAnalyze) {
                 VStack(spacing: 1) {
                     Image(systemName: hasResults ? "list.bullet.rectangle" : "sparkles")
-                    Text(hasResults ? "结果" : "AI")
+                    Text(hasResults ? "结果" : "分析")
                         .font(.caption2.weight(.semibold))
                 }
                 .frame(width: 50, height: 44)
-                .background(AnalysisTheme.raisedChrome, in: RoundedRectangle(cornerRadius: 12))
-                .foregroundStyle(AnalysisTheme.pose)
+                .background(
+                    hasResults ? AnalysisTheme.proTourSurface : AnalysisTheme.proTourSignal,
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
+                .foregroundStyle(hasResults ? AnalysisTheme.proTourPrimaryText : AnalysisTheme.proTourBackground)
             }
             .disabled(playbackManager.isScanning)
             .accessibilityLabel(hasResults ? "查看分析结果" : "开始 AI 分析")
         }
         .frame(maxWidth: .infinity)
-        .foregroundStyle(.white)
+        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
-        .background(AnalysisTheme.canvasBackground)
+        .background(AnalysisTheme.proTourBackground)
     }
 
     private var speedLabel: String {
@@ -242,7 +505,7 @@ struct PlaybackControlsView: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .frame(width: 44, height: 44)
-                .background(AnalysisTheme.raisedChrome, in: RoundedRectangle(cornerRadius: 12))
+                .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .accessibilityLabel(label)
     }
@@ -449,7 +712,7 @@ struct AnalysisProgressCard: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(presentation.title).font(.subheadline.weight(.semibold))
-                    Text(presentation.detail).font(.caption).foregroundStyle(.secondary)
+                    Text(presentation.detail).font(.caption).foregroundStyle(AnalysisTheme.proTourSecondaryText)
                 }
                 Spacer()
                 Text("\(presentation.percentage)%")
@@ -458,12 +721,12 @@ struct AnalysisProgressCard: View {
                     .font(.caption.weight(.semibold))
             }
             ProgressView(value: min(max(progress, 0), 1))
-                .tint(AnalysisTheme.confirmed)
+                .tint(AnalysisTheme.proTourSignal)
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
         .padding(12)
-        .background(AnalysisTheme.raisedChrome, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.08)))
+        .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(AnalysisTheme.proTourRaisedSurface))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(presentation.title)，\(presentation.percentage)%")
     }
@@ -475,14 +738,96 @@ struct AnalysisFailureBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(AnalysisTheme.proTourPaused)
             Text(AnalysisFailurePresentation(failure: failure).message)
-                .font(.caption)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .foregroundStyle(AnalysisTheme.current)
-        .padding(10)
-        .background(AnalysisTheme.chrome)
+        .padding(14)
+        .background(AnalysisTheme.proTourSurface)
+        .overlay(alignment: .leading) {
+            Capsule()
+                .fill(AnalysisTheme.proTourPaused)
+                .frame(width: 4)
+                .padding(.vertical, 10)
+                .padding(.leading, 5)
+        }
         .accessibilityElement(children: .combine)
+    }
+}
+
+struct TechniqueFeedbackCard: View {
+    let presentation: TechniqueFeedbackPresentation
+    let onSelectEvidence: (SwingStage) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 9) {
+                Image(systemName: presentation.showsEvidence ? "scope" : "questionmark.circle")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(presentation.showsEvidence ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourSecondaryText)
+                Text(presentation.showsEvidence ? "PRIORITY FEEDBACK" : "EVIDENCE PENDING")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .tracking(1.1)
+                    .foregroundStyle(presentation.showsEvidence ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourSecondaryText)
+                Spacer(minLength: 0)
+                Text(presentation.showsEvidence ? "CONFIRMED" : "NO PRESCRIPTION")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(0.7)
+                    .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+            }
+
+            Text(presentation.title)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+            Text(presentation.detail)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+
+            if presentation.showsEvidence {
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("CONFIRMED P-STAGES")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .tracking(0.9)
+                        .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+                    HStack(spacing: 8) {
+                        ForEach(presentation.evidenceStages) { stage in
+                            Button(stage.pNumber) { onSelectEvidence(stage) }
+                                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                .foregroundStyle(AnalysisTheme.proTourBackground)
+                                .frame(minWidth: 44, minHeight: 36)
+                                .background(AnalysisTheme.proTourSignal, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+
+            if let drill = presentation.drill {
+                HStack(spacing: 10) {
+                    Image(systemName: "figure.strengthtraining.traditional")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(AnalysisTheme.proTourSignal)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("DRILL")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .tracking(0.9)
+                            .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+                        Text(drill.title)
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(16)
+        .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(AnalysisTheme.proTourRaisedSurface, lineWidth: 1)
+        )
     }
 }
 
@@ -756,6 +1101,130 @@ struct GridView: View {
             }
             context.stroke(path, with: .color(.white.opacity(0.28)), style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
         }
+    }
+}
+
+struct SwingPhaseRailView: View {
+    let keyframes: [KeyframeMarker]
+    let presentation: AnalysisWorkspacePresentation
+    let currentTime: Double
+    let frameDuration: Double
+    let duration: Double
+    let onSelect: (Double) -> Void
+    let onScrub: (Double) -> Void
+
+    var body: some View {
+        VStack(spacing: 5) {
+            Slider(
+                value: Binding(
+                    get: { min(max(currentTime, 0), max(duration, 0.001)) },
+                    set: onScrub
+                ),
+                in: 0...max(duration, 0.001)
+            )
+            .tint(AnalysisTheme.proTourSignal)
+            .accessibilityLabel("挥杆进度")
+
+            HStack(spacing: 0) {
+                ForEach(visibleDescriptors, id: \.stage) { descriptor in
+                    Button {
+                        if let marker = descriptor.marker {
+                            onSelect(marker.time)
+                        }
+                    } label: {
+                        SwingPhaseSilhouette(
+                            stage: descriptor.stage,
+                            isCurrent: descriptor.isCurrent,
+                            resultState: descriptor.resultState
+                        )
+                        .frame(maxWidth: .infinity, minHeight: FullscreenPlaybackPolicy.minimumTouchTarget)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(descriptor.accessibilityLabel)
+                    .accessibilityHint("跳到该挥杆位置")
+                }
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 5)
+        .padding(.bottom, 2)
+        .background(.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var visibleDescriptors: [StageDisplayDescriptor] {
+        SwingStage.allCases.compactMap { stage in
+            let descriptor = StageDisplayDescriptor(
+                stage: stage,
+                keyframes: keyframes,
+                presentation: presentation,
+                currentTime: currentTime,
+                frameDuration: frameDuration
+            )
+            guard descriptor.marker != nil,
+                  SwingPhaseRailPolicy.appearance(
+                    for: descriptor.resultState,
+                    hasMarker: true
+                  ) != .hidden
+            else {
+                return nil
+            }
+            return descriptor
+        }
+    }
+}
+
+private struct SwingPhaseSilhouette: View {
+    let stage: SwingStage
+    let isCurrent: Bool
+    let resultState: StageResultState
+
+    private var clubAngle: Angle {
+        switch stage {
+        case .address: .degrees(-20)
+        case .takeaway: .degrees(-48)
+        case .leadArmParallelBackswing: .degrees(-72)
+        case .top: .degrees(-112)
+        case .leadArmParallelDownswing: .degrees(38)
+        case .impact: .degrees(18)
+        case .followThrough: .degrees(66)
+        case .finish: .degrees(105)
+        }
+    }
+
+    private var accent: Color {
+        if isCurrent { return .white }
+        switch resultState {
+        case .confirmed, .manual: return AnalysisTheme.proTourSignal
+        case .review: return AnalysisTheme.current.opacity(0.45)
+        case .unresolved: return .white.opacity(0.28)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(isCurrent ? .white : .clear, lineWidth: 1.5)
+                .frame(width: 36, height: 36)
+
+            Circle()
+                .fill(accent)
+                .frame(width: 5.5, height: 5.5)
+                .offset(y: -11)
+
+            Capsule()
+                .fill(accent)
+                .frame(width: 3.5, height: 15)
+                .offset(y: -2)
+
+            Capsule()
+                .fill(accent)
+                .frame(width: 2.5, height: 13)
+                .rotationEffect(clubAngle)
+                .offset(x: 6, y: -2)
+        }
+        .frame(width: 40, height: 40)
+        .contentShape(Circle())
+        .accessibilityHidden(true)
     }
 }
 

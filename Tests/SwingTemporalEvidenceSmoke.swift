@@ -7,6 +7,7 @@ struct SwingTemporalEvidenceSmoke {
         verifyBoundaryAdjacentNoiseDoesNotMoveBoundaries()
         verifyBoundaryAdjacentWrongDirectionDoesNotMoveBoundaries()
         verifyHorizontalTakeawayBoundary()
+        verifyAddressBoundaryIgnoresIsolatedVisionSpeedSpike()
         verifyHighHandsDoNotCreateAddressBoundary()
         verifyPartialTakeawayDoesNotCreateAddressBoundary()
         verifyHorizontalBackswingPhase()
@@ -189,6 +190,38 @@ struct SwingTemporalEvidenceSmoke {
         precondition(
             SwingEvidenceTimeline.build(from: fixture).allSatisfy { !$0.isAddressBoundary },
             "A high-hands motion pulse near the top must not become an address boundary"
+        )
+    }
+
+    private static func verifyAddressBoundaryIgnoresIsolatedVisionSpeedSpike() {
+        let fps = 30
+        let times = (0...Int(2.0 * Double(fps))).map { Double($0) / Double(fps) }
+        let fixture = times.enumerated().map { ordinal, time -> SwingFrameEvidence in
+            let visionSpike = ordinal == 23
+            let minorVisionJitter = ordinal == 25
+            let velocityX: CGFloat
+            if time < 1.0 {
+                velocityX = visionSpike ? 0.26 : (minorVisionJitter ? 0.081 : 0.04)
+            } else {
+                velocityX = -0.10
+            }
+            let handX: CGFloat = time < 1.0
+                ? 0.55
+                : 0.55 - CGFloat(time - 1.0) * 0.10
+            return evidence(
+                sourceFrameIndex: 93_000 + ordinal,
+                time: time,
+                velocityX: velocityX,
+                velocityY: 0,
+                headSpeed: (visionSpike || minorVisionJitter) ? 0.20 : 0.01,
+                handCenter: CGPoint(x: handX, y: 0.58)
+            )
+        }
+        let address = SwingEvidenceTimeline.build(from: fixture)
+            .last(where: \.isAddressBoundary)?.frame
+        precondition(
+            address?.time == times.last { $0 < 1.0 },
+            "An isolated Vision hand-speed spike before sustained takeaway must not erase P1"
         )
     }
 

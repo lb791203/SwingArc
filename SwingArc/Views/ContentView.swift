@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import Foundation
 
 private enum MediaAction {
     case save
@@ -17,23 +18,44 @@ struct ContentView: View {
     @State private var projects = LocalProjectStore.projects()
     @State private var activeProject: LocalProjectSummary?
     @State private var currentProjectURL: URL?
+    @State private var practiceCameraView: PracticeCameraView?
+    @State private var feedbackConfiguration: FeedbackConfiguration?
     @State private var saveStatus: WorkspaceSaveStatus = .idle
 
     @State private var drawings: [DrawingElement] = []
     @State private var keyframes: [KeyframeMarker] = []
+    @State private var stageCorrections: [StageCorrection] = []
     @State private var isKeyframeMode = false
     @State private var showPoseSkeleton = false
     @State private var showHeadStability = false
     @State private var showSpineAngle = false
     @State private var showGrid = false
 
-    @State private var showCameraView = false
+    @State private var selectedPracticeView: PracticeCameraView?
+    @State private var showProjectLibrary = false
     @State private var showVideoPicker = false
+    @State private var showManualCapture = false
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var showExportActions = false
     @State private var sharePayload: SharePayload?
     @State private var isExporting = false
     @State private var statusMessage: String?
+    @State private var didLoadPreviewImport = false
+
+    init() {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let previewView = PracticePreviewConfiguration.view(for: arguments) {
+            _selectedPracticeView = State(initialValue: previewView)
+        }
+        if PracticePreviewConfiguration.showsLibrary(for: arguments) {
+            _showProjectLibrary = State(initialValue: true)
+        }
+        if PracticePreviewConfiguration.showsManualCapture(for: arguments) {
+            _showManualCapture = State(initialValue: true)
+        }
+        #endif
+    }
 
     var body: some View {
         Group {
@@ -49,22 +71,34 @@ struct ContentView: View {
                     showHeadStability: $showHeadStability,
                     showSpineAngle: $showSpineAngle,
                     showGrid: $showGrid,
+                    practiceCameraView: $practiceCameraView,
+                    feedbackConfiguration: $feedbackConfiguration,
                     saveStatus: saveStatus,
                     onBack: closeWorkspace,
                     onSelectProject: openProject,
                     onExport: { showExportActions = true },
                     onAnalyze: runAISwingAnalysis,
                     onCancelAnalysis: playbackManager.cancelAnalysis,
-                    onSetManualStage: saveManualStage
+                    onSetManualStage: saveManualStage,
+                    feedback: playbackManager.priorityFeedback(
+                        view: practiceCameraView,
+                        manualMarkers: keyframes
+                    )
                 )
-            } else {
+            } else if showProjectLibrary {
                 ProjectLibraryView(
                     projects: projects,
                     onOpen: openProject,
-                    onImport: { showVideoPicker = true },
-                    onRecord: { showCameraView = true },
                     onRename: renameProject,
-                    onDelete: deleteProject
+                    onDelete: deleteProject,
+                    onClose: { showProjectLibrary = false }
+                )
+            } else {
+                PracticeHomeView(
+                    onStartPractice: { selectedPracticeView = $0 },
+                    onManualCapture: { showManualCapture = true },
+                    onImport: { showVideoPicker = true },
+                    onOpenLibrary: { showProjectLibrary = true }
                 )
             }
         }
@@ -74,17 +108,46 @@ struct ContentView: View {
             loadSelectedVideo(from: item)
             selectedPickerItem = nil
         }
+        .onAppear {
+            #if DEBUG
+            guard !didLoadPreviewImport,
+                  let path = PracticePreviewConfiguration.importPath(
+                    for: ProcessInfo.processInfo.arguments
+                  ) else { return }
+
+            didLoadPreviewImport = true
+            loadVideoFromURL(URL(fileURLWithPath: path))
+            #endif
+        }
         .onChange(of: drawings) { _, _ in persistCurrentProject() }
         .onChange(of: keyframes) { _, _ in persistCurrentProject() }
+        .onChange(of: stageCorrections) { _, _ in persistCurrentProject() }
         .onChange(of: isKeyframeMode) { _, _ in persistCurrentProject() }
         .onChange(of: showPoseSkeleton) { _, _ in persistCurrentProject() }
         .onChange(of: showHeadStability) { _, _ in persistCurrentProject() }
         .onChange(of: showSpineAngle) { _, _ in persistCurrentProject() }
         .onChange(of: showGrid) { _, _ in persistCurrentProject() }
-        .fullScreenCover(isPresented: $showCameraView) {
-            CameraView { recordedURL in
-                showCameraView = false
-                loadVideoFromURL(persistVideoIfNeeded(recordedURL))
+        .onChange(of: feedbackConfiguration) { _, _ in persistCurrentProject() }
+        .fullScreenCover(item: $selectedPracticeView) { practiceView in
+            PracticeSessionView(
+                view: practiceView,
+                onClose: {
+                    selectedPracticeView = nil
+                    projects = LocalProjectStore.projects()
+                },
+                onOpenLastClip: { clipURL in
+                    selectedPracticeView = nil
+                    loadVideoFromURL(
+                        clipURL,
+                        practiceView: practiceView,
+                        origin: .capturedClipSaved
+                    )
+                }
+            )
+        }
+        .fullScreenCover(isPresented: $showManualCapture) {
+            CameraView { temporaryURL in
+                persistCapturedVideo(temporaryURL)
             }
         }
         .sheet(item: $sharePayload) { payload in
@@ -123,7 +186,7 @@ struct ContentView: View {
         if currentProjectURL != project.videoURL {
             persistCurrentProject()
         }
-        loadVideoFromURL(project.videoURL, existingSummary: project)
+        loadVideoFromURL(project.videoURL, existingSummary: project, origin: .projectReopened)
     }
 
     private func closeWorkspace() {
@@ -131,6 +194,8 @@ struct ContentView: View {
         playbackManager.unloadVideo()
         activeProject = nil
         currentProjectURL = nil
+        practiceCameraView = nil
+        stageCorrections = []
         saveStatus = .idle
         projects = LocalProjectStore.projects()
     }
@@ -143,28 +208,61 @@ struct ContentView: View {
                     .appendingPathComponent("imported-\(UUID().uuidString).mp4")
                 do {
                     try data.write(to: videoURL, options: .atomic)
-                    DispatchQueue.main.async { loadVideoFromURL(videoURL) }
+                    DispatchQueue.main.async {
+                        loadVideoFromURL(videoURL, origin: .importCompleted)
+                    }
                 } catch {
-                    DispatchQueue.main.async { statusMessage = "视频导入失败：\(error.localizedDescription)" }
+                    DispatchQueue.main.async {
+                        statusMessage = "视频导入失败：\(error.localizedDescription)"
+                    }
                 }
             case .failure(let error):
-                DispatchQueue.main.async { statusMessage = "无法读取所选视频：\(error.localizedDescription)" }
+                DispatchQueue.main.async {
+                    statusMessage = "无法读取所选视频：\(error.localizedDescription)"
+                }
             default:
                 break
             }
         }
     }
 
-    private func loadVideoFromURL(_ url: URL, existingSummary: LocalProjectSummary? = nil) {
+    private func persistCapturedVideo(_ temporaryURL: URL) {
+        isExporting = true
+        Task {
+            do {
+                let clip = try await CapturedVideoStore(
+                    destinationDirectory: LocalProjectStore.videoDirectory()
+                ).persist(
+                    sourceURL: temporaryURL,
+                    prefix: "manual",
+                    quality: .complete
+                )
+                showManualCapture = false
+                loadVideoFromURL(clip.url, origin: .capturedClipSaved)
+            } catch {
+                statusMessage = "录像已经完成，但保存失败。请检查本机储存空间后重试。"
+            }
+            isExporting = false
+        }
+    }
+
+    private func loadVideoFromURL(
+        _ url: URL,
+        existingSummary: LocalProjectSummary? = nil,
+        practiceView: PracticeCameraView? = nil,
+        origin: VideoLoadOrigin = .importCompleted
+    ) {
         playbackManager.unloadVideo()
         currentProjectURL = nil
         drawings = []
         keyframes = []
+        stageCorrections = []
         isKeyframeMode = false
         showPoseSkeleton = false
         showHeadStability = false
         showSpineAngle = false
         showGrid = false
+        feedbackConfiguration = nil
         saveStatus = .idle
 
         let didLoad = playbackManager.loadVideo(url: url)
@@ -177,6 +275,11 @@ struct ContentView: View {
             showHeadStability = saved.showHeadStability
             showSpineAngle = saved.showSpineAngle
             showGrid = saved.showGrid
+            self.practiceCameraView = practiceView ?? saved.practiceCameraView
+            stageCorrections = saved.stageCorrections
+            feedbackConfiguration = saved.feedbackConfiguration
+        } else {
+            self.practiceCameraView = practiceView
         }
 
         var summary = existingSummary
@@ -199,6 +302,13 @@ struct ContentView: View {
         activeProject = summary
         projects = LocalProjectStore.projects()
         saveStatus = .saved
+
+        if didLoad, AutomaticAnalysisPolicy.shouldAnalyze(event: origin) {
+            DispatchQueue.main.async {
+                guard currentProjectURL == url, playbackManager.analysisState == .idle else { return }
+                runAISwingAnalysis()
+            }
+        }
     }
 
     private func persistCurrentProject() {
@@ -212,7 +322,10 @@ struct ContentView: View {
                 showPoseSkeleton: showPoseSkeleton,
                 showHeadStability: showHeadStability,
                 showSpineAngle: showSpineAngle,
-                showGrid: showGrid
+                showGrid: showGrid,
+                practiceCameraView: practiceCameraView,
+                stageCorrections: stageCorrections,
+                feedbackConfiguration: feedbackConfiguration
             ),
             for: videoURL
         )
@@ -262,6 +375,18 @@ struct ContentView: View {
         keyframes.removeAll { $0.stage == stage.rawValue }
         keyframes.append(marker)
         keyframes.sort { $0.time < $1.time }
+        guard let view = practiceCameraView,
+              let automaticFrame = playbackManager.analysisOutput?.result.detections
+                .first(where: { $0.stage == stage })?.sourceFrameIndex,
+              playbackManager.sourceFrameRate > 0 else { return }
+        let manualFrame = Int((playbackManager.currentTime * playbackManager.sourceFrameRate).rounded())
+        stageCorrections.removeAll { $0.stage == stage && $0.view == view }
+        stageCorrections.append(StageCorrection(
+            stage: stage,
+            view: view,
+            automaticFrameIndex: automaticFrame,
+            manualFrameIndex: manualFrame
+        ))
     }
 
     private func performMediaAction(_ action: MediaAction, kind: MediaExportKind) {
@@ -295,21 +420,6 @@ struct ContentView: View {
                 statusMessage = error.localizedDescription
             }
             isExporting = false
-        }
-    }
-
-    private func persistVideoIfNeeded(_ sourceURL: URL) -> URL {
-        guard sourceURL.isFileURL else { return sourceURL }
-        let directory = LocalProjectStore.videoDirectory()
-        guard !sourceURL.path.hasPrefix(directory.path) else { return sourceURL }
-        let pathExtension = sourceURL.pathExtension.isEmpty ? "mov" : sourceURL.pathExtension
-        let destination = directory.appendingPathComponent("recorded-\(UUID().uuidString).\(pathExtension)")
-        do {
-            try FileManager.default.copyItem(at: sourceURL, to: destination)
-            return destination
-        } catch {
-            statusMessage = "录制视频保存失败：\(error.localizedDescription)"
-            return sourceURL
         }
     }
 
