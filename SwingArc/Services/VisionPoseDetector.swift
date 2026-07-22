@@ -851,11 +851,16 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         guard nominalFrameRate.isFinite, nominalFrameRate > 0 else {
             return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)
         }
+        guard let decodeTolerance = FrameExtractionTolerancePolicy.halfFrameTime(
+            sourceFrameRate: nominalFrameRate
+        ) else {
+            return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)
+        }
 
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
+        generator.requestedTimeToleranceBefore = decodeTolerance
+        generator.requestedTimeToleranceAfter = decodeTolerance
 
         // One tracker is intentionally reused for the complete coarse pass and
         // every adaptive block. Expansion must never create a new golfer identity.
@@ -874,10 +879,10 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 max(0, Int((seconds * nominalFrameRate).rounded()))
             )
             let sample: CoarseSwingSample? = autoreleasepool {
-                let requestedTime = SourceFrameRequestTimePolicy.time(
+                guard let requestedTime = FrameExtractionTolerancePolicy.decodeRequestTime(
                     sourceFrameIndex: requestedSourceFrameIndex,
                     sourceFrameRate: nominalFrameRate
-                )
+                ) else { return nil }
                 var actualTime = CMTime.invalid
                 guard let image = try? generator.copyCGImage(
                     at: requestedTime,
@@ -1164,10 +1169,10 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 guard decodeLedger.registerDecode(
                     sourceFrameIndex: reference.sourceFrameIndex
                 ) else { return nil }
-                let requestedTime = SourceFrameRequestTimePolicy.time(
+                guard let requestedTime = FrameExtractionTolerancePolicy.decodeRequestTime(
                     sourceFrameIndex: reference.sourceFrameIndex,
                     sourceFrameRate: sourceFrameRate
-                )
+                ) else { return nil }
                 var actualTime = CMTime.invalid
                 guard let image = try? generator.copyCGImage(
                     at: requestedTime,
