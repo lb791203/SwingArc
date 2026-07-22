@@ -8,10 +8,8 @@ struct CameraView: View {
     let onRecordCompleted: (URL) -> Void
 
     @State private var isRecording = false
-    @State private var countdownValue = 0
-    @State private var isCountingDown = false
     @State private var useFrontCamera = false
-    @State private var timer: Timer? = nil
+    @State private var pendingAutomaticStop: DispatchWorkItem?
 
     @StateObject private var cameraState = CameraStateModel()
 
@@ -50,10 +48,13 @@ struct CameraView: View {
             cameraState.setupSession()
         }
         .onDisappear {
+            pendingAutomaticStop?.cancel()
+            if isRecording {
+                cameraState.stopRecording()
+            }
             cameraState.stopSession()
-            timer?.invalidate()
         }
-        .onChange(of: cameraState.recordedVideoURL) { newURL in
+        .onChange(of: cameraState.recordedVideoURL) { _, newURL in
             if let url = newURL {
                 onRecordCompleted(url)
                 presentationMode.wrappedValue.dismiss()
@@ -76,10 +77,10 @@ struct CameraView: View {
             Spacer()
 
             VStack(spacing: 3) {
-                Text("MANUAL CAPTURE")
+                Text(ManualCapturePresentation.title)
                     .font(.system(size: 11, weight: .black, design: .monospaced))
                     .tracking(1.2)
-                Text("120 FPS · LOCAL")
+                Text(ManualCapturePresentation.detail)
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .tracking(0.8)
                     .foregroundStyle(AnalysisTheme.proTourSecondaryText)
@@ -118,8 +119,8 @@ struct CameraView: View {
                     .frame(width: geometry.size.width * 0.62, height: geometry.size.height * 0.52)
                     .position(x: geometry.size.width / 2, y: geometry.size.height * 0.48)
 
-                if !isRecording && !isCountingDown {
-                    Text("FULL BODY + BALL IN FRAME")
+                if !isRecording {
+                    Text(ManualCapturePresentation.framingPrompt)
                         .font(.system(size: 11, weight: .black, design: .monospaced))
                         .tracking(1.0)
                         .foregroundStyle(AnalysisTheme.proTourPrimaryText)
@@ -137,14 +138,7 @@ struct CameraView: View {
 
     @ViewBuilder
     private var captureStatus: some View {
-        if isCountingDown {
-            Text("\(countdownValue)")
-                .font(.system(size: 132, weight: .black, design: .rounded))
-                .foregroundStyle(AnalysisTheme.proTourSignal)
-                .shadow(color: .black.opacity(0.7), radius: 16)
-                .accessibilityLabel("倒计时 \(countdownValue)")
-        } else {
-            VStack(spacing: 11) {
+        VStack(spacing: 11) {
                 HStack(spacing: 9) {
                     Circle()
                         .fill(isRecording ? AnalysisTheme.proTourPaused : AnalysisTheme.proTourSignal)
@@ -157,7 +151,7 @@ struct CameraView: View {
                 Text(isRecording ? "RECORDING" : "READY")
                     .font(.system(size: 42, weight: .heavy, design: .monospaced))
                     .foregroundStyle(AnalysisTheme.proTourPrimaryText)
-                Text(isRecording ? "录制将在 6 秒后自动停止" : "架好手机后开始 3 秒倒计时")
+                Text(isRecording ? "最长 15 秒，可随时停止" : ManualCapturePresentation.readyDetail)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AnalysisTheme.proTourSecondaryText)
             }
@@ -166,31 +160,29 @@ struct CameraView: View {
             .padding(.vertical, 20)
             .background(AnalysisTheme.proTourBackground.opacity(0.82), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(AnalysisTheme.proTourRaisedSurface))
-        }
     }
 
     private var captureControl: some View {
         Button {
             if isRecording {
                 stopRecording()
-            } else if !isCountingDown {
-                startCountdown()
+            } else {
+                startRecording()
             }
         } label: {
-            HStack(spacing: 14) {
-                Image(systemName: isRecording ? "stop.fill" : "record.circle")
-                    .font(.system(size: 20, weight: .bold))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(isRecording ? "结束录制" : "开始倒计时")
-                        .font(.system(size: 20, weight: .black))
-                    Text(isRecording ? "保存当前挥杆影片" : "3 秒后自动录制")
-                        .font(.system(size: 13, weight: .bold))
-                        .opacity(0.68)
-                }
-                Spacer()
+            VStack(spacing: 4) {
+                Label(
+                    isRecording ? "结束录制" : "开始录像",
+                    systemImage: isRecording ? "stop.fill" : "record.circle"
+                )
+                .font(.system(size: 20, weight: .black, design: .rounded))
+
+                Text(isRecording ? "保存当前挥杆影片" : "点击立即录制")
+                    .font(.system(size: 13, weight: .bold))
+                    .opacity(0.68)
             }
+            .multilineTextAlignment(.center)
             .foregroundStyle(isRecording ? AnalysisTheme.proTourPrimaryText : AnalysisTheme.proTourBackground)
-            .padding(.horizontal, 20)
             .frame(maxWidth: .infinity, minHeight: 84)
             .background(
                 isRecording ? AnalysisTheme.proTourPaused : AnalysisTheme.proTourSignal,
@@ -198,37 +190,24 @@ struct CameraView: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(isCountingDown)
-        .opacity(isCountingDown ? 0.55 : 1)
-    }
-
-    private func startCountdown() {
-        isCountingDown = true
-        countdownValue = 3
-
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { t in
-            if countdownValue > 1 {
-                countdownValue -= 1
-            } else {
-                t.invalidate()
-                isCountingDown = false
-                startRecording()
-            }
-        }
     }
     
     private func startRecording() {
         isRecording = true
         cameraState.startRecording()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
-            if self.isRecording {
-                self.stopRecording()
-            }
-        }
+        let automaticStop = DispatchWorkItem { stopRecording() }
+        pendingAutomaticStop = automaticStop
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + ManualCaptureTiming.maximumDuration,
+            execute: automaticStop
+        )
     }
     
     private func stopRecording() {
+        guard isRecording else { return }
+        pendingAutomaticStop?.cancel()
+        pendingAutomaticStop = nil
         isRecording = false
         cameraState.stopRecording()
     }
@@ -236,24 +215,25 @@ struct CameraView: View {
 
 // MARK: - 相机状态模型类
 
-class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecordingDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
+class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecordingDelegate, AVCaptureVideoDataOutputSampleBufferDelegate {
     @Published var session = AVCaptureSession()
     @Published var recordedVideoURL: URL? = nil
-    @Published private(set) var lastImpactTime: TimeInterval? = nil
+    @Published private(set) var captureFrameRate: Double = 30
     
     private var movieOutput = AVCaptureMovieFileOutput()
     private var activeVideoInput: AVCaptureDeviceInput?
-    private var audioInput: AVCaptureDeviceInput?
-    private let audioOutput = AVCaptureAudioDataOutput()
-    private let audioQueue = DispatchQueue(label: "com.liangbo.swingarc.impact-audio", qos: .userInitiated)
-    private var impactTrigger = ImpactTriggerPolicy()
-    private var audioTimeOrigin: CMTime?
-    private var isImpactMonitoring = false
-    var onImpactDetected: ((TimeInterval) -> Void)?
-    private var practiceWindow: PracticeClipWindow?
-    private var practiceRecordingStartedAt: Date?
-    private var practiceImpactDetectedAt: Date?
-    private var practiceClipCompletion: ((Result<URL, PracticeSessionError>) -> Void)?
+    private let videoDataOutput = AVCaptureVideoDataOutput()
+    private let sessionQueue = DispatchQueue(label: "com.liangbo.swingarc.capture-session", qos: .userInitiated)
+    private let visionQueue = DispatchQueue(label: "com.liangbo.swingarc.live-vision", qos: .userInitiated)
+    private var livePoseSampler = LivePoseSampler()
+    private var liveSwingDetector = LiveSwingTriggerDetector(configuration: .standard)
+    private var visualOutputAvailable = false
+    private var isVisualMonitoring = false
+    private var practiceRecordingTimeOrigin: TimeInterval?
+    private var pendingBoundary: PracticeCaptureBoundary?
+    private var lastPublishedCaptureStatus: PracticeCaptureStatus?
+    private var practiceStatus: ((PracticeCaptureStatus) -> Void)?
+    private var practiceClipCompletion: ((Result<RecordedPracticeClip, PracticeSessionError>) -> Void)?
     private var discardsNextRecording = false
     
     func setupSession() {
@@ -284,13 +264,14 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
             if session.canAddOutput(movieOutput) {
                 session.addOutput(movieOutput)
             }
-
-            configureImpactAudio()
+            configureVisualOutput()
             
             session.commitConfiguration()
             
-            // 后台启动 Session
-            DispatchQueue.global(qos: .background).async {
+            // Session startup and recording requests share one queue. FIFO
+            // ordering prevents a fast tap from racing `startRunning()`.
+            sessionQueue.async { [weak self] in
+                guard let self, !self.session.isRunning else { return }
                 self.session.startRunning()
             }
         } catch {
@@ -300,52 +281,45 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
     }
     
     func stopSession() {
-        if session.isRunning {
-            session.stopRunning()
+        sessionQueue.async { [weak self] in
+            guard let self, self.session.isRunning else { return }
+            self.session.stopRunning()
         }
     }
 
-    /// The caller arms this only after the user has explicitly started an
-    /// automatic practice session. Preview audio alone must never create clips.
-    func startImpactMonitoring(onImpactDetected: @escaping (TimeInterval) -> Void) {
-        impactTrigger = ImpactTriggerPolicy()
-        audioTimeOrigin = nil
-        self.onImpactDetected = onImpactDetected
-        isImpactMonitoring = true
-    }
-
-    func stopImpactMonitoring() {
-        isImpactMonitoring = false
-        onImpactDetected = nil
-        audioTimeOrigin = nil
-    }
-
-    /// Starts one continuous source recording. The microphone detector arms
-    /// only after the file output confirms recording has begun; the resulting
-    /// callback receives a trimmed 2-second-before / 1-second-after clip.
+    /// Starts one continuous source recording. A low-rate Vision stream finds
+    /// the golfer and emits a complete or time-bounded swing interval.
     func startAutomaticPracticeRecording(
-        window: PracticeClipWindow = .standard,
-        completion: @escaping (Result<URL, PracticeSessionError>) -> Void
+        status: @escaping (PracticeCaptureStatus) -> Void,
+        completion: @escaping (Result<RecordedPracticeClip, PracticeSessionError>) -> Void
     ) {
-        guard !movieOutput.isRecording else {
-            DispatchQueue.main.async { completion(.failure(.recordingFailed)) }
+        guard visualOutputAvailable else {
+            status(.visualUnavailable(
+                message: "此设备无法启动视觉检测，请返回选择手动录像。"
+            ))
+            completion(.failure(.recordingFailed))
             return
         }
-        practiceWindow = window
-        practiceRecordingStartedAt = nil
-        practiceImpactDetectedAt = nil
+        practiceStatus = status
+        practiceRecordingTimeOrigin = nil
+        pendingBoundary = nil
+        lastPublishedCaptureStatus = nil
         practiceClipCompletion = completion
-        startRecording()
+        publishPracticeStatus(.captureFrameRateChanged(captureFrameRate))
+        publishPracticeStatus(.searchingForPerson)
+        startRecording { [weak self] in
+            guard let self, let completion = self.practiceClipCompletion else { return }
+            self.clearAutomaticPracticeState()
+            self.practiceClipCompletion = nil
+            completion(.failure(.recordingFailed))
+        }
     }
 
     func cancelAutomaticPracticeRecording() {
-        guard practiceWindow != nil || practiceClipCompletion != nil else { return }
-        practiceWindow = nil
+        guard practiceClipCompletion != nil else { return }
         practiceClipCompletion = nil
-        practiceRecordingStartedAt = nil
-        practiceImpactDetectedAt = nil
         discardsNextRecording = movieOutput.isRecording
-        stopImpactMonitoring()
+        clearAutomaticPracticeState()
         stopRecording()
     }
     
@@ -384,38 +358,47 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
         session.commitConfiguration()
     }
     
-    /// 锁定相机硬件配置 120 FPS / 240 FPS
+    /// Prefer 240 FPS, then degrade explicitly to 120 or 60 FPS when the
+    /// active camera cannot sustain the faster recording format.
     private func configureHighFrameRate(for device: AVCaptureDevice) {
         do {
             try device.lockForConfiguration()
-            var selectedFormat: AVCaptureDevice.Format? = nil
-            var maxRate: Float64 = 30.0
-            
-            // 遍历相机支持的视频格式
-            for format in device.formats {
-                for range in format.videoSupportedFrameRateRanges {
-                    if range.maxFrameRate >= 120.0 {
-                        // 寻找能够支持 120fps 及以上且分辨率理想的格式
-                        let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-                        if dimensions.width >= 1280 { // 保证至少有 720p HD 高清
-                            if range.maxFrameRate > maxRate {
-                                maxRate = range.maxFrameRate
-                                selectedFormat = format
-                            }
-                        }
+            let preferredRates: [Float64] = [240, 120, 60]
+            var selection: (format: AVCaptureDevice.Format, rate: Float64)?
+
+            for targetRate in preferredRates {
+                let candidates = device.formats.filter { format in
+                    let dimensions = CMVideoFormatDescriptionGetDimensions(
+                        format.formatDescription
+                    )
+                    guard dimensions.width >= 1280 else { return false }
+                    return format.videoSupportedFrameRateRanges.contains { range in
+                        range.minFrameRate <= targetRate && range.maxFrameRate >= targetRate
                     }
                 }
+                if let format = candidates.max(by: { lhs, rhs in
+                    formatPreferenceScore(lhs) < formatPreferenceScore(rhs)
+                }) {
+                    selection = (format, targetRate)
+                    break
+                }
             }
-            
-            // 应用最高帧率格式
-            if let format = selectedFormat {
+
+            if let selection {
+                let format = selection.format
+                let selectedRate = selection.rate
                 device.activeFormat = format
-                let targetDuration = CMTime(value: 1, timescale: CMTimeScale(maxRate))
+                let targetDuration = CMTime(
+                    value: 1,
+                    timescale: CMTimeScale(selectedRate)
+                )
                 device.activeVideoMinFrameDuration = targetDuration
                 device.activeVideoMaxFrameDuration = targetDuration
-                print("Successfully locked camera in \(maxRate) FPS high speed mode.")
+                captureFrameRate = selectedRate
+                print("Successfully locked camera in \(selectedRate) FPS high speed mode.")
             } else {
-                print("This camera hardware does not support >=120 FPS slow motion recording.")
+                captureFrameRate = 30
+                print("This camera hardware does not support 60 FPS capture.")
             }
             
             device.unlockForConfiguration()
@@ -423,39 +406,74 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
             print("Failed to lock device configuration: \(error)")
         }
     }
+
+    private func formatPreferenceScore(_ format: AVCaptureDevice.Format) -> Int64 {
+        let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        let width = Int64(dimensions.width)
+        let height = Int64(dimensions.height)
+        let area = width * height
+        let fullHD = Int64(1920 * 1080)
+        if area <= fullHD {
+            return fullHD + area
+        }
+        return max(0, fullHD - (area - fullHD))
+    }
     
     // MARK: - 录制控制
     
     func startRecording() {
-        guard !movieOutput.isRecording else { return }
-        
-        let tempDir = NSTemporaryDirectory()
-        let fileName = "swing_record_\(UUID().uuidString).mp4"
-        let outputURL = URL(fileURLWithPath: tempDir).appendingPathComponent(fileName)
-        
-        movieOutput.startRecording(to: outputURL, recordingDelegate: self)
+        startRecording(onFailure: nil)
+    }
+
+    private func startRecording(onFailure: (() -> Void)?) {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            let videoConnection = self.movieOutput.connection(with: .video)
+            let hasActiveVideoConnection = videoConnection?.isEnabled == true &&
+                videoConnection?.isActive == true
+            guard CameraRecordingReadiness.canStart(
+                sessionIsRunning: self.session.isRunning,
+                hasActiveVideoConnection: hasActiveVideoConnection,
+                isAlreadyRecording: self.movieOutput.isRecording
+            ) else {
+                DispatchQueue.main.async {
+                    onFailure?()
+                }
+                return
+            }
+
+            let outputURL = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("swing_record_\(UUID().uuidString).mp4")
+            // Keep the session queue blocked through the transition while the
+            // delegate call remains on the model's main-actor context.
+            DispatchQueue.main.sync {
+                self.movieOutput.startRecording(to: outputURL, recordingDelegate: self)
+            }
+        }
     }
     
     func stopRecording() {
-        guard movieOutput.isRecording else { return }
-        movieOutput.stopRecording()
+        sessionQueue.async { [weak self] in
+            guard let self, self.movieOutput.isRecording else { return }
+            self.movieOutput.stopRecording()
+        }
     }
 
-    private func configureImpactAudio() {
-        guard audioInput == nil,
-              let microphone = AVCaptureDevice.default(for: .audio) else { return }
-        do {
-            let input = try AVCaptureDeviceInput(device: microphone)
-            if session.canAddInput(input) {
-                session.addInput(input)
-                audioInput = input
-            }
-            audioOutput.setSampleBufferDelegate(self, queue: audioQueue)
-            if session.canAddOutput(audioOutput) {
-                session.addOutput(audioOutput)
-            }
-        } catch {
-            print("Impact audio setup error: \(error)")
+    private func configureVisualOutput() {
+        videoDataOutput.alwaysDiscardsLateVideoFrames = true
+        videoDataOutput.videoSettings = [
+            kCVPixelBufferPixelFormatTypeKey as String:
+                Int(kCVPixelFormatType_32BGRA)
+        ]
+        videoDataOutput.setSampleBufferDelegate(self, queue: visionQueue)
+        guard session.canAddOutput(videoDataOutput) else {
+            visualOutputAvailable = false
+            return
+        }
+        session.addOutput(videoDataOutput)
+        visualOutputAvailable = true
+        if let connection = videoDataOutput.connection(with: .video) {
+            connection.videoOrientation = .portrait
         }
     }
 
@@ -464,52 +482,49 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        guard output === audioOutput, isImpactMonitoring,
-              let rms = audioRMS(from: sampleBuffer) else { return }
-        let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        guard timestamp.isValid else { return }
-        if audioTimeOrigin == nil { audioTimeOrigin = timestamp }
-        let elapsed = CMTimeGetSeconds(CMTimeSubtract(timestamp, audioTimeOrigin ?? timestamp))
-        guard elapsed.isFinite else { return }
-        if impactTrigger.ingest(rms: rms, at: elapsed) {
-            DispatchQueue.main.async {
-                self.lastImpactTime = elapsed
-                self.onImpactDetected?(elapsed)
-            }
+        guard output === videoDataOutput,
+              isVisualMonitoring,
+              pendingBoundary == nil,
+              var sample = livePoseSampler.sample(from: sampleBuffer) else {
+            return
         }
-    }
-
-    private func audioRMS(from sampleBuffer: CMSampleBuffer) -> Double? {
-        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return nil }
-        let byteCount = CMBlockBufferGetDataLength(blockBuffer)
-        guard byteCount >= MemoryLayout<Int16>.size else { return nil }
-        var samples = [Int16](repeating: 0, count: byteCount / MemoryLayout<Int16>.size)
-        let copyStatus = samples.withUnsafeMutableBytes {
-            CMBlockBufferCopyDataBytes(blockBuffer, atOffset: 0, dataLength: byteCount, destination: $0.baseAddress!)
+        if practiceRecordingTimeOrigin == nil {
+            practiceRecordingTimeOrigin = sample.time
         }
-        guard copyStatus == kCMBlockBufferNoErr else { return nil }
-        let meanSquare = samples.reduce(0.0) { partial, sample in
-            let normalized = Double(sample) / Double(Int16.max)
-            return partial + normalized * normalized
-        } / Double(samples.count)
-        return sqrt(meanSquare)
+        guard let origin = practiceRecordingTimeOrigin else { return }
+        sample = LivePoseMotionSample(
+            time: max(0, sample.time - origin),
+            personVisible: sample.personVisible,
+            normalizedWristSpeed: sample.normalizedWristSpeed,
+            normalizedTorsoSpeed: sample.normalizedTorsoSpeed,
+            backswingDirectionScore: sample.backswingDirectionScore,
+            followThroughScore: sample.followThroughScore
+        )
+        let update = liveSwingDetector.ingest(sample)
+        guard let boundary = update.boundary else {
+            publishDetectorState(update.state)
+            return
+        }
+        pendingBoundary = boundary
+        isVisualMonitoring = false
+        publishPracticeStatus(.finalizing)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.stopRecording()
+        }
     }
     
     // MARK: - AVCaptureFileOutputRecordingDelegate
     
     func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {
         print("Camera recording started: \(fileURL)")
-        guard let window = practiceWindow else { return }
-        practiceRecordingStartedAt = Date()
-        startImpactMonitoring { [weak self] elapsed in
-            guard let self,
-                  self.practiceImpactDetectedAt == nil,
-                  elapsed >= window.preImpact else { return }
-            self.practiceImpactDetectedAt = Date()
-            self.stopImpactMonitoring()
-            DispatchQueue.main.asyncAfter(deadline: .now() + window.postImpact + 0.12) {
-                self.stopRecording()
-            }
+        guard practiceClipCompletion != nil else { return }
+        visionQueue.async { [weak self] in
+            guard let self else { return }
+            self.livePoseSampler.reset()
+            self.liveSwingDetector.reset()
+            self.practiceRecordingTimeOrigin = nil
+            self.pendingBoundary = nil
+            self.isVisualMonitoring = true
         }
     }
     
@@ -518,19 +533,14 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
             print("Camera recording error: \(error.localizedDescription)")
         }
 
-        if let window = practiceWindow {
-            stopImpactMonitoring()
+        if practiceClipCompletion != nil {
             let completion = practiceClipCompletion
-            let recordingStartedAt = practiceRecordingStartedAt
-            let impactDetectedAt = practiceImpactDetectedAt
-            practiceWindow = nil
+            let boundary = pendingBoundary
             practiceClipCompletion = nil
-            practiceRecordingStartedAt = nil
-            practiceImpactDetectedAt = nil
+            clearAutomaticPracticeState()
             guard error == nil,
                   let completion,
-                  let recordingStartedAt,
-                  let impactDetectedAt else {
+                  let boundary else {
                 DispatchQueue.main.async {
                     completion?(.failure(.recordingFailed))
                 }
@@ -538,8 +548,7 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
             }
             exportPracticeClip(
                 sourceURL: outputFileURL,
-                impactTime: impactDetectedAt.timeIntervalSince(recordingStartedAt),
-                window: window,
+                boundary: boundary,
                 completion: completion
             )
             return
@@ -559,17 +568,14 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
 
     private func exportPracticeClip(
         sourceURL: URL,
-        impactTime: TimeInterval,
-        window: PracticeClipWindow,
-        completion: @escaping (Result<URL, PracticeSessionError>) -> Void
+        boundary: PracticeCaptureBoundary,
+        completion: @escaping (Result<RecordedPracticeClip, PracticeSessionError>) -> Void
     ) {
         let asset = AVURLAsset(url: sourceURL)
         let duration = CMTimeGetSeconds(asset.duration)
-        guard let range = PracticeClipRangePolicy.resolve(
-            impactTime: impactTime,
-            sourceDuration: duration,
-            window: window
-        ) else {
+        let start = max(0, boundary.swingStartTime - 1.0)
+        let end = min(duration, boundary.swingEndTime + 0.8)
+        guard duration.isFinite, start.isFinite, end.isFinite, end > start else {
             DispatchQueue.main.async { completion(.failure(.recordingFailed)) }
             return
         }
@@ -586,29 +592,58 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
         export.outputURL = destination
         export.outputFileType = .mp4
         export.timeRange = CMTimeRange(
-            start: CMTime(seconds: range.start, preferredTimescale: 600),
-            duration: CMTime(seconds: range.duration, preferredTimescale: 600)
+            start: CMTime(seconds: start, preferredTimescale: 600),
+            duration: CMTime(seconds: end - start, preferredTimescale: 600)
         )
-        export.exportAsynchronously { [weak self] in
+        export.exportAsynchronously {
             DispatchQueue.main.async {
                 guard export.status == .completed else {
                     completion(.failure(.recordingFailed))
                     return
                 }
                 try? FileManager.default.removeItem(at: sourceURL)
-                self?.lastImpactTime = nil
-                completion(.success(destination))
+                completion(.success(RecordedPracticeClip(
+                    url: destination,
+                    quality: boundary.quality
+                )))
             }
         }
+    }
+
+    private func publishDetectorState(_ state: LiveSwingTriggerState) {
+        switch state {
+        case .searchingForPerson:
+            publishPracticeStatus(.searchingForPerson)
+        case .ready, .cooldown:
+            publishPracticeStatus(.readyForSwing)
+        case .swingInProgress, .finishing:
+            publishPracticeStatus(.capturingSwing)
+        }
+    }
+
+    private func publishPracticeStatus(_ status: PracticeCaptureStatus) {
+        guard status != lastPublishedCaptureStatus else { return }
+        lastPublishedCaptureStatus = status
+        DispatchQueue.main.async { [weak self] in
+            self?.practiceStatus?(status)
+        }
+    }
+
+    private func clearAutomaticPracticeState() {
+        isVisualMonitoring = false
+        practiceRecordingTimeOrigin = nil
+        pendingBoundary = nil
+        lastPublishedCaptureStatus = nil
+        practiceStatus = nil
     }
 }
 
 extension CameraStateModel: PracticeClipRecording {
     func requestClip(
-        window: PracticeClipWindow,
-        completion: @escaping (Result<URL, PracticeSessionError>) -> Void
+        status: @escaping (PracticeCaptureStatus) -> Void,
+        completion: @escaping (Result<RecordedPracticeClip, PracticeSessionError>) -> Void
     ) {
-        startAutomaticPracticeRecording(window: window, completion: completion)
+        startAutomaticPracticeRecording(status: status, completion: completion)
     }
 
     func cancelPendingClip() {
@@ -631,11 +666,13 @@ struct CameraPreviewRepresentable: UIViewRepresentable {
     
     func updateUIView(_ uiView: CameraPreviewView, context: Context) {
         // 更新画面拉伸属性
-        uiView.previewLayer.connection?.videoOrientation = .portrait
-        if useFrontCamera {
-            uiView.previewLayer.connection?.isVideoMirrored = true // 前置需要镜像
-        } else {
-            uiView.previewLayer.connection?.isVideoMirrored = false
+        guard let connection = uiView.previewLayer.connection else { return }
+        connection.videoOrientation = .portrait
+        if connection.isVideoMirroringSupported {
+            // AVCaptureConnection throws an Objective-C exception if manual
+            // mirroring is assigned while automatic mirroring remains enabled.
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = useFrontCamera
         }
     }
 }

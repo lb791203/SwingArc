@@ -12,6 +12,9 @@ struct PracticeSessionView: View {
     @StateObject private var cameraState: CameraStateModel
     @StateObject private var sessionEngine: PracticeSessionEngine
     @State private var persistedLastClipURL: URL?
+    @State private var hasOpenedPersistedLastClip = false
+    @State private var clipPersistenceError: String?
+    @State private var clipPersistenceTask: Task<Void, Never>?
 
     init(
         view: PracticeCameraView,
@@ -26,7 +29,7 @@ struct PracticeSessionView: View {
         _sessionEngine = StateObject(
             wrappedValue: PracticeSessionEngine(
                 recorder: cameraState,
-                analyzer: OnDevicePracticeAnalyzer()
+                analysisDestination: .workspaceHandoff
             )
         )
     }
@@ -77,6 +80,8 @@ struct PracticeSessionView: View {
                 sessionEngine.start()
                 if preview == .paused {
                     sessionEngine.pause()
+                } else {
+                    sessionEngine.armNextCapture()
                 }
             } else if PracticePreviewConfiguration.startsReady(for: arguments) {
                 sessionEngine.confirmAlignment()
@@ -84,12 +89,54 @@ struct PracticeSessionView: View {
             #endif
         }
         .onDisappear {
+            clipPersistenceTask?.cancel()
             sessionEngine.pause()
             cameraState.stopSession()
         }
-        .onChange(of: sessionEngine.lastClipURL) { _, clipURL in
-            guard let clipURL else { return }
-            persistedLastClipURL = persistPracticeClip(clipURL)
+        .onChange(of: sessionEngine.lastClip) { _, clip in
+            guard let clip else { return }
+            clipPersistenceTask?.cancel()
+            clipPersistenceTask = Task {
+                do {
+                    let persisted = try await CapturedVideoStore(
+                        destinationDirectory: LocalProjectStore.videoDirectory()
+                    ).persist(
+                        sourceURL: clip.url,
+                        prefix: "practice",
+                        quality: clip.quality
+                    )
+                    guard !Task.isCancelled else { return }
+                    persistedLastClipURL = persisted.url
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    sessionEngine.reportClipPersistenceFailure()
+                    clipPersistenceError = "视频已经录制完成，但无法保存到本机以进行 AI 分析。请释放储存空间后重新录制。"
+                }
+            }
+        }
+        .onChange(of: persistedLastClipURL) { _, clipURL in
+            guard let clipURL, !hasOpenedPersistedLastClip else { return }
+            hasOpenedPersistedLastClip = true
+            onOpenLastClip(clipURL)
+        }
+        .alert(
+            "无法打开 AI 分析",
+            isPresented: Binding(
+                get: { clipPersistenceError != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        clipPersistenceError = nil
+                    }
+                }
+            )
+        ) {
+            Button("重新录制") {
+                clipPersistenceError = nil
+                sessionEngine.retryAfterClipPersistenceFailure()
+            }
+            Button("结束练习", role: .cancel, action: onClose)
+        } message: {
+            Text(clipPersistenceError ?? "请释放储存空间后重新录制。")
         }
     }
 
@@ -182,6 +229,13 @@ struct PracticeSessionView: View {
                     .multilineTextAlignment(.center)
                     .foregroundStyle(AnalysisTheme.proTourSecondaryText)
             }
+
+            if let frameRate = sessionEngine.captureFrameRate {
+                Text("CAPTURE · \(Int(frameRate.rounded())) FPS")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+            }
         }
         .frame(maxWidth: 560)
         .padding(.horizontal, 22)
@@ -198,23 +252,6 @@ struct PracticeSessionView: View {
         VStack(spacing: 12) {
             if case let .resultRibbon(_, _, feedback) = sessionEngine.state {
                 feedbackRibbon(feedback)
-            }
-
-            if let persistedLastClipURL {
-                Button {
-                    onOpenLastClip(persistedLastClipURL)
-                } label: {
-                    Label("查看上一球慢动作", systemImage: "play.rectangle")
-                        .font(.system(size: 16, weight: .bold))
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
-                .background(AnalysisTheme.proTourSurface.opacity(0.92), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(AnalysisTheme.proTourRaisedSurface, lineWidth: 1)
-                )
             }
 
             primaryControl
@@ -260,6 +297,13 @@ struct PracticeSessionView: View {
                 tint: AnalysisTheme.proTourSignal,
                 action: sessionEngine.confirmAlignment
             )
+        case .degraded where sessionEngine.canRetryAfterClipPersistenceFailure:
+            PracticePrimaryControlButton(
+                title: "重新录制",
+                systemImage: "arrow.clockwise",
+                tint: AnalysisTheme.proTourPaused,
+                action: sessionEngine.retryAfterClipPersistenceFailure
+            )
         default:
             switch PracticePresentationPolicy.primaryControl(for: sessionEngine.state) {
             case .start:
@@ -286,7 +330,10 @@ struct PracticeSessionView: View {
         switch sessionEngine.state {
         case .aligning: return "CAMERA ALIGNMENT"
         case .readyToStart: return "STANCE LOCKED"
-        case .waitingForImpact: return "AUTO CAPTURE ARMED"
+        case .searchingForPerson: return "FINDING PERSON"
+        case .readyForSwing: return "PERSON LOCKED"
+        case .capturingSwing: return "VISUAL SWING CAPTURE"
+        case .finalizingCapture: return "FINALIZING CLIP"
         case .processing: return "ON-DEVICE ANALYSIS"
         case .resultRibbon: return "PRIORITY FEEDBACK"
         case .paused: return "PRACTICE PAUSED"
@@ -300,7 +347,7 @@ struct PracticeSessionView: View {
             return AnalysisTheme.proTourSignal
         case .paused, .degraded, .failed:
             return AnalysisTheme.proTourPaused
-        case .waitingForImpact, .processing:
+        case .searchingForPerson, .readyForSwing, .capturingSwing, .finalizingCapture, .processing:
             return AnalysisTheme.proTourPrimaryText
         }
     }
@@ -333,16 +380,6 @@ struct PracticeSessionView: View {
         }
     }
 
-    private func persistPracticeClip(_ sourceURL: URL) -> URL? {
-        let destination = LocalProjectStore.videoDirectory()
-            .appendingPathComponent("practice-\(UUID().uuidString).mp4")
-        do {
-            try FileManager.default.copyItem(at: sourceURL, to: destination)
-            return destination
-        } catch {
-            return nil
-        }
-    }
 }
 
 private struct PracticePrimaryControlButton: View {

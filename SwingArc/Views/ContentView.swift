@@ -31,10 +31,10 @@ struct ContentView: View {
     @State private var showSpineAngle = false
     @State private var showGrid = false
 
-    @State private var showCameraView = false
     @State private var selectedPracticeView: PracticeCameraView?
     @State private var showProjectLibrary = false
     @State private var showVideoPicker = false
+    @State private var showManualCapture = false
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var showExportActions = false
     @State private var sharePayload: SharePayload?
@@ -52,7 +52,7 @@ struct ContentView: View {
             _showProjectLibrary = State(initialValue: true)
         }
         if PracticePreviewConfiguration.showsManualCapture(for: arguments) {
-            _showCameraView = State(initialValue: true)
+            _showManualCapture = State(initialValue: true)
         }
         #endif
     }
@@ -89,8 +89,6 @@ struct ContentView: View {
                 ProjectLibraryView(
                     projects: projects,
                     onOpen: openProject,
-                    onImport: { showVideoPicker = true },
-                    onRecord: { showCameraView = true },
                     onRename: renameProject,
                     onDelete: deleteProject,
                     onClose: { showProjectLibrary = false }
@@ -98,6 +96,7 @@ struct ContentView: View {
             } else {
                 PracticeHomeView(
                     onStartPractice: { selectedPracticeView = $0 },
+                    onManualCapture: { showManualCapture = true },
                     onImport: { showVideoPicker = true },
                     onOpenLibrary: { showProjectLibrary = true }
                 )
@@ -129,15 +128,6 @@ struct ContentView: View {
         .onChange(of: showSpineAngle) { _, _ in persistCurrentProject() }
         .onChange(of: showGrid) { _, _ in persistCurrentProject() }
         .onChange(of: feedbackConfiguration) { _, _ in persistCurrentProject() }
-        .fullScreenCover(isPresented: $showCameraView) {
-            CameraView { recordedURL in
-                showCameraView = false
-                loadVideoFromURL(
-                    persistVideoIfNeeded(recordedURL),
-                    origin: .capturedClipSaved
-                )
-            }
-        }
         .fullScreenCover(item: $selectedPracticeView) { practiceView in
             PracticeSessionView(
                 view: practiceView,
@@ -150,10 +140,15 @@ struct ContentView: View {
                     loadVideoFromURL(
                         clipURL,
                         practiceView: practiceView,
-                        origin: .projectReopened
+                        origin: .capturedClipSaved
                     )
                 }
             )
+        }
+        .fullScreenCover(isPresented: $showManualCapture) {
+            CameraView { temporaryURL in
+                persistCapturedVideo(temporaryURL)
+            }
         }
         .sheet(item: $sharePayload) { payload in
             ShareSheet(items: [payload.url])
@@ -217,13 +212,37 @@ struct ContentView: View {
                         loadVideoFromURL(videoURL, origin: .importCompleted)
                     }
                 } catch {
-                    DispatchQueue.main.async { statusMessage = "视频导入失败：\(error.localizedDescription)" }
+                    DispatchQueue.main.async {
+                        statusMessage = "视频导入失败：\(error.localizedDescription)"
+                    }
                 }
             case .failure(let error):
-                DispatchQueue.main.async { statusMessage = "无法读取所选视频：\(error.localizedDescription)" }
+                DispatchQueue.main.async {
+                    statusMessage = "无法读取所选视频：\(error.localizedDescription)"
+                }
             default:
                 break
             }
+        }
+    }
+
+    private func persistCapturedVideo(_ temporaryURL: URL) {
+        isExporting = true
+        Task {
+            do {
+                let clip = try await CapturedVideoStore(
+                    destinationDirectory: LocalProjectStore.videoDirectory()
+                ).persist(
+                    sourceURL: temporaryURL,
+                    prefix: "manual",
+                    quality: .complete
+                )
+                showManualCapture = false
+                loadVideoFromURL(clip.url, origin: .capturedClipSaved)
+            } catch {
+                statusMessage = "录像已经完成，但保存失败。请检查本机储存空间后重试。"
+            }
+            isExporting = false
         }
     }
 
@@ -401,21 +420,6 @@ struct ContentView: View {
                 statusMessage = error.localizedDescription
             }
             isExporting = false
-        }
-    }
-
-    private func persistVideoIfNeeded(_ sourceURL: URL) -> URL {
-        guard sourceURL.isFileURL else { return sourceURL }
-        let directory = LocalProjectStore.videoDirectory()
-        guard !sourceURL.path.hasPrefix(directory.path) else { return sourceURL }
-        let pathExtension = sourceURL.pathExtension.isEmpty ? "mov" : sourceURL.pathExtension
-        let destination = directory.appendingPathComponent("recorded-\(UUID().uuidString).\(pathExtension)")
-        do {
-            try FileManager.default.copyItem(at: sourceURL, to: destination)
-            return destination
-        } catch {
-            statusMessage = "录制视频保存失败：\(error.localizedDescription)"
-            return sourceURL
         }
     }
 

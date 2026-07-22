@@ -5,14 +5,11 @@ import UIKit
 struct ProjectLibraryView: View {
     let projects: [LocalProjectSummary]
     let onOpen: (LocalProjectSummary) -> Void
-    let onImport: () -> Void
-    let onRecord: () -> Void
     let onRename: (LocalProjectSummary, String) -> Void
     let onDelete: (LocalProjectSummary) -> Void
     var onClose: (() -> Void)? = nil
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @State private var showsNewProjectSheet = false
     @State private var projectToRename: LocalProjectSummary?
     @State private var projectToDelete: LocalProjectSummary?
     @State private var renameText = ""
@@ -44,45 +41,10 @@ struct ProjectLibraryView: View {
                             .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showsNewProjectSheet = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .fontWeight(.semibold)
-                            .frame(width: 42, height: 42)
-                            .foregroundStyle(AnalysisTheme.proTourBackground)
-                            .background(AnalysisTheme.proTourSignal, in: Circle())
-                    }
-                    .accessibilityLabel("新建分析项目")
-                }
             }
         }
         .tint(AnalysisTheme.proTourSignal)
         .preferredColorScheme(.dark)
-        .onAppear {
-            #if DEBUG
-            if PracticePreviewConfiguration.showsNewProject(
-                for: ProcessInfo.processInfo.arguments
-            ) {
-                showsNewProjectSheet = true
-            }
-            #endif
-        }
-        .sheet(isPresented: $showsNewProjectSheet) {
-            NewProjectSheet(
-                onImport: {
-                    showsNewProjectSheet = false
-                    onImport()
-                },
-                onRecord: {
-                    showsNewProjectSheet = false
-                    onRecord()
-                }
-            )
-            .presentationDetents([.height(280)])
-            .presentationDragIndicator(.visible)
-        }
         .alert("重命名项目", isPresented: Binding(
             get: { projectToRename != nil },
             set: { if !$0 { projectToRename = nil } }
@@ -129,7 +91,7 @@ struct ProjectLibraryView: View {
                 .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                 .padding(.top, 10)
 
-            Text("导入一段影片，逐帧定位你的 P1–P8。")
+            Text("这里会保存已完成分析的挥杆影片与标注。")
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(AnalysisTheme.proTourSecondaryText)
                 .padding(.top, 8)
@@ -151,24 +113,6 @@ struct ProjectLibraryView: View {
             }
 
             Spacer()
-
-            VStack(spacing: 12) {
-                LibraryActionButton(
-                    title: "导入影片分析",
-                    detail: "慢动作 · P1–P8 · 手动画线",
-                    systemImage: "arrow.down.to.line.compact",
-                    isPrimary: true,
-                    action: onImport
-                )
-                LibraryActionButton(
-                    title: "录制新影片",
-                    detail: "使用本机高速相机",
-                    systemImage: "video",
-                    isPrimary: false,
-                    action: onRecord
-                )
-            }
-            .padding(.bottom, 12)
         }
         .padding(.horizontal, 24)
     }
@@ -210,123 +154,6 @@ struct ProjectLibraryView: View {
             .padding(24)
             .padding(.top, 22)
         }
-    }
-}
-
-private struct LibraryActionButton: View {
-    let title: String
-    let detail: String
-    let systemImage: String
-    let isPrimary: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 20, weight: .bold))
-                    .frame(width: 48, height: 48)
-                    .foregroundStyle(isPrimary ? AnalysisTheme.proTourBackground : AnalysisTheme.proTourSignal)
-                    .background(
-                        isPrimary ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourRaisedSurface,
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    )
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.system(size: 18, weight: .bold))
-                    Text(detail)
-                        .font(.system(size: 13, weight: .medium))
-                        .opacity(0.7)
-                }
-
-                Spacer()
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 16, weight: .bold))
-            }
-            .foregroundStyle(isPrimary ? AnalysisTheme.proTourBackground : AnalysisTheme.proTourPrimaryText)
-            .padding(.horizontal, 16)
-            .frame(maxWidth: .infinity, minHeight: 76)
-            .background(
-                isPrimary ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourSurface,
-                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
-            )
-            .overlay {
-                if !isPrimary {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(AnalysisTheme.proTourRaisedSurface)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-struct NewProjectSheet: View {
-    let onImport: () -> Void
-    let onRecord: () -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 12) {
-                Button(action: onImport) {
-                    NewProjectActionLabel(
-                        title: "导入视频",
-                        subtitle: "从照片选择已有视频",
-                        systemImage: "photo.on.rectangle"
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Button(action: onRecord) {
-                    NewProjectActionLabel(
-                        title: "录制视频",
-                        subtitle: "使用高速相机录制",
-                        systemImage: "video"
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(16)
-            .background(AnalysisTheme.proTourBackground.ignoresSafeArea())
-            .navigationTitle("新建项目")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
-                }
-            }
-        }
-        .preferredColorScheme(.dark)
-    }
-}
-
-private struct NewProjectActionLabel: View {
-    let title: String
-    let subtitle: String
-    let systemImage: String
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: systemImage)
-                .font(.title3)
-                .frame(width: 44, height: 44)
-                .foregroundStyle(AnalysisTheme.proTourSignal)
-                .background(AnalysisTheme.proTourRaisedSurface, in: RoundedRectangle(cornerRadius: 12))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline)
-                Text(subtitle).font(.subheadline).foregroundStyle(AnalysisTheme.proTourSecondaryText)
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .foregroundStyle(AnalysisTheme.proTourSecondaryText)
-        }
-        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
-        .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 72)
-        .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(AnalysisTheme.proTourRaisedSurface))
     }
 }
 

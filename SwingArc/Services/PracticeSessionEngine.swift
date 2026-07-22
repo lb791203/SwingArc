@@ -37,10 +37,18 @@ enum PracticeSessionError: Error, Equatable {
     case analysisFailed
 }
 
+/// A captured clip has one Vision-analysis owner. Practice feedback stays in
+/// the camera session, while a workspace handoff defers the same work to the
+/// replay screen that is about to open.
+enum PracticeAnalysisDestination: Equatable {
+    case practiceFeedback
+    case workspaceHandoff
+}
+
 protocol PracticeClipRecording: AnyObject {
     func requestClip(
-        window: PracticeClipWindow,
-        completion: @escaping (Result<URL, PracticeSessionError>) -> Void
+        status: @escaping (PracticeCaptureStatus) -> Void,
+        completion: @escaping (Result<RecordedPracticeClip, PracticeSessionError>) -> Void
     )
 
     func cancelPendingClip()
@@ -58,24 +66,39 @@ protocol PracticeAnalyzing: AnyObject {
     )
 }
 
-/// Serializes one impact at a time. Camera and audio implementations are
-/// injected so this stateful policy can be tested without hardware.
+/// Serializes one visually detected swing at a time. Camera and Vision
+/// implementations are injected so this stateful policy can be tested without
+/// hardware.
 final class PracticeSessionEngine: ObservableObject {
     private let recorder: PracticeClipRecording
-    private let analyzer: PracticeAnalyzing
+    private let analyzer: PracticeAnalyzing?
+    private let analysisDestination: PracticeAnalysisDestination
     @Published private(set) var state: PracticeSessionState = .failed(
         view: .downTheLine,
         message: "练习尚未开始"
     )
-    @Published private(set) var lastClipURL: URL?
+    @Published private(set) var lastClip: RecordedPracticeClip?
+    @Published private(set) var captureFrameRate: Double?
     private var isCaptureArmed = false
+    private var clipPersistenceRetry: (view: PracticeCameraView, swingCount: Int)?
 
-    init(recorder: PracticeClipRecording, analyzer: PracticeAnalyzing) {
+    var canRetryAfterClipPersistenceFailure: Bool {
+        clipPersistenceRetry != nil
+    }
+
+    init(
+        recorder: PracticeClipRecording,
+        analyzer: PracticeAnalyzing? = nil,
+        analysisDestination: PracticeAnalysisDestination = .practiceFeedback
+    ) {
         self.recorder = recorder
         self.analyzer = analyzer
+        self.analysisDestination = analysisDestination
     }
 
     func begin(view: PracticeCameraView) {
+        lastClip = nil
+        captureFrameRate = nil
         state = .aligning(view: view)
     }
 
@@ -101,49 +124,63 @@ final class PracticeSessionEngine: ObservableObject {
         state = PracticeSessionReducer.reduce(state: state, event: .resultRibbonElapsed)
     }
 
-    /// Arms one microphone-triggered capture while the state remains visibly
-    /// in waiting mode. The recorder owns the pre/post-impact buffering;
-    /// analysis begins only when it returns an actual trimmed local clip.
+    /// Arms one visual capture while the state remains visibly in the person
+    /// search / swing-ready flow. Analysis begins only when the recorder
+    /// returns an actual trimmed local clip.
     func armNextCapture() {
-        guard case .waitingForImpact = state, !isCaptureArmed else { return }
+        guard activeCaptureIdentity != nil, !isCaptureArmed else { return }
         isCaptureArmed = true
-        recorder.requestClip(window: .standard) { [weak self] recordingResult in
+        recorder.requestClip(status: { [weak self] status in
+            self?.publish(status)
+        }) { [weak self] recordingResult in
             guard let self else { return }
             self.isCaptureArmed = false
-            guard case let .waitingForImpact(view, _) = self.state else { return }
+            guard let (view, _) = self.activeCaptureIdentity else { return }
             switch recordingResult {
-            case let .success(clipURL):
-                self.lastClipURL = clipURL
-                self.state = PracticeSessionReducer.reduce(
-                    state: self.state,
-                    event: .impactDetected
-                )
-                self.analyze(clipURL: clipURL, view: view)
+            case let .success(clip):
+                self.acceptRecordedClip(clip, view: view)
             case .failure:
                 self.state = .degraded(view: view, message: "本球录制失败，请检查储存空间或相机权限")
             }
         }
     }
 
-    func ingestImpact(time _: TimeInterval) {
-        guard case let .waitingForImpact(view, _) = state, !isCaptureArmed else { return }
-        isCaptureArmed = true
-        state = PracticeSessionReducer.reduce(state: state, event: .impactDetected)
-        recorder.requestClip(window: .standard) { [weak self] recordingResult in
-            guard let self else { return }
-            self.isCaptureArmed = false
-            switch recordingResult {
-            case let .success(clipURL):
-                self.lastClipURL = clipURL
-                self.analyze(clipURL: clipURL, view: view)
-            case .failure:
-                self.state = .degraded(view: view, message: "本球录制失败，请检查储存空间或相机权限")
-            }
+    /// The file was captured but the private, stable copy required by the
+    /// analysis workspace could not be made. Keep the camera session visible
+    /// and offer a deliberate retry instead of leaving it in `processing`.
+    func reportClipPersistenceFailure() {
+        guard analysisDestination == .workspaceHandoff,
+              case let .processing(view, swingCount) = state else {
+            return
         }
+        clipPersistenceRetry = (view, swingCount)
+        state = .degraded(
+            view: view,
+            message: "录制已完成，但无法保存用于 AI 分析的视频。请释放储存空间后重新录制。"
+        )
+    }
+
+    func retryAfterClipPersistenceFailure() {
+        guard let retry = clipPersistenceRetry else { return }
+        clipPersistenceRetry = nil
+        state = .searchingForPerson(view: retry.view, swingCount: retry.swingCount)
+        armNextCapture()
+    }
+
+    private func acceptRecordedClip(_ clip: RecordedPracticeClip, view: PracticeCameraView) {
+        lastClip = clip
+        state = PracticeSessionReducer.reduce(state: state, event: .clipCaptured)
+
+        guard analysisDestination == .practiceFeedback else { return }
+        guard analyzer != nil else {
+            state = .degraded(view: view, message: "本球未能分析，影片已保留")
+            return
+        }
+        analyze(clipURL: clip.url, view: view)
     }
 
     private func analyze(clipURL: URL, view: PracticeCameraView) {
-        analyzer.analyze(clipURL: clipURL, view: view) { [weak self] analysisResult in
+        analyzer?.analyze(clipURL: clipURL, view: view) { [weak self] analysisResult in
             guard let self else { return }
             switch analysisResult {
             case let .success(feedback):
@@ -163,6 +200,37 @@ final class PracticeSessionEngine: ObservableObject {
             guard let self, case .resultRibbon = self.state else { return }
             self.advanceResultRibbon()
             self.armNextCapture()
+        }
+    }
+
+    private func publish(_ status: PracticeCaptureStatus) {
+        guard let (view, _) = activeCaptureIdentity else { return }
+        switch status {
+        case .searchingForPerson:
+            state = PracticeSessionReducer.reduce(state: state, event: .captureSearching)
+        case .readyForSwing:
+            state = PracticeSessionReducer.reduce(state: state, event: .captureReady)
+        case .capturingSwing:
+            state = PracticeSessionReducer.reduce(state: state, event: .swingStarted)
+        case .finalizing:
+            state = PracticeSessionReducer.reduce(state: state, event: .clipFinalizing)
+        case let .captureFrameRateChanged(rate):
+            captureFrameRate = rate
+        case let .visualUnavailable(message):
+            isCaptureArmed = false
+            state = .degraded(view: view, message: message)
+        }
+    }
+
+    private var activeCaptureIdentity: (PracticeCameraView, Int)? {
+        switch state {
+        case let .searchingForPerson(view, swingCount),
+             let .readyForSwing(view, swingCount),
+             let .capturingSwing(view, swingCount),
+             let .finalizingCapture(view, swingCount):
+            return (view, swingCount)
+        default:
+            return nil
         }
     }
 }

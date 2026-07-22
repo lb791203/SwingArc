@@ -10,18 +10,18 @@ struct PracticePresentationSmoke {
         )
         precondition(
             PracticePresentationPolicy.primaryControl(
-                for: .waitingForImpact(view: .downTheLine, swingCount: 0)
+                for: .readyForSwing(view: .downTheLine, swingCount: 0)
             ) == .pause
         )
         precondition(
             PracticePresentationPolicy.remoteStatus(
                 for: .processing(view: .faceOn, swingCount: 4)
-            ) == "第 4 球分析中"
+            ) == "ANALYSING · SHOT 04"
         )
         precondition(
             PracticePresentationPolicy.remoteStatus(
                 for: .aligning(view: .faceOn)
-            ) == "请站入取景框"
+            ) == "ALIGNMENT"
         )
     }
 }

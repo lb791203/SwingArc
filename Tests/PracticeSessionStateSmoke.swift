@@ -7,8 +7,11 @@ struct PracticeSessionStateSmoke {
         state = PracticeSessionReducer.reduce(state: state, event: .alignmentConfirmed)
         precondition(state == .readyToStart(view: .downTheLine))
         state = PracticeSessionReducer.reduce(state: state, event: .startTapped)
-        precondition(state == .waitingForImpact(view: .downTheLine, swingCount: 0))
-        state = PracticeSessionReducer.reduce(state: state, event: .impactDetected)
+        precondition(state == .searchingForPerson(view: .downTheLine, swingCount: 0))
+        state = PracticeSessionReducer.reduce(state: state, event: .captureReady)
+        state = PracticeSessionReducer.reduce(state: state, event: .swingStarted)
+        state = PracticeSessionReducer.reduce(state: state, event: .clipFinalizing)
+        state = PracticeSessionReducer.reduce(state: state, event: .clipCaptured)
         precondition(state == .processing(view: .downTheLine, swingCount: 1))
         state = PracticeSessionReducer.reduce(
             state: state,
@@ -20,10 +23,10 @@ struct PracticeSessionStateSmoke {
             feedback: .unresolved
         ))
         state = PracticeSessionReducer.reduce(state: state, event: .resultRibbonElapsed)
-        precondition(state == .waitingForImpact(view: .downTheLine, swingCount: 1))
+        precondition(state == .searchingForPerson(view: .downTheLine, swingCount: 1))
         state = PracticeSessionReducer.reduce(state: state, event: .pauseTapped)
         precondition(state == .paused(view: .downTheLine, swingCount: 1))
         state = PracticeSessionReducer.reduce(state: state, event: .resumeTapped)
-        precondition(state == .waitingForImpact(view: .downTheLine, swingCount: 1))
+        precondition(state == .searchingForPerson(view: .downTheLine, swingCount: 1))
     }
 }
