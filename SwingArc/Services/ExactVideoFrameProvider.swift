@@ -121,3 +121,32 @@ final class ExactVideoFrameProvider {
         )
     }
 }
+
+struct ExactVideoFrameSessionMetadata: Sendable {
+    let frameCount: Int
+    let timelineSHA256: String
+    let orientedWidth: Int
+    let orientedHeight: Int
+}
+
+actor ExactVideoFrameSession {
+    private var provider: ExactVideoFrameProvider?
+
+    func open(url: URL) throws -> ExactVideoFrameSessionMetadata {
+        let provider = try ExactVideoFrameProvider.load(url: url)
+        self.provider = provider
+        return .init(
+            frameCount: provider.frameCount,
+            timelineSHA256: provider.timelineSHA256,
+            orientedWidth: Int(provider.orientedSize.width.rounded()),
+            orientedHeight: Int(provider.orientedSize.height.rounded())
+        )
+    }
+
+    func frame(at sourceFrameIndex: Int) throws -> ExactVideoFrame {
+        guard let provider else {
+            throw ExactVideoFrameProviderError.timelineUnavailable
+        }
+        return try provider.frame(at: sourceFrameIndex)
+    }
+}

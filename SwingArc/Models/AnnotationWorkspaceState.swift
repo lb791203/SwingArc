@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 enum AnnotationStep: String, CaseIterable {
     case setup
@@ -282,5 +283,89 @@ enum AnnotationFrameQueueBuilder {
         return frames.filter {
             (0..<frameCount).contains($0)
         }.sorted()
+    }
+}
+
+enum AnnotationStepPresentation {
+    static func title(for step: AnnotationStep) -> String {
+        switch step {
+        case .setup: return "任务资料"
+        case .stages: return "P1–P8"
+        case .landmarks: return "关键点"
+        case .adjudication: return "分歧裁定"
+        case .export: return "冻结与导出"
+        }
+    }
+}
+
+enum AnnotationLandmarkCatalog {
+    static let body = [
+        "head", "leftShoulder", "rightShoulder",
+        "leftElbow", "rightElbow",
+        "leftWrist", "rightWrist", "handCenter",
+        "leftHip", "rightHip",
+        "leftKnee", "rightKnee",
+        "leftAnkle", "rightAnkle"
+    ]
+
+    static let golf = [
+        "grip", "shaftStart", "shaftEnd", "clubhead", "ball"
+    ]
+}
+
+enum AnnotationFrameStepPolicy {
+    static func target(
+        current: Int,
+        delta: Int,
+        frameCount: Int
+    ) -> Int {
+        max(0, min(max(0, frameCount - 1), current + delta))
+    }
+}
+
+enum AnnotationCanvasGeometry {
+    static func aspectFitRect(
+        imageSize: CGSize,
+        containerSize: CGSize
+    ) -> CGRect {
+        guard imageSize.width > 0,
+              imageSize.height > 0,
+              containerSize.width > 0,
+              containerSize.height > 0 else {
+            return .zero
+        }
+        let scale = min(
+            containerSize.width / imageSize.width,
+            containerSize.height / imageSize.height
+        )
+        let size = CGSize(
+            width: imageSize.width * scale,
+            height: imageSize.height * scale
+        )
+        return CGRect(
+            x: (containerSize.width - size.width) / 2,
+            y: (containerSize.height - size.height) / 2,
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    static func normalizedPoint(
+        location: CGPoint,
+        imageRect: CGRect
+    ) -> CGPoint {
+        guard imageRect.width > 0, imageRect.height > 0 else {
+            return .zero
+        }
+        return CGPoint(
+            x: min(
+                1,
+                max(0, (location.x - imageRect.minX) / imageRect.width)
+            ),
+            y: min(
+                1,
+                max(0, (location.y - imageRect.minY) / imageRect.height)
+            )
+        )
     }
 }

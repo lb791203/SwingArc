@@ -3,7 +3,7 @@ import Foundation
 
 @main
 struct AnnotationSourceFrameTimelineSmoke {
-    static func main() throws {
+    static func main() async throws {
         let synthetic = SourceFrameTimeline(presentationTimes: [
             CMTime(value: 0, timescale: 240),
             CMTime(value: 1, timescale: 240),
@@ -32,5 +32,12 @@ struct AnnotationSourceFrameTimelineSmoke {
         precondition(first.image.width == last.image.width)
         precondition(first.image.height == last.image.height)
         print("TIMELINE \(provider.timelineSHA256) \(provider.frameCount)")
+
+        let session = ExactVideoFrameSession()
+        let metadata = try await session.open(url: provider.url)
+        precondition(metadata.frameCount == provider.frameCount)
+        precondition(metadata.timelineSHA256 == provider.timelineSHA256)
+        let sessionFirst = try await session.frame(at: 0)
+        precondition(sessionFirst.sourceFrameIndex == 0)
     }
 }
