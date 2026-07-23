@@ -1,0 +1,162 @@
+import Darwin
+import AVFoundation
+import Foundation
+
+struct RealVideoStageDiagnostic: Encodable {
+    let stage: String
+    let sourceFrameIndex: Int?
+    let time: Double?
+    let confidence: Double
+    let status: String
+    let hasClubEvidence: Bool
+    let hasBallEvidence: Bool
+    let hasBallChangeEvidence: Bool
+}
+
+struct RealVideoStageDiagnosticReport: Encodable {
+    let video: String
+    let captureFrameRate: Double
+    let sourceFrameRate: Double?
+    let timelineInterpretation: String
+    let motionBlurHandling: String
+    let outcome: String
+    let elapsedSeconds: Double?
+    let adaptiveWindowStart: Double?
+    let adaptiveWindowEnd: Double?
+    let stages: [RealVideoStageDiagnostic]
+    let observationFrameCount: Int
+    let measuredLandmarkFrameCounts: [String: Int]
+    let trackingDiagnostics: PrimaryGolferTrackingDiagnostics
+}
+
+@main
+struct RealVideoStageDiagnostics {
+    static func main() async throws {
+        guard (2...3).contains(CommandLine.arguments.count) else {
+            fputs(
+                "usage: real-video-stage-diagnostics <video-path> [capture-fps]\n",
+                stderr
+            )
+            exit(EXIT_FAILURE)
+        }
+
+        let captureFrameRate: Double
+        if CommandLine.arguments.count == 3 {
+            guard let parsed = Double(CommandLine.arguments[2]),
+                  parsed.isFinite,
+                  parsed > 0 else {
+                fputs("capture-fps must be a positive number\n", stderr)
+                exit(EXIT_FAILURE)
+            }
+            captureFrameRate = parsed
+        } else {
+            captureFrameRate = 240
+        }
+
+        let videoURL = URL(fileURLWithPath: CommandLine.arguments[1])
+        let asset = AVURLAsset(url: videoURL)
+        let metadataSourceFrameRate: Double?
+        if let track = try? await asset.loadTracks(withMediaType: .video).first,
+           let nominalFrameRate = try? await track.load(.nominalFrameRate) {
+            metadataSourceFrameRate = Double(nominalFrameRate)
+        } else {
+            metadataSourceFrameRate = nil
+        }
+        let gate = AnalysisRunGate()
+        let runID = gate.begin()
+        let engine = SwingVideoAnalysisEngine(
+            motionBlurDisposition: .warning
+        )
+        let outcome = engine.analyze(
+            url: videoURL,
+            runID: runID,
+            gate: gate,
+            progress: { _ in }
+        )
+
+        let report: RealVideoStageDiagnosticReport
+        switch outcome {
+        case let .completed(output):
+            let stages = SwingStage.pStages.enumerated().map { index, stage in
+                let detection = output.result.detections.first {
+                    $0.stage == stage
+                }
+                return RealVideoStageDiagnostic(
+                    stage: "P\(index + 1)",
+                    sourceFrameIndex: detection?.sourceFrameIndex,
+                    time: detection?.time,
+                    confidence: detection?.confidence ?? 0,
+                    status: detection?.status.rawValue ?? "unresolved",
+                    hasClubEvidence: detection?.hasClubEvidence ?? false,
+                    hasBallEvidence: detection?.hasBallEvidence ?? false,
+                    hasBallChangeEvidence: detection?.hasBallChangeEvidence ?? false
+                )
+            }
+            var measuredCounts: [String: Int] = [:]
+            for landmark in SwingLandmark.allCases {
+                measuredCounts[landmark.rawValue] = output.observationFrames.filter {
+                    $0.landmarks[landmark]?.isMeasured == true
+                }.count
+            }
+            report = RealVideoStageDiagnosticReport(
+                video: videoURL.lastPathComponent,
+                captureFrameRate: captureFrameRate,
+                sourceFrameRate: output.sourceFrameRate,
+                timelineInterpretation: "processed slow-motion playback timeline",
+                motionBlurHandling: "warning-only development diagnostic",
+                outcome: "completed",
+                elapsedSeconds: output.elapsedSeconds,
+                adaptiveWindowStart: output.adaptiveWindow.startTime,
+                adaptiveWindowEnd: output.adaptiveWindow.endTime,
+                stages: stages,
+                observationFrameCount: output.observationFrames.count,
+                measuredLandmarkFrameCounts: measuredCounts,
+                trackingDiagnostics: output.trackingDiagnostics
+            )
+        case let .failed(reason):
+            report = RealVideoStageDiagnosticReport(
+                video: videoURL.lastPathComponent,
+                captureFrameRate: captureFrameRate,
+                sourceFrameRate: metadataSourceFrameRate,
+                timelineInterpretation: "processed slow-motion playback timeline",
+                motionBlurHandling: "warning-only development diagnostic",
+                outcome: "failed: \(reason)",
+                elapsedSeconds: nil,
+                adaptiveWindowStart: nil,
+                adaptiveWindowEnd: nil,
+                stages: [],
+                observationFrameCount: 0,
+                measuredLandmarkFrameCounts: [:],
+                trackingDiagnostics: engine.latestTrackingDiagnostics
+            )
+        case .cancelled:
+            report = RealVideoStageDiagnosticReport(
+                video: videoURL.lastPathComponent,
+                captureFrameRate: captureFrameRate,
+                sourceFrameRate: metadataSourceFrameRate,
+                timelineInterpretation: "processed slow-motion playback timeline",
+                motionBlurHandling: "warning-only development diagnostic",
+                outcome: "cancelled",
+                elapsedSeconds: nil,
+                adaptiveWindowStart: nil,
+                adaptiveWindowEnd: nil,
+                stages: [],
+                observationFrameCount: 0,
+                measuredLandmarkFrameCounts: [:],
+                trackingDiagnostics: engine.latestTrackingDiagnostics
+            )
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        FileHandle.standardOutput.write(try encoder.encode(report))
+        FileHandle.standardOutput.write(Data("\n".utf8))
+
+        switch outcome {
+        case .failed(.frameExtractionFailed), .cancelled:
+            exit(EXIT_FAILURE)
+        case .completed, .failed:
+            break
+        }
+    }
+}

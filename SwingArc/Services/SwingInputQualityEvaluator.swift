@@ -36,6 +36,11 @@ enum SwingInputQualityIssue: String, Codable, Equatable {
     case motionBlur
 }
 
+enum SwingMotionBlurDisposition {
+    case blocking
+    case warning
+}
+
 struct SwingInputQualityReport: Equatable {
     let blockingIssues: [SwingInputQualityIssue]
     let warnings: [SwingInputQualityIssue]
@@ -153,7 +158,10 @@ enum SwingInputQualityEvaluator {
         )
     }
 
-    static func evaluate(_ signal: SwingInputQualitySignals) -> SwingInputQualityReport {
+    static func evaluate(
+        _ signal: SwingInputQualitySignals,
+        motionBlurDisposition: SwingMotionBlurDisposition = .blocking
+    ) -> SwingInputQualityReport {
         var blocking: [SwingInputQualityIssue] = []
         var warnings: [SwingInputQualityIssue] = []
 
@@ -174,7 +182,12 @@ enum SwingInputQualityEvaluator {
             blocking.append(.cameraMoved)
         }
         if signal.medianBlurScore < 0.35 {
-            blocking.append(.motionBlur)
+            switch motionBlurDisposition {
+            case .blocking:
+                blocking.append(.motionBlur)
+            case .warning:
+                warnings.append(.motionBlur)
+            }
         }
 
         return SwingInputQualityReport(

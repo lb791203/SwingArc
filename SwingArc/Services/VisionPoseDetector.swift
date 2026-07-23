@@ -772,8 +772,13 @@ final class FineFrameImageCache {
 final class SwingVideoAnalysisEngine: @unchecked Sendable {
     typealias ProgressHandler = @Sendable (SwingAnalysisProgressUpdate) -> Void
 
+    private let motionBlurDisposition: SwingMotionBlurDisposition
     private let diagnosticsLock = NSLock()
     private var storedTrackingDiagnostics = PrimaryGolferTrackingDiagnostics()
+
+    init(motionBlurDisposition: SwingMotionBlurDisposition = .blocking) {
+        self.motionBlurDisposition = motionBlurDisposition
+    }
 
     var latestTrackingDiagnostics: PrimaryGolferTrackingDiagnostics {
         diagnosticsLock.lock()
@@ -994,7 +999,9 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 var firstFailureDiagnostics: PrimaryGolferTrackingDiagnostics?
                 for attempt in rankedAttempts {
                     guard gate.isActive(runID) else { return .cancelled }
-                    let candidateEngine = SwingVideoAnalysisEngine()
+                    let candidateEngine = SwingVideoAnalysisEngine(
+                        motionBlurDisposition: motionBlurDisposition
+                    )
                     let outcome = candidateEngine.analyze(
                         url: url,
                         runID: runID,
@@ -1051,7 +1058,10 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             frames: qualityFrames,
             clubCoverage: nil
         )
-        let qualityReport = SwingInputQualityEvaluator.evaluate(qualitySignals)
+        let qualityReport = SwingInputQualityEvaluator.evaluate(
+            qualitySignals,
+            motionBlurDisposition: motionBlurDisposition
+        )
         guard qualityReport.isSupported else {
             return activeFailure(
                 .unsupportedInput(qualityReport.blockingIssues),
