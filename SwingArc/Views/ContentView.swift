@@ -19,7 +19,6 @@ struct ContentView: View {
     @State private var activeProject: LocalProjectSummary?
     @State private var currentProjectURL: URL?
     @State private var practiceCameraView: PracticeCameraView?
-    @State private var feedbackConfiguration: FeedbackConfiguration?
     @State private var saveStatus: WorkspaceSaveStatus = .idle
 
     @State private var drawings: [DrawingElement] = []
@@ -72,18 +71,13 @@ struct ContentView: View {
                     showSpineAngle: $showSpineAngle,
                     showGrid: $showGrid,
                     practiceCameraView: $practiceCameraView,
-                    feedbackConfiguration: $feedbackConfiguration,
                     saveStatus: saveStatus,
                     onBack: closeWorkspace,
                     onSelectProject: openProject,
                     onExport: { showExportActions = true },
                     onAnalyze: runAISwingAnalysis,
                     onCancelAnalysis: playbackManager.cancelAnalysis,
-                    onSetManualStage: saveManualStage,
-                    feedback: playbackManager.priorityFeedback(
-                        view: practiceCameraView,
-                        manualMarkers: keyframes
-                    )
+                    onSetManualStage: saveManualStage
                 )
             } else if showProjectLibrary {
                 ProjectLibraryView(
@@ -127,7 +121,6 @@ struct ContentView: View {
         .onChange(of: showHeadStability) { _, _ in persistCurrentProject() }
         .onChange(of: showSpineAngle) { _, _ in persistCurrentProject() }
         .onChange(of: showGrid) { _, _ in persistCurrentProject() }
-        .onChange(of: feedbackConfiguration) { _, _ in persistCurrentProject() }
         .fullScreenCover(item: $selectedPracticeView) { practiceView in
             PracticeSessionView(
                 view: practiceView,
@@ -262,7 +255,6 @@ struct ContentView: View {
         showHeadStability = false
         showSpineAngle = false
         showGrid = false
-        feedbackConfiguration = nil
         saveStatus = .idle
 
         let didLoad = playbackManager.loadVideo(url: url)
@@ -277,7 +269,6 @@ struct ContentView: View {
             showGrid = saved.showGrid
             self.practiceCameraView = practiceView ?? saved.practiceCameraView
             stageCorrections = saved.stageCorrections
-            feedbackConfiguration = saved.feedbackConfiguration
         } else {
             self.practiceCameraView = practiceView
         }
@@ -324,8 +315,7 @@ struct ContentView: View {
                 showSpineAngle: showSpineAngle,
                 showGrid: showGrid,
                 practiceCameraView: practiceCameraView,
-                stageCorrections: stageCorrections,
-                feedbackConfiguration: feedbackConfiguration
+                stageCorrections: stageCorrections
             ),
             for: videoURL
         )
