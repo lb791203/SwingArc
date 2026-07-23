@@ -31,7 +31,6 @@ struct AnalysisWorkspaceView: View {
     @State private var showsInspector = true
     @State private var showsResultsSheet = false
     @State private var adjustmentStage: SwingStage?
-    @State private var showsFullscreenPlayback = false
 
     private var presentation: AnalysisWorkspacePresentation {
         AnalysisWorkspacePresentation(state: playbackManager.analysisState)
@@ -112,26 +111,6 @@ struct AnalysisWorkspaceView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
-        .fullScreenCover(isPresented: $showsFullscreenPlayback) {
-            FullscreenVideoPlaybackView(
-                playbackManager: playbackManager,
-                drawings: $drawings,
-                isKeyframeMode: $isKeyframeMode,
-                showPoseSkeleton: showPoseSkeleton,
-                showHeadStability: showHeadStability,
-                showSpineAngle: showSpineAngle,
-                showGrid: showGrid,
-                keyframes: keyframes,
-                practiceCameraView: $practiceCameraView,
-                feedbackConfiguration: $feedbackConfiguration,
-                onDismiss: { showsFullscreenPlayback = false }
-            )
-        }
-        .onChange(of: playbackManager.analysisState) { _, state in
-            if case .completed = state, horizontalSizeClass != .regular {
-                showsResultsSheet = true
-            }
-        }
         .task(id: project.id) {
             #if DEBUG
             guard PracticePreviewConfiguration.autoAnalyzes(
@@ -147,6 +126,14 @@ struct AnalysisWorkspaceView: View {
 
     @ViewBuilder
     private func centerWorkbench(isRegularLayout: Bool) -> some View {
+        if isRegularLayout {
+            regularReplayWorkbench(isRegularLayout: isRegularLayout)
+        } else {
+            mobileReplayWorkbench
+        }
+    }
+
+    private func regularReplayWorkbench(isRegularLayout: Bool) -> some View {
         VStack(spacing: 0) {
             WorkspaceHeaderView(
                 projectName: project.name,
@@ -175,8 +162,8 @@ struct AnalysisWorkspaceView: View {
                     showSpineAngle: showSpineAngle,
                     showGrid: showGrid,
                     interactionMode: interactionMode,
-                    showsFullscreenButton: isRegularLayout,
-                    onEnterFullscreen: { showsFullscreenPlayback = true }
+                    showsFullscreenButton: false,
+                    onEnterFullscreen: {}
                 )
 
                 if interactionMode == .idle, !isRegularLayout {
@@ -264,68 +251,255 @@ struct AnalysisWorkspaceView: View {
         }
     }
 
-    private var mobileReviewChrome: some View {
-        VStack {
-            HStack {
-                Spacer()
-                Button { showsFullscreenPlayback = true } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .frame(width: 44, height: 44)
-                        .background(.black.opacity(0.55), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.white)
-                .accessibilityLabel("全屏回放")
+    private var mobileReplayWorkbench: some View {
+        ZStack {
+            VideoCanvasView(
+                playbackManager: playbackManager,
+                drawings: $drawings,
+                activeTool: $activeTool,
+                selectedColor: $selectedColor,
+                strokeWidth: $strokeWidth,
+                isKeyframeMode: $isKeyframeMode,
+                showPoseSkeleton: showPoseSkeleton,
+                showHeadStability: showHeadStability,
+                showSpineAngle: showSpineAngle,
+                showGrid: showGrid,
+                interactionMode: interactionMode,
+                showsFullscreenButton: false,
+                onEnterFullscreen: {}
+            )
+            .ignoresSafeArea()
+
+            if interactionMode == .idle {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: toggleWorkspacePlayback)
             }
 
-            Spacer()
+            mobileReplayHeader
+            mobileReviewChrome
 
-            if playbackManager.isScanning {
-                AnalysisProgressCard(
-                    phase: playbackManager.analysisProgressPhase,
-                    progress: playbackManager.scanProgress,
-                    onCancel: onCancelAnalysis
+            if interactionMode == .drawing {
+                DrawingToolRail(
+                    activeTool: $activeTool,
+                    selectedColor: $selectedColor,
+                    isKeyframeMode: $isKeyframeMode,
+                    onUndo: { if !drawings.isEmpty { drawings.removeLast() } },
+                    onClear: { drawings.removeAll() },
+                    onDone: { interactionMode = .idle }
                 )
-                .frame(maxWidth: 300)
-            } else if let failure = playbackManager.analysisFailure {
-                AnalysisFailureBanner(failure: failure)
-                    .frame(maxWidth: 330)
-            }
-
-            HStack(spacing: 10) {
-                Button(action: toggleDrawingMode) {
-                    Image(systemName: "pencil.tip")
-                        .frame(width: 48, height: 48)
-                        .background(AnalysisTheme.proTourSurface.opacity(0.94), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.white)
-                .accessibilityLabel("画线")
-
-                Button {
-                    interactionMode = .idle
-                    if playbackManager.analysisState.hasCompletedResult {
-                        showResults(isRegularLayout: false)()
-                    } else {
-                        onAnalyze()
-                    }
-                } label: {
-                    Label(
-                        playbackManager.analysisState.hasCompletedResult ? "结果" : "AI 分析",
-                        systemImage: playbackManager.analysisState.hasCompletedResult ? "list.bullet.rectangle" : "sparkles"
-                    )
-                    .font(.system(size: 15, weight: .bold))
-                    .padding(.horizontal, 18)
-                    .frame(minHeight: 48)
-                    .background(AnalysisTheme.proTourSignal, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.black)
-                .disabled(playbackManager.isScanning)
-                .accessibilityLabel(playbackManager.analysisState.hasCompletedResult ? "查看分析结果" : "开始 AI 分析")
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.trailing, 10)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .padding(12)
+        .background(Color.black)
+        .animation(.easeInOut(duration: 0.2), value: interactionMode)
+    }
+
+    private var mobileReplayHeader: some View {
+        HStack(spacing: 12) {
+            Button(action: onBack) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 23, weight: .semibold))
+                    .frame(width: 42, height: 42)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("返回项目库")
+
+            HStack(spacing: 7) {
+                Text(project.name)
+                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+
+                if !saveStatus.label.isEmpty {
+                    Circle()
+                        .fill(saveStatus == .failed ? AnalysisTheme.proTourPaused : AnalysisTheme.proTourSignal)
+                        .frame(width: 6, height: 6)
+                        .accessibilityLabel(saveStatus.label)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .background(
+            LinearGradient(
+                colors: [.black.opacity(0.64), .black.opacity(0.28), .clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var mobileReviewChrome: some View {
+        ZStack {
+            VStack {
+                mobileAnalysisStatus
+                    .padding(.top, 68)
+                Spacer()
+            }
+
+            VStack {
+                Spacer()
+                mobileReplayOverlayControls
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder
+    private var mobileAnalysisStatus: some View {
+        if playbackManager.isScanning {
+            let presentation = AnalysisProgressPresentation(
+                phase: playbackManager.analysisProgressPhase,
+                progress: playbackManager.scanProgress
+            )
+
+            HStack(spacing: 9) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(AnalysisTheme.proTourSignal)
+                Text("AI 分析 · \(presentation.percentage)%")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(presentation.title)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.66))
+                    .lineLimit(1)
+                Button("取消", action: onCancelAnalysis)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AnalysisTheme.proTourSignal)
+            }
+            .padding(.horizontal, 13)
+            .frame(minHeight: 38)
+            .background(.black.opacity(0.62), in: Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 1))
+            .foregroundStyle(.white)
+            .frame(maxWidth: 316)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(presentation.title)，\(presentation.percentage)%")
+        } else if let failure = playbackManager.analysisFailure {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(AnalysisTheme.proTourPaused)
+                Text(mobileFailureMessage(failure))
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .multilineTextAlignment(.leading)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 10)
+            .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .stroke(AnalysisTheme.proTourPaused.opacity(0.48), lineWidth: 1)
+            }
+            .frame(maxWidth: 316, alignment: .leading)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private var mobileReplayOverlayControls: some View {
+        VStack(spacing: 14) {
+            mobileReplayActionRow
+
+            MobileReplayTimelineView(
+                playbackManager: playbackManager,
+                keyframes: keyframes
+            )
+        }
+        .padding(.top, 34)
+        .padding(.bottom, 10)
+        .background(alignment: .bottom) {
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.34), .black.opacity(0.84)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .padding(.horizontal, -14)
+            .padding(.bottom, -8)
+        }
+    }
+
+    private var mobileReplayActionRow: some View {
+        HStack {
+            Button {
+                interactionMode = .idle
+                if playbackManager.analysisState.hasCompletedResult {
+                    showResults(isRegularLayout: false)()
+                } else {
+                    onAnalyze()
+                }
+            } label: {
+                Image(
+                    systemName: playbackManager.analysisState.hasCompletedResult
+                        ? "list.bullet"
+                        : "sparkles"
+                )
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 48, height: 48)
+                    .background(.black.opacity(0.46), in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(
+                playbackManager.isScanning ? .white.opacity(0.58) : .white
+            )
+            .disabled(playbackManager.isScanning)
+            .accessibilityLabel(
+                playbackManager.analysisState.hasCompletedResult
+                    ? "查看分析结果"
+                    : "开始 AI 分析"
+            )
+
+            Spacer(minLength: 20)
+
+            Button(action: toggleDrawingMode) {
+                HStack(spacing: 7) {
+                    Image(systemName: "pencil.tip")
+                    Text("标注")
+                }
+                .font(.system(size: 15, weight: .bold))
+                .padding(.horizontal, 20)
+                .frame(minHeight: 48)
+                .background(
+                    interactionMode == .drawing
+                        ? AnalysisTheme.proTourSignal
+                        : .black.opacity(0.56),
+                    in: Capsule()
+                )
+                .overlay {
+                    Capsule()
+                        .stroke(.white.opacity(interactionMode == .drawing ? 0 : 0.20), lineWidth: 1)
+                }
+                .foregroundStyle(
+                    interactionMode == .drawing
+                        ? AnalysisTheme.proTourBackground
+                        : .white
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(interactionMode == .drawing ? "结束标注" : "开始标注")
+
+            Spacer(minLength: 20)
+
+            Button(action: onExport) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 48, height: 48)
+                    .background(.black.opacity(0.46), in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .accessibilityLabel("导出")
+        }
     }
 
     private func toggleWorkspacePlayback() {
@@ -334,6 +508,35 @@ struct AnalysisWorkspaceView: View {
         } else {
             interactionMode = WorkspaceModeTransition.beginPlayback.mode
             playbackManager.play()
+        }
+    }
+
+    private func mobileFailureMessage(_ failure: AnalysisFailure) -> String {
+        switch failure {
+        case .noVideo:
+            return "没有可分析的视频"
+        case .invalidDuration, .frameExtractionFailed:
+            return "视频读取失败，请重新导入"
+        case .insufficientPoseEvidence:
+            return "未识别到清晰的人体姿势"
+        case .noStableGolfer:
+            return "无法持续锁定主球员"
+        case .noSwingMotion:
+            return "未检测到完整挥杆动作"
+        case .ambiguousSwingWindows:
+            return "检测到多个挥杆，无法确定目标"
+        case .swingWindowTooLong, .incompleteSwingClip:
+            return "挥杆片段不完整"
+        case .missingAddressBoundary:
+            return "未找到准备位到起杆的边界"
+        case .missingTopTransition:
+            return "未找到上杆顶点转换"
+        case .noImpactCorridor:
+            return "未找到击球瞬间"
+        case .missingPostImpactBoundary:
+            return "未找到击球后释放边界"
+        case .analysisCancelled:
+            return "AI 分析已取消"
         }
     }
 
@@ -629,21 +832,6 @@ struct VideoCanvasView: View {
         .clipped()
         .contentShape(Rectangle())
         .simultaneousGesture(magnificationGesture, including: .all)
-        .overlay(alignment: .topTrailing) {
-            if showsFullscreenButton,
-               interactionMode == .idle,
-               playbackManager.mediaLoadState == .ready {
-                Button(action: onEnterFullscreen) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                        .background(.black.opacity(0.55), in: Circle())
-                }
-                .foregroundStyle(.white)
-                .padding(12)
-                .accessibilityLabel("全屏播放")
-            }
-        }
     }
 
     private func resetZoom() {

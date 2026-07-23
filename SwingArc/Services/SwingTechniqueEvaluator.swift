@@ -65,7 +65,7 @@ struct TechniqueFeedbackPresentation: Equatable {
             let missing = analysis.unresolvedStages
                 .sorted { $0.rawValue < $1.rawValue }
                 .first
-                .map { "P\((SwingStage.allCases.firstIndex(of: $0) ?? 0) + 1)" } ?? "关键帧"
+                .map(stageReference) ?? "关键帧"
             return TechniqueFeedbackPresentation(
                 title: "本球未能判定",
                 detail: "\(missing) 的人体或动作证据不足；不会给出猜测性的纠错建议。",
@@ -73,6 +73,20 @@ struct TechniqueFeedbackPresentation: Equatable {
                 drill: nil,
                 showsEvidence: false
             )
+        }
+    }
+
+    nonisolated private static func stageReference(_ stage: SwingStage) -> String {
+        switch stage {
+        case .address: return "P1"
+        case .takeaway: return "P2"
+        case .leadArmParallelBackswing: return "P3"
+        case .top: return "P4"
+        case .leadArmParallelDownswing: return "P5"
+        case .shaftParallelDownswing: return "P6"
+        case .impact: return "P7"
+        case .followThrough: return "P8"
+        case .finish: return "收杆（兼容）"
         }
     }
 }

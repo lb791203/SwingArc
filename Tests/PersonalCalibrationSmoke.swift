@@ -54,5 +54,27 @@ struct PersonalCalibrationSmoke {
             view: .downTheLine
         )
         precondition(clamped.offsetFrames[.top] == 6)
+
+        let legacyFinishCorrection = StageCorrection(
+            stage: .finish,
+            view: .downTheLine,
+            automaticFrameIndex: 300,
+            manualFrameIndex: 304
+        )
+        let decodedLegacyFinish = try! JSONDecoder().decode(
+            StageCorrection.self,
+            from: try! JSONEncoder().encode(legacyFinishCorrection)
+        )
+        precondition(decodedLegacyFinish.stage == .finish)
+
+        let retainedLegacyFinish = PersonalCalibrationPolicy.update(
+            current: PersonalStageCalibration(offsetFrames: [.finish: 4]),
+            corrections: [],
+            view: .downTheLine
+        )
+        precondition(
+            retainedLegacyFinish.offsetFrames[.finish] == 4,
+            "Canonical P1-P8 calibration must retain stored legacy finish offsets"
+        )
     }
 }
