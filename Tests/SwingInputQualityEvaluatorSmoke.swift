@@ -24,6 +24,20 @@ struct SwingInputQualityEvaluatorSmoke {
         precondition(accepted.isSupported)
         precondition(accepted.issues.isEmpty)
 
+        let defaultBlurWarning = SwingInputQualityEvaluator.evaluate(.init(
+            poseFrameCoverage: 0.95,
+            fullBodyCoverage: 0.95,
+            clubCoverage: nil,
+            cameraMotion: 0.01,
+            medianBlurScore: 0.10
+        ))
+        precondition(defaultBlurWarning.isSupported)
+        precondition(defaultBlurWarning.blockingIssues.isEmpty)
+        precondition(defaultBlurWarning.warnings == [
+            .clubVisibilityNotAssessed,
+            .motionBlur
+        ])
+
         let unassessedClub = SwingInputQualityEvaluator.evaluate(.init(
             poseFrameCoverage: 0.95,
             fullBodyCoverage: 0.95,
@@ -55,9 +69,9 @@ struct SwingInputQualityEvaluatorSmoke {
             .personNotStable,
             .fullBodyNotVisible,
             .clubNotVisible,
-            .cameraMoved,
-            .motionBlur
+            .cameraMoved
         ])
+        precondition(allBlocking.warnings == [.motionBlur])
 
         let diagnosticBlur = SwingInputQualityEvaluator.evaluate(
             .init(

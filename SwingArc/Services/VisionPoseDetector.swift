@@ -776,7 +776,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
     private let diagnosticsLock = NSLock()
     private var storedTrackingDiagnostics = PrimaryGolferTrackingDiagnostics()
 
-    init(motionBlurDisposition: SwingMotionBlurDisposition = .blocking) {
+    init(motionBlurDisposition: SwingMotionBlurDisposition = .warning) {
         self.motionBlurDisposition = motionBlurDisposition
     }
 

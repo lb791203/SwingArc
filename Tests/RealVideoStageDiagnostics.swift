@@ -32,17 +32,25 @@ struct RealVideoStageDiagnosticReport: Encodable {
 @main
 struct RealVideoStageDiagnostics {
     static func main() async throws {
-        guard (2...3).contains(CommandLine.arguments.count) else {
+        guard (2...4).contains(CommandLine.arguments.count) else {
             fputs(
-                "usage: real-video-stage-diagnostics <video-path> [capture-fps]\n",
+                "usage: real-video-stage-diagnostics <video-path> [capture-fps] [--blocking-blur]\n",
                 stderr
             )
             exit(EXIT_FAILURE)
         }
 
+        let usesBlockingBlur = CommandLine.arguments.contains("--blocking-blur")
+        let valueArguments = CommandLine.arguments.dropFirst().filter {
+            $0 != "--blocking-blur"
+        }
+        guard (1...2).contains(valueArguments.count) else {
+            fputs("invalid diagnostic arguments\n", stderr)
+            exit(EXIT_FAILURE)
+        }
         let captureFrameRate: Double
-        if CommandLine.arguments.count == 3 {
-            guard let parsed = Double(CommandLine.arguments[2]),
+        if valueArguments.count == 2 {
+            guard let parsed = Double(valueArguments[1]),
                   parsed.isFinite,
                   parsed > 0 else {
                 fputs("capture-fps must be a positive number\n", stderr)
@@ -53,7 +61,7 @@ struct RealVideoStageDiagnostics {
             captureFrameRate = 240
         }
 
-        let videoURL = URL(fileURLWithPath: CommandLine.arguments[1])
+        let videoURL = URL(fileURLWithPath: valueArguments[0])
         let asset = AVURLAsset(url: videoURL)
         let metadataSourceFrameRate: Double?
         if let track = try? await asset.loadTracks(withMediaType: .video).first,
@@ -67,9 +75,9 @@ struct RealVideoStageDiagnostics {
             : "processed slow-motion playback timeline"
         let gate = AnalysisRunGate()
         let runID = gate.begin()
-        let engine = SwingVideoAnalysisEngine(
-            motionBlurDisposition: .warning
-        )
+        let engine = usesBlockingBlur
+            ? SwingVideoAnalysisEngine(motionBlurDisposition: .blocking)
+            : SwingVideoAnalysisEngine()
         let outcome = engine.analyze(
             url: videoURL,
             runID: runID,
@@ -106,7 +114,7 @@ struct RealVideoStageDiagnostics {
                 captureFrameRate: captureFrameRate,
                 sourceFrameRate: output.sourceFrameRate,
                 timelineInterpretation: timelineInterpretation,
-                motionBlurHandling: "warning-only development diagnostic",
+                motionBlurHandling: usesBlockingBlur ? "blocking diagnostic" : "warning",
                 outcome: "completed",
                 elapsedSeconds: output.elapsedSeconds,
                 adaptiveWindowStart: output.adaptiveWindow.startTime,
@@ -122,7 +130,7 @@ struct RealVideoStageDiagnostics {
                 captureFrameRate: captureFrameRate,
                 sourceFrameRate: metadataSourceFrameRate,
                 timelineInterpretation: timelineInterpretation,
-                motionBlurHandling: "warning-only development diagnostic",
+                motionBlurHandling: usesBlockingBlur ? "blocking diagnostic" : "warning",
                 outcome: "failed: \(reason)",
                 elapsedSeconds: nil,
                 adaptiveWindowStart: nil,
@@ -138,7 +146,7 @@ struct RealVideoStageDiagnostics {
                 captureFrameRate: captureFrameRate,
                 sourceFrameRate: metadataSourceFrameRate,
                 timelineInterpretation: timelineInterpretation,
-                motionBlurHandling: "warning-only development diagnostic",
+                motionBlurHandling: usesBlockingBlur ? "blocking diagnostic" : "warning",
                 outcome: "cancelled",
                 elapsedSeconds: nil,
                 adaptiveWindowStart: nil,

@@ -160,7 +160,7 @@ enum SwingInputQualityEvaluator {
 
     static func evaluate(
         _ signal: SwingInputQualitySignals,
-        motionBlurDisposition: SwingMotionBlurDisposition = .blocking
+        motionBlurDisposition: SwingMotionBlurDisposition = .warning
     ) -> SwingInputQualityReport {
         var blocking: [SwingInputQualityIssue] = []
         var warnings: [SwingInputQualityIssue] = []

@@ -48,10 +48,10 @@ clip.
 
 The existing full-frame blur score incorrectly rejected five visibly sharp
 clips because it measures a 32-pixel scene-texture signal rather than golfer
-motion blur. This baseline therefore used a development-only mode in which
-that uncalibrated blur result remains a warning but does not stop P1–P8
-analysis. Production behavior remains blocking until real clear/blurred
-reference pairs calibrate a replacement metric.
+motion blur. The uncalibrated blur result is therefore a warning and does not
+stop P1–P8 analysis. Person stability, full-body coverage, and camera-motion
+quality gates remain blocking. A future blur blocker requires labelled
+clear/blurred reference pairs and a golfer-region motion-blur metric.
 
 ## Per-clip result
 
