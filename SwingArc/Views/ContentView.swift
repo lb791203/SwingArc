@@ -34,6 +34,7 @@ struct ContentView: View {
     @State private var showProjectLibrary = false
     @State private var showVideoPicker = false
     @State private var showManualCapture = false
+    @State private var showAnnotationWorkspace = false
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var showExportActions = false
     @State private var sharePayload: SharePayload?
@@ -78,7 +79,11 @@ struct ContentView: View {
                     onExport: { showExportActions = true },
                     onAnalyze: runAISwingAnalysis,
                     onCancelAnalysis: playbackManager.cancelAnalysis,
-                    onSetManualStage: saveManualStage
+                    onSetManualStage: saveManualStage,
+                    onAnnotate: {
+                        playbackManager.pause()
+                        showAnnotationWorkspace = true
+                    }
                 )
             } else if showProjectLibrary {
                 ProjectLibraryView(
@@ -147,6 +152,22 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showManualCapture) {
             CameraView { temporaryURL in
                 persistCapturedVideo(temporaryURL)
+            }
+        }
+        .fullScreenCover(isPresented: $showAnnotationWorkspace) {
+            if let currentProjectURL {
+                AnnotationWorkspaceView(
+                    videoURL: currentProjectURL,
+                    prediction: AnnotationPredictionAdapter.snapshot(
+                        detections: playbackManager.analysisOutput?.result.detections ?? [],
+                        frames: playbackManager.analysisOutput?.observationFrames ?? []
+                    ),
+                    onClose: { showAnnotationWorkspace = false },
+                    onExport: { url in
+                        showAnnotationWorkspace = false
+                        sharePayload = SharePayload(url: url)
+                    }
+                )
             }
         }
         .sheet(item: $sharePayload) { payload in

@@ -19,6 +19,7 @@ struct AnalysisWorkspaceView: View {
     let onAnalyze: () -> Void
     let onCancelAnalysis: () -> Void
     let onSetManualStage: (SwingStage) -> Void
+    let onAnnotate: () -> Void
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var interactionMode: WorkspaceInteractionMode = .idle
@@ -186,6 +187,7 @@ struct AnalysisWorkspaceView: View {
                 onToggleProjectSidebar: { showsProjectSidebar.toggle() },
                 onToggleInspector: { showsInspector.toggle() },
                 onShowResults: showResults(isRegularLayout: isRegularLayout),
+                onAnnotate: onAnnotate,
                 onExport: onExport
             )
 
@@ -351,6 +353,14 @@ struct AnalysisWorkspaceView: View {
             }
 
             Spacer(minLength: 0)
+
+            Button(action: onAnnotate) {
+                Text("标注")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(minWidth: 44, minHeight: 42)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("打开精确标注")
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 16)

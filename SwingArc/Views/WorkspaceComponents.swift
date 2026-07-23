@@ -11,6 +11,7 @@ struct WorkspaceHeaderView: View {
     let onToggleProjectSidebar: () -> Void
     let onToggleInspector: () -> Void
     let onShowResults: () -> Void
+    let onAnnotate: () -> Void
     let onExport: () -> Void
 
     var body: some View {
@@ -55,6 +56,13 @@ struct WorkspaceHeaderView: View {
                 }
                 .accessibilityLabel("查看分析结果")
             }
+
+            Button(action: onAnnotate) {
+                Text("标注")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel("打开精确标注")
 
             Button(action: onExport) {
                 Image(systemName: "square.and.arrow.up")

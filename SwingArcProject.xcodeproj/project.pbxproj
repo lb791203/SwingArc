@@ -54,6 +54,15 @@
 		F80000000000000000000017 /* SwingFeedbackPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000018 /* SwingFeedbackPipeline.swift */; };
 		F80000000000000000000019 /* SwingTrajectoryOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000001A /* SwingTrajectoryOverlay.swift */; };
 		F8000000000000000000001B /* SimplifiedSwingFeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000001C /* SimplifiedSwingFeedbackView.swift */; };
+		A90000000000000000000001 /* AnnotationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000002 /* AnnotationModels.swift */; };
+		A90000000000000000000003 /* AnnotationWorkspaceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000004 /* AnnotationWorkspaceState.swift */; };
+		A90000000000000000000005 /* ExactVideoFrameProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000006 /* ExactVideoFrameProvider.swift */; };
+		A90000000000000000000007 /* AnnotationPackageValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000008 /* AnnotationPackageValidator.swift */; };
+		A90000000000000000000009 /* AnnotationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9000000000000000000000A /* AnnotationStore.swift */; };
+		A9000000000000000000000B /* AnnotationExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9000000000000000000000C /* AnnotationExportService.swift */; };
+		A9000000000000000000000D /* AnnotationFrameCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9000000000000000000000E /* AnnotationFrameCanvas.swift */; };
+		A9000000000000000000000F /* AnnotationWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000010 /* AnnotationWorkspaceView.swift */; };
+		A90000000000000000000011 /* AnnotationPredictionAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000012 /* AnnotationPredictionAdapter.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -105,6 +114,15 @@
 		F80000000000000000000018 /* SwingFeedbackPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingFeedbackPipeline.swift; sourceTree = "<group>"; };
 		F8000000000000000000001A /* SwingTrajectoryOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingTrajectoryOverlay.swift; sourceTree = "<group>"; };
 		F8000000000000000000001C /* SimplifiedSwingFeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimplifiedSwingFeedbackView.swift; sourceTree = "<group>"; };
+		A90000000000000000000002 /* AnnotationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationModels.swift; sourceTree = "<group>"; };
+		A90000000000000000000004 /* AnnotationWorkspaceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationWorkspaceState.swift; sourceTree = "<group>"; };
+		A90000000000000000000006 /* ExactVideoFrameProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExactVideoFrameProvider.swift; sourceTree = "<group>"; };
+		A90000000000000000000008 /* AnnotationPackageValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationPackageValidator.swift; sourceTree = "<group>"; };
+		A9000000000000000000000A /* AnnotationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationStore.swift; sourceTree = "<group>"; };
+		A9000000000000000000000C /* AnnotationExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationExportService.swift; sourceTree = "<group>"; };
+		A9000000000000000000000E /* AnnotationFrameCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationFrameCanvas.swift; sourceTree = "<group>"; };
+		A90000000000000000000010 /* AnnotationWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationWorkspaceView.swift; sourceTree = "<group>"; };
+		A90000000000000000000012 /* AnnotationPredictionAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationPredictionAdapter.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -152,6 +170,8 @@
 				F80000000000000000000002 /* SwingObservationModels.swift */,
 				F80000000000000000000004 /* SwingMetricModels.swift */,
 				F80000000000000000000012 /* SimplifiedSwingFeedbackModels.swift */,
+				A90000000000000000000002 /* AnnotationModels.swift */,
+				A90000000000000000000004 /* AnnotationWorkspaceState.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -179,6 +199,11 @@
 				F80000000000000000000014 /* SwingFeedbackAssembler.swift */,
 				F80000000000000000000016 /* SwingAnalysisArtifactBuilder.swift */,
 				F80000000000000000000018 /* SwingFeedbackPipeline.swift */,
+				A90000000000000000000006 /* ExactVideoFrameProvider.swift */,
+				A90000000000000000000008 /* AnnotationPackageValidator.swift */,
+				A9000000000000000000000A /* AnnotationStore.swift */,
+				A9000000000000000000000C /* AnnotationExportService.swift */,
+				A90000000000000000000012 /* AnnotationPredictionAdapter.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -199,6 +224,8 @@
 				C40000000000000000000002 /* BrandMarkView.swift */,
 				F8000000000000000000001A /* SwingTrajectoryOverlay.swift */,
 				F8000000000000000000001C /* SimplifiedSwingFeedbackView.swift */,
+				A9000000000000000000000E /* AnnotationFrameCanvas.swift */,
+				A90000000000000000000010 /* AnnotationWorkspaceView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -331,6 +358,15 @@
 				F80000000000000000000019 /* SwingTrajectoryOverlay.swift in Sources */,
 				F8000000000000000000001B /* SimplifiedSwingFeedbackView.swift in Sources */,
 				C40000000000000000000001 /* BrandMarkView.swift in Sources */,
+				A90000000000000000000001 /* AnnotationModels.swift in Sources */,
+				A90000000000000000000003 /* AnnotationWorkspaceState.swift in Sources */,
+				A90000000000000000000005 /* ExactVideoFrameProvider.swift in Sources */,
+				A90000000000000000000007 /* AnnotationPackageValidator.swift in Sources */,
+				A90000000000000000000009 /* AnnotationStore.swift in Sources */,
+				A9000000000000000000000B /* AnnotationExportService.swift in Sources */,
+				A9000000000000000000000D /* AnnotationFrameCanvas.swift in Sources */,
+				A9000000000000000000000F /* AnnotationWorkspaceView.swift in Sources */,
+				A90000000000000000000011 /* AnnotationPredictionAdapter.swift in Sources */,
 			);
 		};
 /* End PBXSourcesBuildPhase section */

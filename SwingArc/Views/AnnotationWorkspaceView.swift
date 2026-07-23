@@ -1,4 +1,6 @@
 import SwiftUI
+import Combine
+import CoreMedia
 
 @MainActor
 final class AnnotationFrameController: ObservableObject {
