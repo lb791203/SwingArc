@@ -1,5 +1,6 @@
 import Foundation
 import CoreMedia
+import CryptoKit
 
 struct SourceFrameTimeline: Equatable {
     private let presentationTimes: [CMTime]
@@ -54,6 +55,23 @@ struct SourceFrameTimeline: Equatable {
               let last = seconds.last,
               last > first else { return nil }
         return Double(count - 1) / (last - first)
+    }
+
+    var timelineSHA256: String {
+        var data = Data()
+        for time in presentationTimes {
+            var value = time.value.bigEndian
+            var timescale = time.timescale.bigEndian
+            withUnsafeBytes(of: &value) {
+                data.append(contentsOf: $0)
+            }
+            withUnsafeBytes(of: &timescale) {
+                data.append(contentsOf: $0)
+            }
+        }
+        return SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     func presentationTime(sourceFrameIndex: Int) -> CMTime? {

@@ -837,33 +837,6 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         let rawPose: PoseEstimationResult?
     }
 
-    private static func sourceFrameTimeline(
-        asset: AVAsset,
-        videoTrack: AVAssetTrack
-    ) -> SourceFrameTimeline? {
-        guard let reader = try? AVAssetReader(asset: asset) else { return nil }
-        let output = AVAssetReaderTrackOutput(
-            track: videoTrack,
-            outputSettings: [
-                kCVPixelBufferPixelFormatTypeKey as String:
-                    kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-            ]
-        )
-        guard reader.canAdd(output) else { return nil }
-        reader.add(output)
-        guard reader.startReading() else { return nil }
-
-        var presentationTimes: [CMTime] = []
-        while let sample = output.copyNextSampleBuffer() {
-            let time = CMSampleBufferGetPresentationTimeStamp(sample)
-            if time.isValid, time.isNumeric {
-                presentationTimes.append(time)
-            }
-        }
-        guard reader.status == .completed else { return nil }
-        return SourceFrameTimeline(presentationTimes: presentationTimes)
-    }
-
     func analyze(
         url: URL,
         runID: UUID,
@@ -902,10 +875,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 constantFrameRate: metadataFrameRate
             )
         } else {
-            sourceFrameTimeline = Self.sourceFrameTimeline(
-                asset: asset,
-                videoTrack: videoTrack
-            )
+            sourceFrameTimeline = try? ExactVideoFrameProvider.load(url: url).timeline
         }
         guard let sourceFrameTimeline else {
             return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)

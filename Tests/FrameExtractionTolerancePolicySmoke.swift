@@ -119,6 +119,18 @@ struct FrameExtractionTolerancePolicySmoke {
                     analyzer.contains("requestedTimeToleranceAfter = decodeTolerance"),
                 "Both generator tolerance directions must use the half-frame bound"
             )
+            precondition(
+                analyzer.contains(
+                    "ExactVideoFrameProvider.load(url: url).timeline"
+                ),
+                "VFR analysis must reuse the exact annotation source timeline"
+            )
+            precondition(
+                !analyzer.contains(
+                    "private static func sourceFrameTimeline("
+                ),
+                "The duplicated AVAssetReader timeline loader must be removed"
+            )
         }
 
         if CommandLine.arguments.count > 2 {
