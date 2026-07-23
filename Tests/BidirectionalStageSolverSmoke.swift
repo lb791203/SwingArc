@@ -44,6 +44,7 @@ struct BidirectionalStageSolverSmoke {
             SwingStage.takeaway,
             .leadArmParallelBackswing,
             .leadArmParallelDownswing,
+            .shaftParallelDownswing,
             .followThrough
         ] {
             let candidates = centeredImpactSet.candidates(for: stage)
@@ -63,12 +64,14 @@ struct BidirectionalStageSolverSmoke {
             .leadArmParallelBackswing: 204,
             .top: 240,
             .leadArmParallelDownswing: 276,
-            .impact: 300,
-            .followThrough: 324,
-            .finish: 360
+            .shaftParallelDownswing: 288,
+            .impact: 300
         ]
         for (stage, frame) in expected {
-            precondition(detection(stage, in: result).sourceFrameIndex == frame)
+            precondition(
+                detection(stage, in: result).sourceFrameIndex == frame,
+                "\(stage) expected \(frame), got \(String(describing: detection(stage, in: result).sourceFrameIndex))"
+            )
         }
         let resolvedFrames = result.detections.compactMap(\.sourceFrameIndex)
         precondition(resolvedFrames.count == SwingStage.allCases.count)
@@ -77,8 +80,20 @@ struct BidirectionalStageSolverSmoke {
             detection(.leadArmParallelBackswing, in: result).sourceFrameIndex!
                 < detection(.leadArmParallelDownswing, in: result).sourceFrameIndex!
         )
+        precondition(
+            detection(.leadArmParallelDownswing, in: result).sourceFrameIndex!
+                < detection(.shaftParallelDownswing, in: result).sourceFrameIndex!
+        )
+        precondition(
+            detection(.shaftParallelDownswing, in: result).sourceFrameIndex!
+                < detection(.impact, in: result).sourceFrameIndex!
+        )
+        precondition(
+            detection(.impact, in: result).sourceFrameIndex!
+                < detection(.followThrough, in: result).sourceFrameIndex!
+        )
         precondition(detection(.top, in: result).sourceFrameIndex == 240)
-        precondition(detection(.finish, in: result).sourceFrameIndex == 360)
+        precondition(!result.detections.contains { $0.stage == .finish })
 
         let objectlessEvidence = fixture(includeImpactObjects: false)
         let objectlessTimeline = SwingEvidenceTimeline.build(from: objectlessEvidence)
@@ -137,7 +152,6 @@ struct BidirectionalStageSolverSmoke {
         verifyObservedTransitionQualityRanksPaths()
         verifyCounterRotatingFollowThroughCannotConfirm()
         verifyChestContinuationIsRequired()
-        verifyFollowThroughRequiresLeadArmExtension()
         verifyFeaturePipelineCapsUnreliableLeadArmEvidence()
         verifyOccludedFollowThroughRemainsLowConfidence()
         verifyDeclaredImpactAnchorCannotDiverge()
@@ -145,6 +159,90 @@ struct BidirectionalStageSolverSmoke {
         verifyTakeawayPositionEvidenceIsBodyScaleInvariant()
         verifyTakeawayResolverIsTempoInvariant()
         verifyParallelStageScoresRequireJointAgreement()
+        verifyDeliveryAndReleaseRequireReliableShaftEvidence()
+        verifyObjectSamplingSeedsDeliveryShaftNeighborhood()
+    }
+
+    private static func verifyDeliveryAndReleaseRequireReliableShaftEvidence() {
+        let reliableTimeline = SwingEvidenceTimeline.build(from: fixture(
+            includeImpactObjects: true
+        ))
+        let reliableSet = candidateSet(impactFrame: 300, timeline: reliableTimeline)
+        precondition(
+            reliableSet.candidates(for: .shaftParallelDownswing).contains {
+                $0.sourceFrameIndex == 288 && $0.requirementsSatisfied && $0.hasClubEvidence
+            },
+            "P6 needs observed, reliable shaft-horizontal evidence before impact"
+        )
+        precondition(
+            reliableSet.candidates(for: .followThrough).contains {
+                $0.sourceFrameIndex == 324 && $0.requirementsSatisfied && $0.hasClubEvidence
+            },
+            "P8 needs observed, reliable shaft-horizontal evidence after impact"
+        )
+
+        let missingDeliveryTimeline = SwingEvidenceTimeline.build(from: fixture(
+            includeImpactObjects: true,
+            includeDeliveryShaft: false
+        ))
+        let missingDeliverySet = candidateSet(
+            impactFrame: 300,
+            timeline: missingDeliveryTimeline
+        )
+        precondition(missingDeliverySet.candidates(for: .shaftParallelDownswing).isEmpty)
+        let missingDelivery = ConstrainedSwingPathSolver.solve(
+            candidateSets: [missingDeliverySet],
+            timeline: missingDeliveryTimeline
+        )
+        precondition(
+            detection(.shaftParallelDownswing, in: missingDelivery).status == .unresolved,
+            "P6 cannot be fabricated from arm or impact evidence when the shaft is absent"
+        )
+
+        let missingReleaseTimeline = SwingEvidenceTimeline.build(from: fixture(
+            includeImpactObjects: true,
+            includeReleaseShaft: false
+        ))
+        let missingReleaseSet = candidateSet(
+            impactFrame: 300,
+            timeline: missingReleaseTimeline
+        )
+        precondition(missingReleaseSet.candidates(for: .followThrough).isEmpty)
+        let missingRelease = ConstrainedSwingPathSolver.solve(
+            candidateSets: [missingReleaseSet],
+            timeline: missingReleaseTimeline
+        )
+        precondition(
+            detection(.followThrough, in: missingRelease).status == .unresolved,
+            "P8 cannot substitute lead-arm evidence for missing shaft evidence"
+        )
+    }
+
+    private static func verifyObjectSamplingSeedsDeliveryShaftNeighborhood() {
+        let timeline = SwingEvidenceTimeline.build(from: fixture(
+            includeImpactObjects: true,
+            includeDeliveryShaft: false
+        ))
+        let impact = ImpactCorridorResolver.candidates(in: timeline).first {
+            $0.sourceFrameIndex == 300
+        }!
+        let strict = BidirectionalStageCandidateResolver.candidates(
+            timeline: timeline,
+            impact: impact
+        )
+        precondition(strict.candidates(for: .shaftParallelDownswing).isEmpty)
+
+        let sampling = BidirectionalStageCandidateResolver.objectSamplingCandidates(
+            timeline: timeline,
+            impact: impact
+        ).candidates(for: .shaftParallelDownswing)
+        precondition(!sampling.isEmpty)
+        precondition(sampling.allSatisfy {
+            !$0.requirementsSatisfied
+                && $0.maximumStatus == .lowConfidence
+                && !$0.hasClubEvidence
+        })
+        precondition(sampling.allSatisfy { $0.sourceFrameIndex < impact.sourceFrameIndex })
     }
 
     private static func verifyMissingTakeawayShaftKeepsPath() {
@@ -194,11 +292,9 @@ struct BidirectionalStageSolverSmoke {
             counterRotateAtFollowThrough: true
         ))
         let centered = candidateSet(impactFrame: 300, timeline: timeline)
-        let p7 = centered.candidates(for: .followThrough).filter {
-            (323...325).contains($0.sourceFrameIndex)
-        }
-        precondition(!p7.isEmpty)
-        precondition(p7.allSatisfy {
+        let p8 = centered.candidates(for: .followThrough)
+        precondition(!p8.isEmpty)
+        precondition(p8.allSatisfy {
             !$0.requirementsSatisfied && $0.maximumStatus == .lowConfidence
         })
         let result = ConstrainedSwingPathSolver.solve(
@@ -216,34 +312,9 @@ struct BidirectionalStageSolverSmoke {
             reverseChestAtFollowThrough: true
         ))
         let centered = candidateSet(impactFrame: 300, timeline: timeline)
-        let p7 = centered.candidates(for: .followThrough).filter {
-            (323...325).contains($0.sourceFrameIndex)
-        }
-        precondition(!p7.isEmpty)
-        precondition(p7.allSatisfy { !$0.requirementsSatisfied })
-    }
-
-    private static func verifyFollowThroughRequiresLeadArmExtension() {
-        let timeline = SwingEvidenceTimeline.build(from: fixture(
-            includeImpactObjects: true,
-            followThroughExtensionProfile: .bentExact
-        ))
-        let centered = candidateSet(impactFrame: 300, timeline: timeline)
-        let candidates = centered.candidates(for: .followThrough)
-        let exactButBent = candidates.first { $0.sourceFrameIndex == 324 }!
-        let slightlyOffButExtended = candidates.first { $0.sourceFrameIndex == 325 }!
-        precondition(!exactButBent.requirementsSatisfied)
-        precondition(exactButBent.maximumStatus == .lowConfidence)
-        precondition(slightlyOffButExtended.requirementsSatisfied)
-        precondition(slightlyOffButExtended.score > exactButBent.score)
-
-        let result = ConstrainedSwingPathSolver.solve(
-            candidateSets: [centered],
-            timeline: timeline
-        )
-        let followThrough = detection(.followThrough, in: result)
-        precondition(followThrough.sourceFrameIndex == 325)
-        precondition(followThrough.status == .confirmed)
+        let p8 = centered.candidates(for: .followThrough)
+        precondition(!p8.isEmpty)
+        precondition(p8.allSatisfy { !$0.requirementsSatisfied })
     }
 
     private static func verifyFeaturePipelineCapsUnreliableLeadArmEvidence() {
@@ -429,11 +500,9 @@ struct BidirectionalStageSolverSmoke {
             followThroughExtensionProfile: .occluded
         ))
         let centered = candidateSet(impactFrame: 300, timeline: timeline)
-        let p7 = centered.candidates(for: .followThrough).filter {
-            (323...325).contains($0.sourceFrameIndex)
-        }
-        precondition(!p7.isEmpty)
-        precondition(p7.allSatisfy {
+        let p8 = centered.candidates(for: .followThrough)
+        precondition(!p8.isEmpty)
+        precondition(p8.allSatisfy {
             !$0.requirementsSatisfied && $0.maximumStatus == .lowConfidence
         })
     }
@@ -630,7 +699,7 @@ struct BidirectionalStageSolverSmoke {
         )
         precondition(
             laterParallelBand > earlyExactFollowThrough,
-            "Sub-threshold velocity noise must not beat continued body rotation inside the P7 parallel band"
+            "Sub-threshold velocity noise must not beat continued body rotation inside the P8 parallel band"
         )
     }
 
@@ -680,6 +749,8 @@ struct BidirectionalStageSolverSmoke {
     private static func fixture(
         includeImpactObjects: Bool,
         includeTakeawayShaft: Bool = true,
+        includeDeliveryShaft: Bool = true,
+        includeReleaseShaft: Bool = true,
         counterRotateAtFollowThrough: Bool = false,
         reverseChestAtFollowThrough: Bool = false,
         followThroughExtensionProfile: FollowThroughExtensionProfile = .extended,
@@ -701,11 +772,11 @@ struct BidirectionalStageSolverSmoke {
 
             let isNoisyFinishFrame = sourceFrameIndex == 372
             let hand = handPosition(sourceFrameIndex: sourceFrameIndex)
-            let isP7Neighborhood = (323...325).contains(sourceFrameIndex)
-            let shoulderAngle = reverseChestAtFollowThrough && isP7Neighborhood
+            let isP8Neighborhood = (323...340).contains(sourceFrameIndex)
+            let shoulderAngle = reverseChestAtFollowThrough && isP8Neighborhood
                 ? 18
                 : shoulderTurn(sourceFrameIndex: sourceFrameIndex)
-            let hipAngle = counterRotateAtFollowThrough && isP7Neighborhood
+            let hipAngle = counterRotateAtFollowThrough && isP8Neighborhood
                 ? -42
                 : hipTurn(sourceFrameIndex: sourceFrameIndex)
             let pose = completePose(
@@ -716,7 +787,9 @@ struct BidirectionalStageSolverSmoke {
             let baseObject = objectEvidence(
                 sourceFrameIndex: sourceFrameIndex,
                 includeImpactObjects: includeImpactObjects,
-                includeTakeawayShaft: includeTakeawayShaft
+                includeTakeawayShaft: includeTakeawayShaft,
+                includeDeliveryShaft: includeDeliveryShaft,
+                includeReleaseShaft: includeReleaseShaft
             )
             let object: SwingObjectEvidence
             if sourceFrameIndex == 324,
@@ -741,7 +814,7 @@ struct BidirectionalStageSolverSmoke {
             case .bentExact:
                 leadArmExtension = sourceFrameIndex == 324 ? 125 : 176
             case .occluded:
-                leadArmExtension = (323...325).contains(sourceFrameIndex) ? nil : 176
+                leadArmExtension = isP8Neighborhood ? nil : 176
             }
             return SwingFrameEvidence(
                 sourceFrameIndex: sourceFrameIndex,
@@ -815,7 +888,9 @@ struct BidirectionalStageSolverSmoke {
     private static func objectEvidence(
         sourceFrameIndex: Int,
         includeImpactObjects: Bool,
-        includeTakeawayShaft: Bool
+        includeTakeawayShaft: Bool,
+        includeDeliveryShaft: Bool,
+        includeReleaseShaft: Bool
     ) -> SwingObjectEvidence {
         let stableBall = CGPoint(x: 0.70, y: 0.82)
         if includeTakeawayShaft, (167...169).contains(sourceFrameIndex) {
@@ -824,6 +899,18 @@ struct BidirectionalStageSolverSmoke {
                     start: CGPoint(x: 0.42, y: 0.66),
                     end: CGPoint(x: 0.68, y: 0.66),
                     confidence: sourceFrameIndex == 168 ? 0.98 : 0.80
+                ),
+                ball: BallEvidence(center: stableBall, radius: 0.012, confidence: 0.95),
+                stableBall: stableBall,
+                ballLocalChange: 0
+            )
+        }
+        if includeDeliveryShaft, (287...289).contains(sourceFrameIndex) {
+            return SwingObjectEvidence(
+                shaft: ClubShaftEvidence(
+                    start: CGPoint(x: 0.28, y: 0.53),
+                    end: CGPoint(x: 0.60, y: 0.53),
+                    confidence: sourceFrameIndex == 288 ? 0.98 : 0.80
                 ),
                 ball: BallEvidence(center: stableBall, radius: 0.012, confidence: 0.95),
                 stableBall: stableBall,
@@ -840,6 +927,18 @@ struct BidirectionalStageSolverSmoke {
                 ball: nil,
                 stableBall: stableBall,
                 ballLocalChange: sourceFrameIndex == 300 ? 1 : 0.70
+            )
+        }
+        if includeReleaseShaft, (323...340).contains(sourceFrameIndex) {
+            return SwingObjectEvidence(
+                shaft: ClubShaftEvidence(
+                    start: CGPoint(x: 0.48, y: 0.46),
+                    end: CGPoint(x: 0.75, y: 0.46),
+                    confidence: sourceFrameIndex == 324 ? 0.98 : 0.80
+                ),
+                ball: BallEvidence(center: stableBall, radius: 0.012, confidence: 0.95),
+                stableBall: stableBall,
+                ballLocalChange: 0
             )
         }
         return .empty
@@ -879,9 +978,9 @@ struct BidirectionalStageSolverSmoke {
             .leadArmParallelBackswing: 4,
             .top: 6,
             .leadArmParallelDownswing: 8,
+            .shaftParallelDownswing: 9,
             .impact: 10,
-            .followThrough: 12,
-            .finish: 16
+            .followThrough: 12
         ]
         let candidateIndices = Set(localStageIndices.values)
 
@@ -890,7 +989,6 @@ struct BidirectionalStageSolverSmoke {
             let isDownswing = (6...10).contains(localIndex)
             let isFollowThrough = (11...15).contains(localIndex)
             let isStableTop = (5...6).contains(localIndex)
-            let isStableFinish = (16...20).contains(localIndex)
             let retainEvidence = hasStrongSupport || candidateIndices.contains(localIndex)
             let direction: SwingMotionDirection
             if isBackswing && retainEvidence {
@@ -902,8 +1000,8 @@ struct BidirectionalStageSolverSmoke {
             } else {
                 direction = .stable
             }
-            let stable = hasStrongSupport && (isStableTop || isStableFinish)
-                || candidateIndices.contains(localIndex) && (localIndex == 0 || localIndex == 6 || localIndex == 16)
+            let stable = hasStrongSupport && isStableTop
+                || candidateIndices.contains(localIndex) && (localIndex == 0 || localIndex == 6)
             let velocityY: CGFloat
             switch direction {
             case .backswing: velocityY = -0.60

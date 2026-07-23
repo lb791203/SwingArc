@@ -10,10 +10,14 @@ struct OrderedStageSolverSmoke {
         let resolved = result.detections.compactMap(\.time)
         precondition(zip(resolved, resolved.dropFirst()).allSatisfy(<))
         precondition(detection(.leadArmParallelDownswing, in: result).time == 0.50)
+        precondition(detection(.shaftParallelDownswing, in: result).time == 0.55)
+        precondition(detection(.shaftParallelDownswing, in: result).sourceFrameIndex == 33)
+        precondition(detection(.shaftParallelDownswing, in: result).status == .confirmed)
         precondition(detection(.impact, in: result).time == 0.60)
         precondition(detection(.impact, in: result).sourceFrameIndex == 36)
         precondition(detection(.impact, in: result).status == .confirmed)
-        precondition(detection(.finish, in: result).time == 0.90)
+        precondition(detection(.followThrough, in: result).time == 0.70)
+        precondition(!result.detections.contains { $0.stage == .finish })
 
         let missingObjects = OrderedStageSolver.solve(evidence: fixture(includeImpactObjects: false))
         precondition(detection(.impact, in: missingObjects).status != .confirmed)
@@ -45,6 +49,16 @@ struct OrderedStageSolverSmoke {
             stableBall: ball,
             ballLocalChange: 0
         )
+        let deliveryShaft = SwingObjectEvidence(
+            shaft: ClubShaftEvidence(
+                start: CGPoint(x: 0.30, y: 0.54),
+                end: CGPoint(x: 0.60, y: 0.54),
+                confidence: 0.98
+            ),
+            ball: BallEvidence(center: ball, radius: 0.012, confidence: 0.9),
+            stableBall: ball,
+            ballLocalChange: 0
+        )
         let impactObject = includeImpactObjects
             ? SwingObjectEvidence(
                 shaft: ClubShaftEvidence(
@@ -67,6 +81,7 @@ struct OrderedStageSolverSmoke {
             make(0.30, hand: CGPoint(x: 0.30, y: 0.20), armAngle: 58, velocityY: -0.80, headSpeed: 0.02, hipSpeed: 0.02, shoulderAngle: 30, object: neutralObject),
             make(0.40, hand: CGPoint(x: 0.33, y: 0.27), armAngle: 48, velocityY: 0.70, headSpeed: 0.02, hipSpeed: 0.03, shoulderAngle: 28, hipAngle: 8, object: neutralObject),
             make(0.50, hand: CGPoint(x: 0.28, y: 0.42), armAngle: 2, velocityY: 1.50, headSpeed: 0.02, hipSpeed: 0.04, shoulderAngle: 20, hipAngle: 20, object: neutralObject),
+            make(0.55, hand: CGPoint(x: 0.45, y: 0.54), armAngle: 25, velocityY: 1.80, headSpeed: 0.02, hipSpeed: 0.04, shoulderAngle: 15, hipAngle: 26, object: deliveryShaft),
             make(0.60, hand: CGPoint(x: 0.54, y: 0.61), armAngle: 28, velocityY: 2.20, headSpeed: 0.03, hipSpeed: 0.04, shoulderAngle: 10, hipAngle: 32, object: impactObject),
             make(0.70, hand: CGPoint(x: 0.72, y: 0.42), armAngle: 3, velocityY: -1.50, headSpeed: 0.02, hipSpeed: 0.03, shoulderAngle: -12, hipAngle: 38, object: horizontalShaft),
             make(0.80, hand: CGPoint(x: 0.68, y: 0.28), armAngle: 45, velocityY: -0.80, headSpeed: 0.02, hipSpeed: 0.02, shoulderAngle: -20, hipAngle: 42, object: neutralObject),
@@ -75,12 +90,12 @@ struct OrderedStageSolverSmoke {
             // One slightly noisy Vision frame must not invalidate the plateau.
             make(1.10, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.00, headSpeed: 0.09, hipSpeed: 0.01, shoulderAngle: -24, hipAngle: 44, object: neutralObject),
             make(1.20, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.00, headSpeed: 0.01, hipSpeed: 0.01, shoulderAngle: -24, hipAngle: 44, object: neutralObject),
-            // A later, higher-scoring stable pose must not replace the first finish plateau.
+            // A later, higher-scoring stable pose must not affect canonical P1–P8 resolution.
             make(1.30, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.00, headSpeed: 0.01, hipSpeed: 0.01, shoulderAngle: 80, hipAngle: 80, object: neutralObject),
             make(1.40, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.00, headSpeed: 0.01, hipSpeed: 0.01, shoulderAngle: 80, hipAngle: 80, object: neutralObject),
             make(1.50, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.00, headSpeed: 0.01, hipSpeed: 0.01, shoulderAngle: 80, hipAngle: 80, object: neutralObject),
             make(1.60, hand: CGPoint(x: 0.66, y: 0.22), armAngle: 60, velocityY: 0.00, headSpeed: 0.01, hipSpeed: 0.01, shoulderAngle: 80, hipAngle: 80, object: neutralObject),
-            // Later walking must not replace the first stable finish window.
+            // Later walking must not affect the selected P1–P8 path.
             make(1.70, hand: CGPoint(x: 0.50, y: 0.55), armAngle: 25, velocityY: 2.00, headSpeed: 0.40, hipSpeed: 0.35, object: .empty)
         ]
     }

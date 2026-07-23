@@ -3,6 +3,7 @@ import Darwin
 import AVFoundation
 
 struct RealVideoReport: Encodable {
+    let stageSystem: String
     let video: String
     let sourceFrameRate: Double
     let adaptiveWindowStart: Double
@@ -56,6 +57,7 @@ struct RealVideoP1P8Acceptance {
                 result: output.result
             )
             let report = RealVideoReport(
+                stageSystem: manifest.stageSystem.rawValue,
                 video: videoURL.lastPathComponent,
                 sourceFrameRate: output.sourceFrameRate,
                 adaptiveWindowStart: output.adaptiveWindow.startTime,
@@ -67,6 +69,13 @@ struct RealVideoP1P8Acceptance {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             FileHandle.standardOutput.write(try encoder.encode(report))
             FileHandle.standardOutput.write(Data("\n".utf8))
+            if manifest.stageSystem == .legacyNamedKeyframes {
+                fputs(
+                    "legacy named-keyframe report only; it is not canonical P1-P8 acceptance\n",
+                    stderr
+                )
+                exit(EXIT_SUCCESS)
+            }
             guard stages.count == SwingStage.allCases.count,
                   stages.allSatisfy(\.passed),
                   output.adaptiveWindow.duration <= AdaptiveSwingWindowPlanner.maximumSpan

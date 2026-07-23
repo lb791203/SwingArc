@@ -831,10 +831,16 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         url: URL,
         runID: UUID,
         gate: AnalysisRunGate,
+        candidateWindow: SwingWindow? = nil,
         progress: @escaping ProgressHandler
     ) -> SwingVideoAnalysisOutcome {
         let trackedPoseDetector = TrackedPoseDetector()
-        defer { storeTrackingDiagnostics(trackedPoseDetector.diagnostics) }
+        var shouldStoreLocalDiagnostics = true
+        defer {
+            if shouldStoreLocalDiagnostics {
+                storeTrackingDiagnostics(trackedPoseDetector.diagnostics)
+            }
+        }
         let startedAt = ProcessInfo.processInfo.systemUptime
         guard gate.isActive(runID) else { return .cancelled }
         publish(.preparing, progress: 0, runID: runID, gate: gate, handler: progress)
@@ -864,7 +870,15 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
 
         // One tracker is intentionally reused for the complete coarse pass and
         // every adaptive block. Expansion must never create a new golfer identity.
-        let coarseTimes = SwingCoreLocator.sampleTimes(duration: duration)
+        let coarseScanWindow = candidateWindow ?? SwingWindow(
+            startTime: 0,
+            endTime: duration
+        )
+        let coarseTimes = SwingCoreLocator.sampleTimes(
+            duration: coarseScanWindow.duration
+        ).map {
+            min(coarseScanWindow.endTime, coarseScanWindow.startTime + $0)
+        }
         var coarseSamples: [CoarseSwingSample] = []
         let maximumSourceFrameIndex = SourceFrameBounds.maximumSourceFrameIndex(
             duration: duration,
@@ -924,8 +938,68 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             return activeFrameExtractionFailure(runID: runID, gate: gate)
         }
 
+        let attempts = SwingAttemptSegmenter.segment(
+            samples: coarseSamples,
+            sourceDuration: duration
+        )
+        if candidateWindow == nil {
+            let rankedAttempts = SwingAttemptSelectionPolicy.rankedAttempts(
+                in: attempts,
+                samples: coarseSamples
+            )
+            if !rankedAttempts.isEmpty {
+                shouldStoreLocalDiagnostics = false
+                var firstFailure: AnalysisFailure?
+                var firstFailureDiagnostics: PrimaryGolferTrackingDiagnostics?
+                for attempt in rankedAttempts {
+                    guard gate.isActive(runID) else { return .cancelled }
+                    let candidateEngine = SwingVideoAnalysisEngine()
+                    let outcome = candidateEngine.analyze(
+                        url: url,
+                        runID: runID,
+                        gate: gate,
+                        candidateWindow: SwingWindow(
+                            startTime: attempt.startTime,
+                            endTime: attempt.endTime
+                        ),
+                        progress: progress
+                    )
+                    switch outcome {
+                    case .completed, .cancelled:
+                        storeTrackingDiagnostics(candidateEngine.latestTrackingDiagnostics)
+                        return outcome
+                    case let .failed(failure):
+                        if firstFailure == nil {
+                            firstFailure = failure
+                            firstFailureDiagnostics = candidateEngine.latestTrackingDiagnostics
+                        }
+                    }
+                }
+                if let firstFailureDiagnostics {
+                    storeTrackingDiagnostics(firstFailureDiagnostics)
+                }
+                return activeFailure(
+                    firstFailure ?? .noSwingMotion,
+                    runID: runID,
+                    gate: gate
+                )
+            }
+        }
+        let coreSamples: [CoarseSwingSample]
+        if candidateWindow == nil,
+           let preferredAttempt = SwingAttemptSelectionPolicy.preferredAttempt(
+            in: attempts,
+            samples: coarseSamples
+        ) {
+            coreSamples = coarseSamples.filter {
+                $0.time >= preferredAttempt.startTime && $0.time <= preferredAttempt.endTime
+            }
+        } else {
+            coreSamples = coarseSamples
+        }
+
         let core: SwingCore
-        switch SwingCoreLocator.locate(samples: coarseSamples) {
+        switch SwingCoreLocator.locate(samples: coreSamples) {
         case let .located(locatedCore):
             core = locatedCore
         case let .failed(reason):
@@ -1042,11 +1116,17 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             return activeFailure(failure, runID: runID, gate: gate)
         }
         let bodyCandidates = bodyImpactCandidates.flatMap { impact in
-            let candidates = BidirectionalStageCandidateResolver.candidates(
+            let candidates = BidirectionalStageCandidateResolver.objectSamplingCandidates(
                 timeline: finalTimeline,
                 impact: impact
             )
-            return [SwingStage.address, .takeaway, .impact, .followThrough]
+            return [
+                SwingStage.address,
+                .takeaway,
+                .shaftParallelDownswing,
+                .impact,
+                .followThrough
+            ]
                 .flatMap { candidates.candidates(for: $0) }
         }
         guard !bodyCandidates.isEmpty else {

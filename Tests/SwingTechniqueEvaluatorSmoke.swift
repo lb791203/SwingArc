@@ -4,6 +4,8 @@ import Foundation
 struct SwingTechniqueEvaluatorSmoke {
     static func main() {
         let stages = confirmedStages()
+        let impactFrame = stageFrame(.impact)
+        let followThroughFrame = stageFrame(.followThrough)
 
         var postureSamples = baseSamples()
         postureSamples[3] = sample(
@@ -21,7 +23,11 @@ struct SwingTechniqueEvaluatorSmoke {
 
         var ottSamples = baseSamples()
         ottSamples[3] = sample(frame: 3, leftWrist: CGPoint(x: 0.50, y: 0.30), rightWrist: CGPoint(x: 0.54, y: 0.30))
-        ottSamples[5] = sample(frame: 5, leftWrist: CGPoint(x: 0.80, y: 0.52), rightWrist: CGPoint(x: 0.84, y: 0.52))
+        ottSamples[impactFrame] = sample(
+            frame: impactFrame,
+            leftWrist: CGPoint(x: 0.80, y: 0.52),
+            rightWrist: CGPoint(x: 0.84, y: 0.52)
+        )
         let overTheTop = SwingTechniqueEvaluator.evaluate(
             samples: ottSamples,
             stages: stages,
@@ -37,14 +43,14 @@ struct SwingTechniqueEvaluatorSmoke {
         ).contains { $0.kind == .overTheTop })
 
         var chickenSamples = baseSamples()
-        chickenSamples[5] = sample(
-            frame: 5,
+        chickenSamples[impactFrame] = sample(
+            frame: impactFrame,
             leftShoulder: CGPoint(x: 0.40, y: 0.32),
             leftWrist: CGPoint(x: 0.82, y: 0.31),
             leftElbow: CGPoint(x: 0.69, y: 0.42)
         )
-        chickenSamples[6] = sample(
-            frame: 6,
+        chickenSamples[followThroughFrame] = sample(
+            frame: followThroughFrame,
             leftShoulder: CGPoint(x: 0.40, y: 0.32),
             leftWrist: CGPoint(x: 0.82, y: 0.31),
             leftElbow: CGPoint(x: 0.69, y: 0.42)
@@ -64,6 +70,28 @@ struct SwingTechniqueEvaluatorSmoke {
             view: .downTheLine,
             leadArm: .left
         ).isEmpty)
+
+        let legacyFinishPresentation = TechniqueFeedbackPresentation.make(
+            feedback: .unresolved,
+            analysis: SwingAnalysisResult(
+                detectedMarkers: [],
+                unresolvedStages: [.finish],
+                detections: [
+                    SwingStageDetection(
+                        stage: .finish,
+                        time: nil,
+                        sourceFrameIndex: nil,
+                        confidence: 0,
+                        status: .unresolved
+                    )
+                ]
+            )
+        )
+        precondition(
+            legacyFinishPresentation.detail.contains("收杆"),
+            "Legacy finish must remain a compatibility label, never a P-number"
+        )
+        precondition(!legacyFinishPresentation.detail.contains("P1"))
     }
 
     private static func confirmedStages() -> [SwingStageDetection] {
@@ -76,6 +104,13 @@ struct SwingTechniqueEvaluatorSmoke {
                 status: .confirmed
             )
         }
+    }
+
+    private static func stageFrame(_ stage: SwingStage) -> Int {
+        guard let index = SwingStage.allCases.firstIndex(of: stage) else {
+            preconditionFailure("Expected canonical stage: \(stage)")
+        }
+        return index
     }
 
     private static func baseSamples(confidence: Float = 0.9) -> [SwingPoseSample] {

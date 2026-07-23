@@ -13,7 +13,7 @@ struct AdaptiveSwingWindowPlannerSmoke {
             duration: duration,
             evidence: AdaptiveBoundaryEvidence(
                 hasAddressBoundary: false,
-                hasFinishBoundary: true
+                hasPostImpactBoundary: true
             )
         )
         precondition(earlier == .expand(SwingWindow(startTime: 13.0, endTime: 16.5)))
@@ -23,7 +23,7 @@ struct AdaptiveSwingWindowPlannerSmoke {
             duration: duration,
             evidence: AdaptiveBoundaryEvidence(
                 hasAddressBoundary: true,
-                hasFinishBoundary: false
+                hasPostImpactBoundary: false
             )
         )
         precondition(later == .expand(SwingWindow(startTime: 13.5, endTime: 17.0)))
@@ -34,7 +34,7 @@ struct AdaptiveSwingWindowPlannerSmoke {
                 duration: duration,
                 evidence: AdaptiveBoundaryEvidence(
                     hasAddressBoundary: true,
-                    hasFinishBoundary: true
+                    hasPostImpactBoundary: true
                 )
             ) == .ready(initial)
         )
@@ -46,10 +46,10 @@ struct AdaptiveSwingWindowPlannerSmoke {
                 duration: duration,
                 evidence: AdaptiveBoundaryEvidence(
                     hasAddressBoundary: true,
-                    hasFinishBoundary: false
+                    hasPostImpactBoundary: false
                 )
             ) == .expand(SwingWindow(startTime: 5.4, endTime: 13.4)),
-            "The final growth step must cap at exactly eight seconds and shift toward the missing finish"
+            "The final growth step must cap at exactly eight seconds and shift toward the missing post-impact boundary"
         )
         precondition(
             AdaptiveSwingWindowPlanner.nextAction(
@@ -57,7 +57,7 @@ struct AdaptiveSwingWindowPlannerSmoke {
                 duration: duration,
                 evidence: AdaptiveBoundaryEvidence(
                     hasAddressBoundary: true,
-                    hasFinishBoundary: true
+                    hasPostImpactBoundary: true
                 )
             ) != .ready(SwingWindow(startTime: 5, endTime: 13.01)),
             "A window above the eight-second contract must never become ready"
@@ -69,7 +69,7 @@ struct AdaptiveSwingWindowPlannerSmoke {
                 duration: duration,
                 evidence: AdaptiveBoundaryEvidence(
                     hasAddressBoundary: false,
-                    hasFinishBoundary: true
+                    hasPostImpactBoundary: true
                 )
             ) == .failed(.incompleteSwingClip)
         )
@@ -79,7 +79,7 @@ struct AdaptiveSwingWindowPlannerSmoke {
                 duration: duration,
                 evidence: AdaptiveBoundaryEvidence(
                     hasAddressBoundary: true,
-                    hasFinishBoundary: false
+                    hasPostImpactBoundary: false
                 )
             ) == .failed(.incompleteSwingClip)
         )
@@ -91,7 +91,7 @@ struct AdaptiveSwingWindowPlannerSmoke {
                 duration: duration,
                 evidence: AdaptiveBoundaryEvidence(
                     hasAddressBoundary: false,
-                    hasFinishBoundary: true
+                    hasPostImpactBoundary: true
                 )
             ) == .expand(SwingWindow(startTime: 4.5, endTime: 12.5)),
             "At maximum width the planner must shift left toward a missing address"
@@ -102,10 +102,10 @@ struct AdaptiveSwingWindowPlannerSmoke {
                 duration: duration,
                 evidence: AdaptiveBoundaryEvidence(
                     hasAddressBoundary: true,
-                    hasFinishBoundary: false
+                    hasPostImpactBoundary: false
                 )
             ) == .expand(SwingWindow(startTime: 5.5, endTime: 13.5)),
-            "At maximum width the planner must shift right toward a missing finish"
+            "At maximum width the planner must shift right toward a missing post-impact boundary"
         )
 
         let nearEnd = SwingWindow(startTime: 17.23, endTime: 25.23)
@@ -115,7 +115,7 @@ struct AdaptiveSwingWindowPlannerSmoke {
                 duration: duration,
                 evidence: AdaptiveBoundaryEvidence(
                     hasAddressBoundary: true,
-                    hasFinishBoundary: false
+                    hasPostImpactBoundary: false
                 )
             ) == .failed(.incompleteSwingClip)
         )
@@ -126,7 +126,7 @@ struct AdaptiveSwingWindowPlannerSmoke {
             duration: duration,
             evidence: AdaptiveBoundaryEvidence(
                 hasAddressBoundary: false,
-                hasFinishBoundary: true
+                hasPostImpactBoundary: true
             )
         )
         precondition(earlierFirst == .expand(SwingWindow(startTime: 4.5, endTime: 12.5)))
@@ -137,10 +137,10 @@ struct AdaptiveSwingWindowPlannerSmoke {
                 duration: duration,
                 evidence: AdaptiveBoundaryEvidence(
                     hasAddressBoundary: true,
-                    hasFinishBoundary: false
+                    hasPostImpactBoundary: false
                 )
-            ) == .failed(.missingFinishBoundary),
-            "A left-shifting full window must report the newly missing finish instead of reversing"
+            ) == .failed(.missingPostImpactBoundary),
+            "A left-shifting full window must report the newly missing post-impact boundary instead of reversing"
         )
 
         var laterSearch = AdaptiveWindowSearchState()
@@ -149,7 +149,7 @@ struct AdaptiveSwingWindowPlannerSmoke {
             duration: duration,
             evidence: AdaptiveBoundaryEvidence(
                 hasAddressBoundary: true,
-                hasFinishBoundary: false
+                hasPostImpactBoundary: false
             )
         )
         precondition(laterFirst == .expand(SwingWindow(startTime: 5.5, endTime: 13.5)))
@@ -160,7 +160,7 @@ struct AdaptiveSwingWindowPlannerSmoke {
                 duration: duration,
                 evidence: AdaptiveBoundaryEvidence(
                     hasAddressBoundary: false,
-                    hasFinishBoundary: true
+                    hasPostImpactBoundary: true
                 )
             ) == .failed(.missingAddressBoundary),
             "A right-shifting full window must report the newly missing address instead of reversing"
@@ -174,7 +174,7 @@ struct AdaptiveSwingWindowPlannerSmoke {
                 duration: duration,
                 evidence: AdaptiveBoundaryEvidence(
                     hasAddressBoundary: false,
-                    hasFinishBoundary: true
+                    hasPostImpactBoundary: true
                 )
             )
             guard case let .expand(next) = action else {

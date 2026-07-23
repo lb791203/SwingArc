@@ -63,9 +63,25 @@ enum SwingStage: String, CaseIterable, Identifiable, Codable {
     case leadArmParallelBackswing = "上杆左臂平行 (Lead Arm Parallel)"
     case top = "上杆顶点 (Top)"
     case leadArmParallelDownswing = "下杆左臂平行 (Lead Arm Parallel)"
+    case shaftParallelDownswing = "下杆杆身平行 (Shaft Parallel)"
     case impact = "击球瞬间 (Impact)"
     case followThrough = "送杆 (Follow-Through)"
     case finish = "收杆 (Finish)"
+
+    /// The canonical P-system track. `.finish` remains decodable so stored
+    /// projects retain their historical marker, but it is not a P1–P8 stage.
+    static let pStages: [SwingStage] = [
+        .address,
+        .takeaway,
+        .leadArmParallelBackswing,
+        .top,
+        .leadArmParallelDownswing,
+        .shaftParallelDownswing,
+        .impact,
+        .followThrough
+    ]
+
+    static let allCases = pStages
     
     var id: String { self.rawValue }
     
@@ -76,9 +92,10 @@ enum SwingStage: String, CaseIterable, Identifiable, Codable {
         case .leadArmParallelBackswing: return "P3 上杆"
         case .top: return "P4 顶点"
         case .leadArmParallelDownswing: return "P5 下杆"
-        case .impact: return "P6 击球"
-        case .followThrough: return "P7 送杆"
-        case .finish: return "P8 收杆"
+        case .shaftParallelDownswing: return "P6 杆身平行"
+        case .impact: return "P7 击球"
+        case .followThrough: return "P8 释放"
+        case .finish: return "收杆（兼容）"
         }
     }
     
@@ -89,6 +106,7 @@ enum SwingStage: String, CaseIterable, Identifiable, Codable {
         case .leadArmParallelBackswing: return .cyan
         case .top: return .orange
         case .leadArmParallelDownswing: return .yellow
+        case .shaftParallelDownswing: return .purple
         case .impact: return .red
         case .followThrough: return .indigo
         case .finish: return .green

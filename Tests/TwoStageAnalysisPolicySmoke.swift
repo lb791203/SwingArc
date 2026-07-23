@@ -5,6 +5,7 @@ struct TwoStageAnalysisPolicySmoke {
     static func main() {
         precondition(AnalysisProgressPresentation(phase: .locating, progress: 0.20).detail.contains("8 FPS"))
         precondition(AnalysisProgressPresentation(phase: .expanding, progress: 0.50).title == "扩展挥杆边界")
+        precondition(AnalysisProgressPresentation(phase: .expanding, progress: 0.50).detail.contains("击球后动作"))
         precondition(AnalysisProgressPresentation(phase: .evidence, progress: 0.80).title == "提取候选证据")
         precondition(AnalysisProgressPresentation(phase: .solving, progress: 0.96).title == "全局阶段求解")
 
@@ -12,7 +13,7 @@ struct TwoStageAnalysisPolicySmoke {
             .missingAddressBoundary,
             .missingTopTransition,
             .noImpactCorridor,
-            .missingFinishBoundary,
+            .missingPostImpactBoundary,
             .incompleteSwingClip,
             .analysisCancelled
         ]
@@ -22,7 +23,7 @@ struct TwoStageAnalysisPolicySmoke {
             (.missingAddressBoundary, "找不到准备位到起杆的边界"),
             (.missingTopTransition, "找不到上杆顶点到下杆的转换"),
             (.noImpactCorridor, "找不到可信的击球候选段"),
-            (.missingFinishBoundary, "找不到稳定收杆位置"),
+            (.missingPostImpactBoundary, "找不到击球后动作边界"),
             (.incompleteSwingClip, "视频缺少完整挥杆前段或后段"),
             (.analysisCancelled, "分析已取消")
         ]

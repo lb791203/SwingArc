@@ -73,7 +73,7 @@ SwingArc 是一款专为 iOS 设备开发的**原生高尔夫挥杆分析与画�
 ## 📂 项目模块结构解析
 
 * **`Models/DrawingModels.swift`**：
-  定义了画笔工具类别（直线、圆形、3点夹角、手绘）、挥杆 P-阶段节点（P1 准备、P4 顶点、P6 击球、P8 收杆）和自适应比例绘图元素数据结构。
+  定义了画笔工具类别（直线、圆形、3点夹角、手绘）、挥杆 P-阶段节点（P1 准备、P4 顶点、P6 下杆杆身平行、P7 击球、P8 击球后杆身平行）和自适应比例绘图元素数据结构；收杆仅保留为历史项目兼容标记。
 * **`Services/VisionPoseDetector.swift`**：
   基于 Vision 框架，获取 CVPixelBuffer 并对 14+ 人体关节执行提取，转换为屏幕绘图坐标，完成脊椎角度和头部半径的数学计算。
 * **`Views/CustomVideoPlayer.swift`**：
@@ -89,19 +89,19 @@ SwingArc 是一款专为 iOS 设备开发的**原生高尔夫挥杆分析与画�
 
 ## P1–P8 多关节定位验收
 
-当前首版面向 30–120 FPS、正面或近正面固定机位。生产流程为：8 FPS 姿态粗扫定位唯一挥杆核心 → 向前/向后自适应扩展边界 → 按源视频真实帧率提取未缓存帧 → 在候选邻域稀疏提取杆身与球位证据 → 以冲击走廊为锚点双向生成 P1–P8 候选 → 通过方向、关节、手相对髋部位置与证据质量联合求解。整个自适应窗口严格不超过 8 秒；达到上限后以固定宽度朝缺失边界单向移动，并淘汰离开窗口的细扫缓存。8 FPS 粗扫与自适应细扫是两个独立流程，可能读取同一源帧；细扫窗口在单向演进期间每个源帧最多解码一次，杆球证据直接复用细扫图像，不增加视频解码。
+当前首版面向 30–120 FPS、正面或近正面固定机位。生产流程为：8 FPS 姿态粗扫分离并排序多个动作候选 → 逐个候选按源视频真实帧率精扫验证 → 向前/向后自适应扩展边界 → 提取未缓存帧 → 在候选邻域稀疏提取杆身与球位证据 → 以冲击走廊为锚点双向生成 P1–P8 候选 → 通过方向、关节、手相对髋部位置与证据质量联合求解。粗扫不再直接决定最终挥杆片段；只有通过完整时序约束的候选才会成为分析结果，避免把走路、弯腰或捡球动作误认为挥杆。整个自适应窗口严格不超过 8 秒；达到上限后以固定宽度朝缺失边界单向移动，并淘汰离开窗口的细扫缓存。8 FPS 粗扫与自适应细扫是两个独立流程，可能读取同一源帧；细扫窗口在单向演进期间每个源帧最多解码一次，杆球证据直接复用细扫图像，不增加视频解码。
 
-所有自动阶段必须对应实际提取到的源视频帧。分析不插帧、不按视频百分比补点，也不把固定时间偏移当作阶段。缺少地址、顶点、冲击走廊或收杆边界时会返回对应失败；剪掉挥杆首尾的素材返回不完整挥杆错误。P6 没有有效杆身/球位变化证据时最高只能是“低置信度”，不能显示为“已确认”。
+所有自动阶段必须对应实际提取到的源视频帧。分析不插帧、不按视频百分比补点，也不把固定时间偏移当作阶段。缺少地址、顶点、冲击走廊或击球后动作边界时会返回对应失败；剪掉挥杆首尾的素材返回不完整挥杆错误。P6 没有可靠的杆身平行证据时保持未确定，P7 才使用杆身与球位变化证据。
 
 在真实 iPhone 上重新构建后，使用正面或近正面挥杆视频逐项验证：正常稳定挥杆、上杆顶点短暂停顿、单侧手腕遮挡、快挥、慢挥、无人体视频、包含两次挥杆的视频，以及手动校正 P4 后重新分析并保存/重开项目。
 
-对每个视频记录 P1–P8 的人工帧、自动帧、帧误差、`已确认 / 低置信度 / 未确定`、杆身证据和球位证据。当前冻结基准要求所有 P1–P8 阶段误差不超过正负 1 个源视频帧。无充分杆球证据时 P6 不得显示为已确认；手动设置的阶段必须在重新分析、保存和恢复后保持不变。跨视频泛化结论必须至少增加 4 段同视角人工标注视频后才能给出。
+对每个视频记录 P1–P8 的人工帧、自动帧、帧误差、`已确认 / 低置信度 / 未确定`、杆身证据和球位证据。当前冻结基准要求所有 P1–P8 阶段误差不超过正负 1 个源视频帧。无充分杆身平行证据时 P6 不得显示为已确认；P7 的确认另需击球时刻的杆身与球位变化证据。手动设置的阶段必须在重新分析、保存和恢复后保持不变。跨视频泛化结论必须至少增加 4 段同视角人工标注视频后才能给出。
 
 ### P1–P8 accuracy contract
 
 Automatic stages always reference observed source frames. Accepted complete fixed-camera clips must place every P1–P8 stage within ±1 source frame of a frozen two-pass manual annotation. Missing required evidence is reported as low confidence, unresolved, or a specific clip failure; the app never fills a stage from a fixed timestamp or video percentage.
 
-当前已验证基准 `/Users/liangbo/Desktop/IMG_4500.mov`：P1–P8 实际帧为 `374, 414, 432, 453, 466, 480, 495, 513`，相对冻结人工帧的绝对误差为 `1, 0, 1, 0, 0, 1, 1, 0`；自适应窗口为 `12.2667–20.2667` 秒（严格 8.0 秒），本机分析耗时约 14.85 秒。可重复运行：
+`/Users/liangbo/Desktop/IMG_4500.mov` 现保留为历史命名关键帧兼容性报告（`legacy-named-keyframes-v1`）：它不能作为 P1–P8 验收，尤其不能替代带杆身证据的 P6 与 P8 标注。其自适应窗口曾为 `12.2667–20.2667` 秒（严格 8.0 秒）；可重复运行：
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
@@ -110,6 +110,8 @@ xcrun swiftc -parse-as-library \
   -framework SwiftUI -framework CoreVideo \
   SwingArc/Models/DrawingModels.swift \
   SwingArc/Models/WorkspaceModels.swift \
+  SwingArc/Models/FrameExtractionTolerancePolicy.swift \
+  SwingArc/Services/StageCalibration.swift \
   SwingArc/Services/VisionPoseDetector.swift \
   SwingArc/Services/SwingStageDetector.swift \
   Tests/P1P8AcceptanceSupport.swift \

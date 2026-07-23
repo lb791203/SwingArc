@@ -88,7 +88,7 @@ struct AnalysisProgressPresentation: Equatable {
         switch phase {
         case .preparing: return "正在读取视频信息"
         case .locating: return "正在以 8 FPS 粗扫完整视频"
-        case .expanding: return "正在寻找准备位和稳定收杆"
+        case .expanding: return "正在寻找准备位和击球后动作"
         case .evidence: return "正在检查关节、杆身和球位"
         case .solving: return "正在联合定位 P1–P8"
         }
@@ -126,8 +126,8 @@ struct AnalysisFailurePresentation: Equatable {
             return "找不到上杆顶点到下杆的转换"
         case .noImpactCorridor:
             return "找不到可信的击球候选段"
-        case .missingFinishBoundary:
-            return "找不到稳定收杆位置"
+        case .missingPostImpactBoundary:
+            return "找不到击球后动作边界"
         case .incompleteSwingClip:
             return "视频缺少完整挥杆前段或后段"
         case .analysisCancelled:
@@ -565,6 +565,7 @@ enum SwingFeedbackProfiles {
         .leadArmParallelBackswing,
         .top,
         .leadArmParallelDownswing,
+        .shaftParallelDownswing,
         .impact,
         .followThrough
     ]
@@ -579,6 +580,7 @@ enum SwingFeedbackProfiles {
                         .takeaway,
                         .leadArmParallelBackswing,
                         .leadArmParallelDownswing,
+                        .shaftParallelDownswing,
                         .followThrough
                     ], evidence: .pose)
                 ]),
@@ -589,7 +591,7 @@ enum SwingFeedbackProfiles {
                     .init(metric: .spineStability, stages: movementStages, evidence: .pose)
                 ]),
                 FeedbackGroup(title: "头部位置", metrics: [
-                    .init(metric: .headPosition, stages: Array(SwingStage.allCases.dropLast()), evidence: .pose)
+                    .init(metric: .headPosition, stages: SwingStage.pStages, evidence: .pose)
                 ])
             ])
         case .faceOn:
@@ -598,6 +600,7 @@ enum SwingFeedbackProfiles {
                 FeedbackGroup(title: "释放", metrics: [
                     .init(metric: .clubRelease, stages: [
                         .leadArmParallelDownswing,
+                        .shaftParallelDownswing,
                         .impact
                     ], evidence: .clubAndImpact)
                 ]),
@@ -611,7 +614,7 @@ enum SwingFeedbackProfiles {
                     .init(metric: .leadHip, stages: movementStages, evidence: .pose)
                 ]),
                 FeedbackGroup(title: "头部位置", metrics: [
-                    .init(metric: .headPosition, stages: Array(SwingStage.allCases.dropLast()), evidence: .pose)
+                    .init(metric: .headPosition, stages: SwingStage.pStages, evidence: .pose)
                 ])
             ])
         }

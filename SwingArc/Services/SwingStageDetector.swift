@@ -148,7 +148,7 @@ struct BallPositionTracker: Equatable {
         } ?? true
         previousSourceFrameIndex = sourceFrameIndex
         if !isContiguous {
-            // Sparse P1/P2/P7 candidate neighborhoods are not a continuous
+            // Sparse P1/P2/P6/P8 candidate neighborhoods are not a continuous
             // disappearance sequence and must not share one miss streak.
             missCount = 0
         }
@@ -298,6 +298,8 @@ struct SwingTemporalFrame: Equatable {
     let sustainedFollowThrough: Bool
     let isAddressBoundary: Bool
     let isTopPlateauEnd: Bool
+    /// Legacy terminal-pose diagnostic. It is not used to close canonical
+    /// P1–P8 analysis or to resolve P8.
     let isFinishPlateauStart: Bool
     let shaftAngleContinuity: Double
     let ballStability: Double
@@ -313,6 +315,7 @@ enum SwingEvidenceTimeline {
     static let bodyStabilityThreshold = 0.08
 
     private static let handStabilityThreshold = 0.18
+    private static let takeawayBodyStabilityThreshold = 0.10
     private static let takeawayOnsetSpeedThreshold = 0.08
     private static let isolatedVisionJitterSpeedThreshold = 0.20
     private static let takeawayConfirmationDisplacement = 0.05
@@ -540,7 +543,10 @@ enum SwingEvidenceTimeline {
         evidence: [SwingFrameEvidence]
     ) -> Bool {
         guard index > evidence.startIndex,
-              frameStability(evidence[index]) == true,
+              evidence[index].headSpeed.isFinite,
+              evidence[index].hipSpeed.isFinite,
+              evidence[index].headSpeed <= takeawayBodyStabilityThreshold,
+              evidence[index].hipSpeed <= takeawayBodyStabilityThreshold,
               let start = evidence[index].handCenter,
               let hip = evidence[index].hipCenter,
               SwingGeometry.distance(start, hip) <= maximumAddressHandHipDistance,
@@ -556,6 +562,7 @@ enum SwingEvidenceTimeline {
             Double(evidence[index - 1].handVelocity.y)
         )
         guard currentSpeed >= takeawayOnsetSpeedThreshold,
+              currentSpeed <= handStabilityThreshold,
               previousSpeed < takeawayOnsetSpeedThreshold else { return false }
 
         let confirmationIndices = timedIndices(
@@ -888,9 +895,13 @@ enum SwingEvidenceTimeline {
 
 extension Array where Element == SwingTemporalFrame {
     var adaptiveBoundaryEvidence: AdaptiveBoundaryEvidence {
+        // This runs before sparse shaft/ball sampling. A sustained body-level
+        // follow-through is enough to close the adaptive search window; it is
+        // not a P8 decision. The final constrained solver still requires
+        // reliable shaft evidence before it resolves P8.
         AdaptiveBoundaryEvidence(
             hasAddressBoundary: contains(where: \.isAddressBoundary),
-            hasFinishBoundary: contains(where: \.isFinishPlateauStart)
+            hasPostImpactBoundary: contains(where: \.sustainedFollowThrough)
         )
     }
 }
@@ -1082,6 +1093,30 @@ enum SwingFeatureExtractor {
                 }
             }
         }
+
+        // Visibility alone is not handedness evidence: the trailing arm is
+        // frequently clearer through impact and follow-through. Prefer the arm
+        // that produces a sustained, long shoulder-to-wrist horizontal crossing,
+        // which is the defining observation for P3/P5.
+        let leftParallel = parallelReachEvidence(for: .left, frames: frames)
+        let rightParallel = parallelReachEvidence(for: .right, frames: frames)
+        switch (leftParallel.onsetTime, rightParallel.onsetTime) {
+        case let (.some(leftTime), .some(rightTime))
+            where abs(leftTime - rightTime) >= 0.05:
+            return leftTime < rightTime ? .left : .right
+        case (.some, .none):
+            return .left
+        case (.none, .some):
+            return .right
+        default:
+            break
+        }
+        let parallelSeparation = abs(leftParallel.score - rightParallel.score)
+        if max(leftParallel.score, rightParallel.score) >= 0.055,
+           parallelSeparation >= 0.04 {
+            return leftParallel.score > rightParallel.score ? .left : .right
+        }
+
         let separation = abs(leftScore - rightScore)
         guard separation >= max(2, max(leftScore, rightScore) * 0.03) else {
             if ballSideBalance > 0 { return .left }
@@ -1089,6 +1124,62 @@ enum SwingFeatureExtractor {
             return .unknown
         }
         return leftScore > rightScore ? .left : .right
+    }
+
+    private struct ParallelReachObservation {
+        let time: Double
+        let score: Double
+    }
+
+    private struct ParallelReachResolution {
+        let score: Double
+        let onsetTime: Double?
+    }
+
+    private static func parallelReachEvidence(
+        for side: LeadArmSide,
+        frames: [SwingFrameSample]
+    ) -> ParallelReachResolution {
+        let observations = frames.compactMap { frame -> ParallelReachObservation? in
+            guard let pose = frame.pose else { return nil }
+            let arm = points(for: side, pose: pose)
+            guard let shoulder = arm.shoulder,
+                  let wrist = arm.wrist,
+                  let shoulderCenter = SwingGeometry.center(
+                    pose.leftShoulder,
+                    pose.rightShoulder
+                  ),
+                  let hipCenter = SwingGeometry.center(pose.leftHip, pose.rightHip) else {
+                return nil
+            }
+            let torsoScale = SwingGeometry.distance(shoulderCenter, hipCenter)
+            guard torsoScale.isFinite, torsoScale > 0.001 else { return nil }
+            let angle = SwingGeometry.angleFromHorizontal(from: shoulder, to: wrist)
+            let horizontal = max(0, 1 - angle / 30)
+            let normalizedReach = SwingGeometry.distance(shoulder, wrist) / torsoScale
+            let reach = min(1, max(0, (normalizedReach - 0.35) / 0.55))
+            return ParallelReachObservation(
+                time: frame.time,
+                score: horizontal * reach
+            )
+        }
+
+        let onsetTime = zip(observations, observations.dropFirst()).first { first, second in
+            first.score >= 0.02
+                && second.score >= 0.02
+                && second.time - first.time <= 0.12
+        }?.0.time
+        let ranked = observations.map(\.score).sorted(by: >)
+
+        guard let strongest = ranked.first,
+              ranked.count > 1,
+              ranked[1] >= 0.02 else {
+            return ParallelReachResolution(score: 0, onsetTime: onsetTime)
+        }
+        return ParallelReachResolution(
+            score: strongest * 0.65 + ranked[1] * 0.35,
+            onsetTime: onsetTime
+        )
     }
 
     private static func armScore(shoulder: CGPoint?, elbow: CGPoint?, wrist: CGPoint?) -> Double {
@@ -1300,7 +1391,7 @@ enum StagePathTieBreakEvidence {
     /// Small, observed-evidence-only tie break. Timestamps and phase position
     /// deliberately do not participate, so tempo variants receive no prior.
     static func score(_ path: [StageCandidate]) -> Double {
-        guard path.count == SwingStage.allCases.count else { return 0 }
+        guard path.count == SwingStage.pStages.count else { return 0 }
         let requirementQuality = Double(path.filter(\.requirementsSatisfied).count)
             / Double(path.count)
         let objectQuality = Double(path.filter { $0.hasClubEvidence || $0.hasBallEvidence }.count)
@@ -1310,6 +1401,17 @@ enum StagePathTieBreakEvidence {
 }
 
 enum ParallelStageEvidence {
+    private static let minimumDownswingCandidateScore = 0.25
+
+    static func downswingArmHorizontalEvidence(angle: Double?) -> Double {
+        guard let angle, angle.isFinite else { return 0 }
+        return clamp(1 - abs(angle) / 30)
+    }
+
+    static func shouldRetainDownswingCandidate(score: Double) -> Bool {
+        score.isFinite && score >= minimumDownswingCandidateScore
+    }
+
     static func downswingScore(
         armHorizontal: Double,
         armExtension: Double,
@@ -1336,7 +1438,7 @@ enum ParallelStageEvidence {
         hasContinuedTurn: Bool,
         coverage: Double
     ) -> Double {
-        // P7 is a narrow horizontal band, not a single noisy angle minimum.
+        // P8 is a narrow horizontal band, not a single noisy angle minimum.
         // Velocity only contributes after it clears the same requirement used
         // to confirm the stage; tiny optical-flow noise cannot win the frame.
         let horizontalBand = ramp(parallelEvidence, minimum: 0.55, maximum: 0.75)
@@ -1368,7 +1470,7 @@ enum ParallelStageEvidence {
 enum ImpactCorridorResolver {
     /// Body-only candidates seed the sparse object pass. Front-view swings can
     /// have little projected hip rotation, so provisional low-confidence
-    /// frames must survive until shaft and ball evidence can disambiguate P6.
+    /// frames must survive until shaft and ball evidence can disambiguate P7.
     private static let minimumCandidateScore = 0.30
     private static let maximumCandidateCount = 5
 
@@ -1489,6 +1591,33 @@ enum BidirectionalStageCandidateResolver {
         timeline: [SwingTemporalFrame],
         impact: StageCandidate
     ) -> StageCandidateSet {
+        resolvedCandidates(
+            timeline: timeline,
+            impact: impact,
+            includesProvisionalDeliveryShaft: false
+        )
+    }
+
+    /// Provides pose-only P6 neighborhoods for the sparse object pass. These
+    /// candidates are never used by the final constrained solver: they are
+    /// explicitly low-confidence and exist only so the detector can look for
+    /// the shaft evidence that final P6 resolution requires.
+    static func objectSamplingCandidates(
+        timeline: [SwingTemporalFrame],
+        impact: StageCandidate
+    ) -> StageCandidateSet {
+        resolvedCandidates(
+            timeline: timeline,
+            impact: impact,
+            includesProvisionalDeliveryShaft: true
+        )
+    }
+
+    private static func resolvedCandidates(
+        timeline: [SwingTemporalFrame],
+        impact: StageCandidate,
+        includesProvisionalDeliveryShaft: Bool
+    ) -> StageCandidateSet {
         guard impact.stage == .impact,
               timeline.indices.contains(impact.evidenceIndex),
               timeline[impact.evidenceIndex].frame.sourceFrameIndex == impact.sourceFrameIndex else {
@@ -1506,12 +1635,21 @@ enum BidirectionalStageCandidateResolver {
         let p3 = ascendingParallelCandidates(before: p4, timeline: timeline)
         let p2 = takeawayShaftCandidates(before: p3, timeline: timeline)
         let p1 = addressBoundaryCandidates(before: p2, timeline: timeline)
-        let p7 = followThroughCandidates(
+        let p6 = deliveryShaftCandidates(
+            before: impact.evidenceIndex,
+            timeline: timeline
+        )
+        let p6ForThisPass = p6.isEmpty && includesProvisionalDeliveryShaft
+            ? provisionalDeliveryShaftCandidates(
+                before: impact.evidenceIndex,
+                timeline: timeline
+            )
+            : p6
+        let p8 = followThroughCandidates(
             after: impact.evidenceIndex,
             impact: impact,
             timeline: timeline
         )
-        let p8 = firstFinishPlateauCandidates(after: p7, timeline: timeline)
 
         return StageCandidateSet(
             impact: impact,
@@ -1521,9 +1659,9 @@ enum BidirectionalStageCandidateResolver {
                 .leadArmParallelBackswing: p3,
                 .top: p4,
                 .leadArmParallelDownswing: p5,
+                .shaftParallelDownswing: p6ForThisPass,
                 .impact: [impact],
-                .followThrough: p7,
-                .finish: p8
+                .followThrough: p8
             ]
         )
     }
@@ -1539,10 +1677,8 @@ enum BidirectionalStageCandidateResolver {
                 let frame = temporal.frame
                 guard temporal.sustainedDownswing,
                       frame.leadArmAngle != nil else { return nil }
-                let armHorizontal = closeness(
-                    frame.leadArmAngle,
-                    target: 0,
-                    tolerance: 18
+                let armHorizontal = ParallelStageEvidence.downswingArmHorizontalEvidence(
+                    angle: frame.leadArmAngle
                 )
                 let armExtended = ramp(
                     frame.leadArmExtension,
@@ -1570,7 +1706,9 @@ enum BidirectionalStageCandidateResolver {
                     hipOpen: hipOpen,
                     coverage: frame.poseCoverage
                 )
-                guard score >= 0.32 else { return nil }
+                guard ParallelStageEvidence.shouldRetainDownswingCandidate(
+                    score: score
+                ) else { return nil }
                 return candidate(
                     stage: .leadArmParallelDownswing,
                     index: index,
@@ -1779,6 +1917,122 @@ enum BidirectionalStageCandidateResolver {
         )
     }
 
+    /// P6 is a delivery position: it requires a trustworthy, horizontal shaft
+    /// observation while the hands are still travelling down toward impact.
+    /// Pose-only evidence must never substitute for this club-defined stage.
+    private static func deliveryShaftCandidates(
+        before upperBound: Int,
+        timeline: [SwingTemporalFrame]
+    ) -> [StageCandidate] {
+        guard upperBound > timeline.startIndex else { return [] }
+        return retainedCandidates(
+            (timeline.startIndex..<upperBound).compactMap { index in
+                let temporal = timeline[index]
+                let frame = temporal.frame
+                guard temporal.sustainedDownswing,
+                      let shaftHorizontal = reliableHorizontalShaftEvidence(frame) else {
+                    return nil
+                }
+                let handsNearHip: Double
+                if let hand = frame.handCenter, let hip = frame.hipCenter {
+                    let distance = SwingGeometry.distance(hand, hip)
+                    handsNearHip = distance.isFinite
+                        ? clamp(1 - distance / 0.30)
+                        : 0
+                } else {
+                    handsNearHip = 0
+                }
+                let downward = ramp(
+                    Double(frame.handVelocity.y),
+                    minimum: 0.15,
+                    maximum: 1
+                )
+                let hipOpen = ramp(
+                    abs(frame.hipAngle ?? 0),
+                    minimum: 8,
+                    maximum: 32
+                )
+                let requirements = shaftHorizontal >= 0.55
+                    && handsNearHip >= 0.40
+                    && downward >= 0.35
+                let score = clamp(
+                    shaftHorizontal * 0.48
+                        + handsNearHip * 0.20
+                        + downward * 0.16
+                        + hipOpen * 0.06
+                        + frame.poseCoverage * 0.10
+                )
+                guard score >= 0.32 else { return nil }
+                return candidate(
+                    stage: .shaftParallelDownswing,
+                    index: index,
+                    score: score,
+                    requirementsSatisfied: requirements,
+                    timeline: timeline
+                )
+            }
+        )
+    }
+
+    private static func provisionalDeliveryShaftCandidates(
+        before upperBound: Int,
+        timeline: [SwingTemporalFrame]
+    ) -> [StageCandidate] {
+        guard upperBound > timeline.startIndex else { return [] }
+        return retainedCandidates(
+            (timeline.startIndex..<upperBound).compactMap { index in
+                let temporal = timeline[index]
+                let frame = temporal.frame
+                guard temporal.sustainedDownswing else { return nil }
+                let handsNearHip: Double
+                if let hand = frame.handCenter, let hip = frame.hipCenter {
+                    let distance = SwingGeometry.distance(hand, hip)
+                    handsNearHip = distance.isFinite
+                        ? clamp(1 - distance / 0.30)
+                        : 0
+                } else {
+                    handsNearHip = 0
+                }
+                let downward = ramp(
+                    Double(frame.handVelocity.y),
+                    minimum: 0.15,
+                    maximum: 1
+                )
+                let hipOpen = ramp(
+                    abs(frame.hipAngle ?? 0),
+                    minimum: 8,
+                    maximum: 32
+                )
+                guard handsNearHip >= 0.25, downward >= 0.25 else { return nil }
+                let score = clamp(
+                    handsNearHip * 0.42
+                        + downward * 0.30
+                        + hipOpen * 0.10
+                        + frame.poseCoverage * 0.18
+                )
+                guard score >= 0.32 else { return nil }
+                let provisional = candidate(
+                    stage: .shaftParallelDownswing,
+                    index: index,
+                    score: score,
+                    requirementsSatisfied: false,
+                    timeline: timeline
+                )
+                return StageCandidate(
+                    stage: provisional.stage,
+                    evidenceIndex: provisional.evidenceIndex,
+                    sourceFrameIndex: provisional.sourceFrameIndex,
+                    time: provisional.time,
+                    score: provisional.score,
+                    requirementsSatisfied: false,
+                    maximumStatus: .lowConfidence,
+                    hasClubEvidence: false,
+                    hasBallEvidence: false
+                )
+            }
+        )
+    }
+
     private static func followThroughCandidates(
         after lowerBound: Int,
         impact: StageCandidate,
@@ -1800,20 +2054,18 @@ enum BidirectionalStageCandidateResolver {
             ((lowerBound + 1)..<timeline.endIndex).compactMap { index in
                 let temporal = timeline[index]
                 let frame = temporal.frame
-                guard temporal.sustainedFollowThrough else { return nil }
+                guard temporal.sustainedFollowThrough,
+                      let shaftHorizontal = reliableHorizontalShaftEvidence(frame) else {
+                    return nil
+                }
                 let armHorizontal = closeness(
                     frame.leadArmAngle,
                     target: 0,
                     tolerance: 18
                 )
-                let shaftHorizontal = frame.objectEvidence.shaft.map {
-                    closeness(
-                        horizontalAngle($0.angle),
-                        target: 0,
-                        tolerance: 18
-                    ) * clamp($0.confidence)
-                } ?? 0
-                let parallelEvidence = max(armHorizontal, shaftHorizontal)
+                // P8's shaft is defining evidence. The lead arm can increase
+                // confidence but must not create a release frame by itself.
+                let parallelEvidence = shaftHorizontal
                 let armExtension = frame.leadArmExtension.map {
                     ramp($0, minimum: 145, maximum: 175)
                 }
@@ -1841,7 +2093,7 @@ enum BidirectionalStageCandidateResolver {
                     && continuedChestTurn
                 let hipTurnScore = ramp(hipContinuation, minimum: 0, maximum: 10)
                 let chestTurnScore = ramp(chestContinuation, minimum: 0, maximum: 12)
-                let score = ParallelStageEvidence.followThroughScore(
+                let score = clamp(ParallelStageEvidence.followThroughScore(
                     parallelEvidence: parallelEvidence,
                     armExtension: armExtension,
                     postImpactRise: postImpactRise,
@@ -1849,7 +2101,7 @@ enum BidirectionalStageCandidateResolver {
                     chestTurn: chestTurnScore,
                     hasContinuedTurn: continuedHipTurn && continuedChestTurn,
                     coverage: frame.poseCoverage
-                )
+                ) + armHorizontal * 0.06)
                 guard score >= 0.32 else { return nil }
                 return candidate(
                     stage: .followThrough,
@@ -1862,36 +2114,22 @@ enum BidirectionalStageCandidateResolver {
         )
     }
 
-    private static func firstFinishPlateauCandidates(
-        after earlierCandidates: [StageCandidate],
-        timeline: [SwingTemporalFrame]
-    ) -> [StageCandidate] {
-        guard let lowerBound = earlierCandidates.map(\.evidenceIndex).min(),
-              lowerBound < timeline.index(before: timeline.endIndex) else { return [] }
-        return retainedCandidates(
-            ((lowerBound + 1)..<timeline.endIndex).compactMap { index in
-                let temporal = timeline[index]
-                guard temporal.isFinishPlateauStart else { return nil }
-                let frame = temporal.frame
-                let turn = max(
-                    ramp(abs(frame.shoulderAngle ?? 0), minimum: 5, maximum: 28),
-                    ramp(abs(frame.hipAngle ?? 0), minimum: 8, maximum: 38)
-                )
-                let score = clamp(
-                    0.55
-                        + highHandsScore(frame) * 0.15
-                        + turn * 0.15
-                        + frame.poseCoverage * 0.15
-                )
-                return candidate(
-                    stage: .finish,
-                    index: index,
-                    score: score,
-                    requirementsSatisfied: true,
-                    timeline: timeline
-                )
-            }
-        )
+    private static func reliableHorizontalShaftEvidence(
+        _ frame: SwingFrameEvidence
+    ) -> Double? {
+        guard let shaft = frame.objectEvidence.shaft,
+              shaft.confidence.isFinite,
+              shaft.confidence >= 0.70,
+              shaft.length.isFinite,
+              shaft.length >= 0.04 else {
+            return nil
+        }
+        let horizontal = closeness(
+            horizontalAngle(shaft.angle),
+            target: 0,
+            tolerance: 18
+        ) * clamp(shaft.confidence)
+        return horizontal >= 0.55 ? horizontal : nil
     }
 
     private static func retainedCandidates(
@@ -2128,7 +2366,7 @@ enum ConstrainedSwingPathSolver {
 
         guard let best else { return unresolvedResult() }
         let pathMargin = max(0, best.total - (secondBest?.total ?? best.total))
-        let detections = zip(SwingStage.allCases, best.candidates).map {
+        let detections = zip(SwingStage.pStages, best.candidates).map {
             stage, candidate -> SwingStageDetection in
             guard timeline.indices.contains(candidate.evidenceIndex) else {
                 return unresolvedDetection(stage: stage)
@@ -2178,7 +2416,7 @@ enum ConstrainedSwingPathSolver {
         timeline: [SwingTemporalFrame],
         visit: ([StageCandidate]) -> Void
     ) {
-        let stages = SwingStage.allCases
+        let stages = SwingStage.pStages
         func append(stageIndex: Int, path: [StageCandidate]) {
             guard stageIndex < stages.count else {
                 visit(path)
@@ -2230,7 +2468,7 @@ enum ConstrainedSwingPathSolver {
             return temporal.sustainedBackswing
         case .top:
             return temporal.isTopPlateauEnd && temporal.sustainedDownswing
-        case .leadArmParallelDownswing, .impact:
+        case .leadArmParallelDownswing, .shaftParallelDownswing, .impact:
             return temporal.sustainedDownswing
         case .followThrough:
             return temporal.sustainedFollowThrough
@@ -2243,7 +2481,7 @@ enum ConstrainedSwingPathSolver {
         _ path: [StageCandidate],
         timeline: [SwingTemporalFrame]
     ) -> Bool {
-        guard path.count == SwingStage.allCases.count,
+        guard path.count == SwingStage.pStages.count,
               zip(path, path.dropFirst()).allSatisfy({
                   $0.sourceFrameIndex < $1.sourceFrameIndex && $0.time < $1.time
               }),
@@ -2274,9 +2512,9 @@ enum ConstrainedSwingPathSolver {
             && frames[3].sustainedDownswing
             && frames[4].sustainedDownswing
             && frames[5].sustainedDownswing
-            && frames[6].sustainedFollowThrough
-            && path[6].evidenceIndex > path[5].evidenceIndex
-            && frames[7].isFinishPlateauStart
+            && frames[6].sustainedDownswing
+            && frames[7].sustainedFollowThrough
+            && path[7].evidenceIndex > path[6].evidenceIndex
     }
 
     private static func directionTransitionScore(
@@ -2294,13 +2532,13 @@ enum ConstrainedSwingPathSolver {
         )
         let downswing = durationWeightedSupport(
             from: path[3].evidenceIndex,
-            through: path[5].evidenceIndex,
+            through: path[6].evidenceIndex,
             timeline: timeline,
             matches: { $0.sustainedDownswing }
         )
         let followThrough = durationWeightedSupport(
-            from: path[5].evidenceIndex,
-            through: path[6].evidenceIndex,
+            from: path[6].evidenceIndex,
+            through: path[7].evidenceIndex,
             timeline: timeline,
             matches: { $0.sustainedFollowThrough }
         )
@@ -2310,17 +2548,10 @@ enum ConstrainedSwingPathSolver {
             through: topTime,
             timeline: timeline
         )
-        let finishTime = path[7].time
-        let finishPlateau = elapsedStabilitySupport(
-            from: finishTime,
-            through: finishTime + SwingEvidenceTimeline.stableWindow,
-            timeline: timeline
-        )
         return backswing * 0.20
-            + downswing * 0.25
+            + downswing * 0.30
             + followThrough * 0.20
             + topPlateau * 0.10
-            + finishPlateau * 0.15
     }
 
     private static func durationWeightedSupport(
@@ -2419,10 +2650,10 @@ enum ConstrainedSwingPathSolver {
     }
 
     private static func unresolvedResult() -> SwingAnalysisResult {
-        let detections = SwingStage.allCases.map(unresolvedDetection)
+        let detections = SwingStage.pStages.map(unresolvedDetection)
         return SwingAnalysisResult(
             detectedMarkers: [],
-            unresolvedStages: Set(SwingStage.allCases),
+            unresolvedStages: Set(SwingStage.pStages),
             detections: detections
         )
     }
@@ -2445,7 +2676,7 @@ enum AnalysisFailure: Equatable {
     case missingAddressBoundary
     case missingTopTransition
     case noImpactCorridor
-    case missingFinishBoundary
+    case missingPostImpactBoundary
     case incompleteSwingClip
     case analysisCancelled
 }
@@ -2471,7 +2702,7 @@ struct AnalysisWorkspacePresentation: Equatable {
     init(state: SwingAnalysisState) {
         guard case let .completed(result) = state else {
             markers = []
-            unresolvedStages = Set(SwingStage.allCases)
+            unresolvedStages = Set(SwingStage.pStages)
             detections = []
             allowsPoseOverlays = false
             return
@@ -2493,12 +2724,12 @@ enum OrderedStageSolver {
 
     static func solve(evidence rawEvidence: [SwingFrameEvidence]) -> SwingAnalysisResult {
         let evidence = rawEvidence.sorted { $0.time < $1.time }
-        guard evidence.count >= SwingStage.allCases.count,
+        guard evidence.count >= SwingStage.pStages.count,
               zip(evidence, evidence.dropFirst()).allSatisfy({ $0.time < $1.time }) else {
             return unresolvedResult()
         }
 
-        let stages = SwingStage.allCases
+        let stages = SwingStage.pStages
         let scores = stages.map { stage in
             evidence.indices.map { index in stageScore(stage, index: index, evidence: evidence) }
         }
@@ -2555,17 +2786,6 @@ enum OrderedStageSolver {
             }
         }
 
-        if let followThroughStageIndex = stages.firstIndex(of: .followThrough),
-           let finishStageIndex = stages.firstIndex(of: .finish) {
-            let firstPostFollowThrough = selected[followThroughStageIndex] + 1
-            if firstPostFollowThrough < evidence.count,
-               let earliestFinish = (firstPostFollowThrough..<evidence.count).first(where: {
-                   isStableFinish(startingAt: $0, evidence: evidence)
-               }) {
-                selected[finishStageIndex] = earliestFinish
-            }
-        }
-
         let detections = stages.indices.map { stageIndex -> SwingStageDetection in
             let stage = stages[stageIndex]
             let frameIndex = selected[stageIndex]
@@ -2591,6 +2811,13 @@ enum OrderedStageSolver {
 
             let hasClub = frame.objectEvidence.shaft != nil
             let hasBall = frame.objectEvidence.stableBall != nil
+            let hasReliableHorizontalShaft = reliableHorizontalShaftEvidence(frame)
+                != nil
+            if (stage == .shaftParallelDownswing || stage == .followThrough)
+                && !hasReliableHorizontalShaft {
+                status = .unresolved
+                confidence = 0
+            }
             if (stage == .takeaway && !hasClub) ||
                 (stage == .impact && !(hasClub && hasBall)) ||
                 ((stage == .leadArmParallelBackswing || stage == .leadArmParallelDownswing) && frame.leadArm == .unknown) {
@@ -2670,6 +2897,19 @@ enum OrderedStageSolver {
         case .leadArmParallelDownswing:
             return clamp(armHorizontal * 0.34 + armExtended * 0.18 + downward * 0.26 + hipTurn * 0.12 + coverage * 0.10)
 
+        case .shaftParallelDownswing:
+            let handNearHip = distance(frame.handCenter, frame.hipCenter).map {
+                1 - min(1, $0 / 0.30)
+            } ?? 0
+            guard reliableHorizontalShaftEvidence(frame) != nil else { return 0 }
+            return clamp(
+                shaftHorizontal * 0.48
+                    + handNearHip * 0.20
+                    + downward * 0.16
+                    + hipTurn * 0.06
+                    + coverage * 0.10
+            )
+
         case .impact:
             let handNearHip = distance(frame.handCenter, frame.hipCenter).map {
                 1 - min(1, $0 / 0.24)
@@ -2679,46 +2919,44 @@ enum OrderedStageSolver {
             return clamp(handNearHip * 0.17 + downward * 0.16 + shaftBall * 0.32 + ballChange * 0.16 + coverage * 0.19)
 
         case .followThrough:
-            return clamp(armHorizontal * 0.28 + upward * 0.27 + hipTurn * 0.17 + shaftHorizontal * 0.13 + coverage * 0.15)
+            guard reliableHorizontalShaftEvidence(frame) != nil else { return 0 }
+            return clamp(
+                shaftHorizontal * 0.35
+                    + armHorizontal * 0.18
+                    + upward * 0.22
+                    + hipTurn * 0.15
+                    + coverage * 0.10
+            )
 
         case .finish:
-            let stable = isStableFinish(startingAt: index, evidence: evidence) ? 1.0 : 0.0
-            let highHands = (handY != nil && shoulderY != nil && handY! < shoulderY!) ? 1.0 : 0.0
-            return clamp(stable * 0.55 + highHands * 0.15 + max(shoulderTurn, hipTurn) * 0.15 + coverage * 0.15)
+            // Decodable legacy compatibility only; it is never part of a
+            // canonical P1–P8 solve.
+            return 0
         }
-    }
-
-    private static func isStableFinish(
-        startingAt index: Int,
-        evidence: [SwingFrameEvidence]
-    ) -> Bool {
-        let start = evidence[index]
-        guard isLocallyStable(start) else { return false }
-        let targetDuration = 0.30
-        let minimumObservedDuration = 0.25
-        var observed = 0
-        var stable = 0
-        var lastTime = start.time
-        for candidate in evidence[index...] {
-            guard candidate.time - start.time <= targetDuration + 0.001 else { break }
-            observed += 1
-            if isLocallyStable(candidate) { stable += 1 }
-            lastTime = candidate.time
-        }
-        guard lastTime - start.time >= minimumObservedDuration, observed > 0 else { return false }
-        return Double(stable) / Double(observed) >= 0.75
-    }
-
-    private static func isLocallyStable(_ frame: SwingFrameEvidence) -> Bool {
-        frame.headSpeed <= 0.08 &&
-            frame.hipSpeed <= 0.08 &&
-            hypot(Double(frame.handVelocity.x), Double(frame.handVelocity.y)) <= 0.18
     }
 
     private static func shaftBallScore(_ object: SwingObjectEvidence) -> Double {
         guard let shaft = object.shaft, let ball = object.stableBall else { return 0 }
         let alignment = 1 - min(1, shaft.distanceFromExtendedLine(to: ball) / 0.08)
         return clamp(alignment * shaft.confidence)
+    }
+
+    private static func reliableHorizontalShaftEvidence(
+        _ frame: SwingFrameEvidence
+    ) -> Double? {
+        guard let shaft = frame.objectEvidence.shaft,
+              shaft.confidence.isFinite,
+              shaft.confidence >= 0.70,
+              shaft.length.isFinite,
+              shaft.length >= 0.04 else {
+            return nil
+        }
+        let horizontal = closeness(
+            horizontalAngle(shaft.angle),
+            target: 0,
+            tolerance: 18
+        ) * shaft.confidence
+        return horizontal >= 0.55 ? horizontal : nil
     }
 
     private static func transitionScore(from: SwingFrameEvidence, to: SwingFrameEvidence) -> Double {
@@ -2752,19 +2990,18 @@ enum OrderedStageSolver {
     }
 
     private static func unresolvedResult() -> SwingAnalysisResult {
-        let detections = SwingStage.allCases.map {
+        let detections = SwingStage.pStages.map {
             SwingStageDetection(stage: $0, time: nil, confidence: 0, status: .unresolved)
         }
         return SwingAnalysisResult(
             detectedMarkers: [],
-            unresolvedStages: Set(SwingStage.allCases),
+            unresolvedStages: Set(SwingStage.pStages),
             detections: detections
         )
     }
 }
 
 enum SwingStageDetector {
-    private static let finishStabilityThreshold: CGFloat = 0.04
     private static let directionChangeThreshold: CGFloat = 0.015
 
     static func detect(frames: [SwingFrameSample]) -> SwingAnalysisResult {
@@ -2830,29 +3067,16 @@ enum SwingStageDetector {
         if let p5Index = downswingParallelIndex(after: p4Index, in: samples) {
             resolved[.leadArmParallelDownswing] = samples[p5Index]
 
-            // P6 couples 2D hand velocity with the hands' position over the
-            // hip centre. Vertical velocity alone fires too early in a steep
-            // downswing, before the club reaches the ball.
-            if let p6Index = impactIndex(after: p5Index, in: samples) {
-                resolved[.impact] = samples[p6Index]
-
-                // P7 must similarly demonstrate a sustained rising hand path,
-                // so one noisy post-impact frame cannot create a false follow-through.
-                if let p7Index = sustainedFollowThroughIndex(after: p6Index, in: samples) {
-                    resolved[.followThrough] = samples[p7Index]
-
-                    // A clip may continue long after the golfer finishes, so
-                    // P8 is the first stable post-P7 plateau, never simply the
-                    // last frame of the source video.
-                    if let p8Index = finishIndex(after: p7Index, in: samples) {
-                        let finish = samples[p8Index]
-                        resolved[.finish] = finish
-                    }
-                }
+            // Legacy pose-only samples cannot establish P6 (shaft-parallel
+            // delivery) or P8 (shaft-parallel release). They stay unresolved
+            // rather than being inferred from hand motion. P7 can still be
+            // retained as an impact compatibility signal.
+            if let p7Index = impactIndex(after: p5Index, in: samples) {
+                resolved[.impact] = samples[p7Index]
             }
         }
 
-        let detections = SwingStage.allCases.map { stage -> SwingStageDetection in
+        let detections = SwingStage.pStages.map { stage -> SwingStageDetection in
             guard let sample = resolved[stage] else {
                 return SwingStageDetection(stage: stage, time: nil, confidence: 0, status: .unresolved)
             }
@@ -2878,12 +3102,12 @@ enum SwingStageDetector {
     }
 
     private static func unresolvedResult() -> SwingAnalysisResult {
-        let detections = SwingStage.allCases.map {
+        let detections = SwingStage.pStages.map {
             SwingStageDetection(stage: $0, time: nil, confidence: 0, status: .unresolved)
         }
         return SwingAnalysisResult(
             detectedMarkers: [],
-            unresolvedStages: Set(SwingStage.allCases),
+            unresolvedStages: Set(SwingStage.pStages),
             detections: detections
         )
     }
@@ -2911,7 +3135,8 @@ enum SwingStageDetector {
             postureMatchesStage = sample.leftElbow != nil || sample.rightElbow != nil
         case .top:
             postureMatchesStage = sample.wristY < (midpointY(sample.leftShoulder, sample.rightShoulder) ?? hipY)
-        case .leadArmParallelDownswing, .impact, .followThrough, .finish:
+        case .leadArmParallelDownswing, .shaftParallelDownswing,
+                .impact, .followThrough, .finish:
             postureMatchesStage = abs(sample.wristY - hipY) <= 0.35
         }
         return postureMatchesStage ? base : base * 0.55
@@ -2955,24 +3180,6 @@ enum SwingStageDetector {
             return (index, score)
         }
         return candidates.max { $0.score < $1.score }?.index
-    }
-
-    private static func sustainedFollowThroughIndex(after impactIndex: Int, in samples: [SwingPoseSample]) -> Int? {
-        guard impactIndex + 2 < samples.count else { return nil }
-        return ((impactIndex + 1)..<(samples.count - 1)).first { index in
-            samples[index].wristY < samples[impactIndex].wristY - directionChangeThreshold &&
-            samples[index + 1].wristY < samples[index].wristY - directionChangeThreshold
-        }
-    }
-
-    private static func finishIndex(after followThroughIndex: Int, in samples: [SwingPoseSample]) -> Int? {
-        guard followThroughIndex + 2 < samples.count else { return nil }
-        return ((followThroughIndex + 1)..<(samples.count - 1)).first { index in
-            let first = samples[index]
-            let second = samples[index + 1]
-            return first.wristY < samples[followThroughIndex].wristY - directionChangeThreshold &&
-                abs(second.wristY - first.wristY) <= finishStabilityThreshold
-        }.map { $0 + 1 }
     }
 
     private static func handSpeed(at index: Int, in samples: [SwingPoseSample]) -> CGFloat {
@@ -3019,7 +3226,7 @@ enum SwingStageDetector {
 }
 
 /// Keeps full-swing analysis dense enough to resolve the short motion interval
-/// inside a much longer imported video.  Twelve samples per second gives the
+/// inside a much longer imported video. Eight samples per second gives the
 /// detector at least 9 observations for a typical 0.8–1.0 second swing.
 enum SwingAnalysisSamplingPlan {
     static let samplesPerSecond = 8.0
@@ -3072,7 +3279,9 @@ enum SwingCoreLocationResult: Equatable {
 
 struct AdaptiveBoundaryEvidence: Equatable {
     let hasAddressBoundary: Bool
-    let hasFinishBoundary: Bool
+    /// Body-only coverage used while deciding how far to scan. This is
+    /// deliberately broader than P8, whose final resolution is shaft-strict.
+    let hasPostImpactBoundary: Bool
 }
 
 enum AdaptiveSwingWindowAction: Equatable {
@@ -3097,7 +3306,7 @@ struct AdaptiveWindowSearchState {
         duration: Double,
         evidence: AdaptiveBoundaryEvidence
     ) -> AdaptiveSwingWindowAction {
-        if evidence.hasAddressBoundary && evidence.hasFinishBoundary {
+        if evidence.hasAddressBoundary && evidence.hasPostImpactBoundary {
             return AdaptiveSwingWindowPlanner.nextAction(
                 current: current,
                 duration: duration,
@@ -3113,7 +3322,7 @@ struct AdaptiveWindowSearchState {
            shiftDirection != requiredDirection {
             return .failed(
                 evidence.hasAddressBoundary
-                    ? .missingFinishBoundary
+                    ? .missingPostImpactBoundary
                     : .missingAddressBoundary
             )
         }
@@ -3154,7 +3363,7 @@ enum AdaptiveSwingWindowPlanner {
         guard current.duration <= maximumSpan + epsilon else {
             return .failed(.swingWindowTooLong)
         }
-        if evidence.hasAddressBoundary && evidence.hasFinishBoundary { return .ready(current) }
+        if evidence.hasAddressBoundary && evidence.hasPostImpactBoundary { return .ready(current) }
         if !evidence.hasAddressBoundary {
             guard current.startTime > 0 else { return .failed(.incompleteSwingClip) }
             let proposedStart = max(0, current.startTime - expansionStep)
@@ -3473,6 +3682,59 @@ enum SwingAttemptSegmenter {
     }
 }
 
+/// Chooses the motion window that most resembles a full golf swing instead of
+/// simply accepting the largest body movement in the clip. Walking toward the
+/// ball or bending to retrieve it can carry more total motion energy than the
+/// swing itself, while the swing retains a substantially larger vertical hand
+/// arc relative to the player's torso scale.
+enum SwingAttemptSelectionPolicy {
+    static func preferredAttempt(
+        in attempts: [SwingAttempt],
+        samples: [CoarseSwingSample]
+    ) -> SwingAttempt? {
+        rankedAttempts(in: attempts, samples: samples).first
+    }
+
+    static func rankedAttempts(
+        in attempts: [SwingAttempt],
+        samples: [CoarseSwingSample]
+    ) -> [SwingAttempt] {
+        attempts.compactMap { attempt -> (attempt: SwingAttempt, score: Double)? in
+            let poses = samples
+                .filter { $0.time >= attempt.startTime && $0.time <= attempt.endTime }
+                .compactMap(\.pose)
+            guard poses.count >= 3 else { return nil }
+
+            let handHeights = poses.map(\.wristY)
+            guard let minimumHandHeight = handHeights.min(),
+                  let maximumHandHeight = handHeights.max() else { return nil }
+            let torsoScales = poses.compactMap(torsoScale).sorted()
+            guard !torsoScales.isEmpty else { return nil }
+            let scale = max(0.000_001, torsoScales[torsoScales.count / 2])
+            let verticalArc = Double(maximumHandHeight - minimumHandHeight) / scale
+
+            let highHandBonus = poses.compactMap { pose -> Double? in
+                guard let leftShoulder = pose.leftShoulder,
+                      let rightShoulder = pose.rightShoulder else { return nil }
+                let shoulderY = (leftShoulder.y + rightShoulder.y) / 2
+                return max(0, Double(shoulderY - pose.wristY) / scale)
+            }.max() ?? 0
+            return (attempt, verticalArc + highHandBonus * 0.25)
+        }.sorted { lhs, rhs in
+            if abs(lhs.score - rhs.score) > 0.000_001 {
+                return lhs.score > rhs.score
+            }
+            return lhs.attempt.startTime < rhs.attempt.startTime
+        }.map(\.attempt)
+    }
+
+    private static func torsoScale(_ pose: SwingPoseSample) -> Double? {
+        guard let shoulder = SwingGeometry.center(pose.leftShoulder, pose.rightShoulder),
+              let hip = SwingGeometry.center(pose.leftHip, pose.rightHip) else { return nil }
+        return SwingGeometry.distance(shoulder, hip)
+    }
+}
+
 /// Temporary compatibility adapter for the production orchestration, which is
 /// migrated to the adaptive planner in a later task.
 enum SwingWindowLocator {
@@ -3555,6 +3817,7 @@ enum SparseObjectSamplingPlan {
     private static let sampledStages: Set<SwingStage> = [
         .address,
         .takeaway,
+        .shaftParallelDownswing,
         .impact,
         .followThrough
     ]
@@ -3617,7 +3880,12 @@ enum SparseObjectSamplingPlan {
         // the centers of up to three plausible alternatives per non-impact stage;
         // the normal priority pass below fills their neighboring frames when
         // space remains.
-        for stage in [SwingStage.address, .takeaway, .followThrough] {
+        for stage in [
+            SwingStage.address,
+            .takeaway,
+            .shaftParallelDownswing,
+            .followThrough
+        ] {
             for center in diverseCandidateCenters(
                 for: stage,
                 from: neighborhoods,
