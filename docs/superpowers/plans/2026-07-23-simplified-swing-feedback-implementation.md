@@ -525,6 +525,7 @@ struct SimplifiedSwingFeedbackSmoke {
             findings: []
         )
         precondition(estimated.card(for: .handPath)?.status == .insufficientEvidence)
+        precondition(estimated.card(for: .swingPlane)?.status == .insufficientEvidence)
         precondition(estimated.card(for: .bodyStability)?.status != .insufficientEvidence)
 
         let missingImpact = SwingFeedbackAssembler.make(
@@ -1186,7 +1187,7 @@ Card order is always `SwingFeedbackCategory.allCases`. Never sort cards by statu
 
 Run the command from Step 2 again.
 
-Expected: executable exits 0; changing P3 hand evidence affects only `手部路径`, and removing P7 impact evidence affects only `击球与释放`.
+Expected: executable exits 0; changing P3 hand evidence affects `手部路径` and `挥杆平面` because both consume that point, while unrelated cards remain unchanged; removing P7 impact evidence affects only `击球与释放`.
 
 - [ ] **Step 7: Commit the fixed feedback domain**
 
@@ -2345,7 +2346,7 @@ git commit -m "refactor: retire configurable swing feedback"
 Implementation is complete only when all of the following are true:
 
 - `SwingFeedbackCategory.allCases` produces exactly five cards in the confirmed order.
-- A single estimated P3 hand point downgrades only `手部路径`.
+- A single estimated P3 hand point downgrades `手部路径` and `挥杆平面`, while unrelated cards remain unchanged.
 - Missing P7 impact evidence downgrades only `击球与释放`.
 - Unsupported equipment/ball-flight parameters are absent from new artifacts, services, and views.
 - Old projects containing `feedbackConfiguration` still decode.

@@ -48,6 +48,8 @@
 		F8000000000000000000000B /* GolfObjectObservationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000C /* GolfObjectObservationProvider.swift */; };
 		F8000000000000000000000D /* CoreMLGolfObjectDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */; };
 		F8000000000000000000000F /* SwingMetricEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000010 /* SwingMetricEngine.swift */; };
+		F80000000000000000000011 /* SimplifiedSwingFeedbackModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000012 /* SimplifiedSwingFeedbackModels.swift */; };
+		F80000000000000000000013 /* SwingFeedbackAssembler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000014 /* SwingFeedbackAssembler.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -93,6 +95,8 @@
 		F8000000000000000000000C /* GolfObjectObservationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GolfObjectObservationProvider.swift; sourceTree = "<group>"; };
 		F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreMLGolfObjectDetector.swift; sourceTree = "<group>"; };
 		F80000000000000000000010 /* SwingMetricEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingMetricEngine.swift; sourceTree = "<group>"; };
+		F80000000000000000000012 /* SimplifiedSwingFeedbackModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimplifiedSwingFeedbackModels.swift; sourceTree = "<group>"; };
+		F80000000000000000000014 /* SwingFeedbackAssembler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingFeedbackAssembler.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -139,6 +143,7 @@
 				D60000000000000000000006 /* LiveSwingCaptureModels.swift */,
 				F80000000000000000000002 /* SwingObservationModels.swift */,
 				F80000000000000000000004 /* SwingMetricModels.swift */,
+				F80000000000000000000012 /* SimplifiedSwingFeedbackModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -163,6 +168,7 @@
 				F8000000000000000000000C /* GolfObjectObservationProvider.swift */,
 				F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */,
 				F80000000000000000000010 /* SwingMetricEngine.swift */,
+				F80000000000000000000014 /* SwingFeedbackAssembler.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -300,12 +306,14 @@
 				D6000000000000000000000B /* CapturedVideoStore.swift in Sources */,
 				F80000000000000000000001 /* SwingObservationModels.swift in Sources */,
 				F80000000000000000000003 /* SwingMetricModels.swift in Sources */,
+				F80000000000000000000011 /* SimplifiedSwingFeedbackModels.swift in Sources */,
 				F80000000000000000000005 /* SwingInputQualityEvaluator.swift in Sources */,
 				F80000000000000000000007 /* SwingPoseObservationAdapter.swift in Sources */,
 				F80000000000000000000009 /* SwingTrajectoryTracker.swift in Sources */,
 				F8000000000000000000000B /* GolfObjectObservationProvider.swift in Sources */,
 				F8000000000000000000000D /* CoreMLGolfObjectDetector.swift in Sources */,
 				F8000000000000000000000F /* SwingMetricEngine.swift in Sources */,
+				F80000000000000000000013 /* SwingFeedbackAssembler.swift in Sources */,
 				C40000000000000000000001 /* BrandMarkView.swift in Sources */,
 			);
 		};
