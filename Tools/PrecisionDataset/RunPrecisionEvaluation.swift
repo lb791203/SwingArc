@@ -15,7 +15,9 @@ struct PrecisionClipEvaluation: Codable {
     let split: DatasetSplit
     let view: DatasetView?
     let stages: [PrecisionStageEvaluation]
+    let expectedBodyLandmarkCount: Int
     let bodyLandmarks: [PrecisionBodyLandmarkEvaluation]
+    let expectedClubheadFrameCount: Int
     let clubheadFrames: [PrecisionClubheadFrameEvaluation]
     let metrics: [SwingMetricValue]
 }
@@ -28,6 +30,7 @@ struct PrecisionStageEvaluation: Codable {
 }
 
 struct PrecisionBodyLandmarkEvaluation: Codable {
+    let sourceFrameIndex: Int
     let landmark: String
     let normalizedError: Double?
 }
@@ -78,6 +81,8 @@ struct PrecisionEvaluationReport: Codable {
     let clubheadByView: [PrecisionClubheadViewSummary]
     let inputRejections: [PrecisionInputRejectionReport]
     let unsupportedMetricsHaveNoMeasuredValues: Bool
+    let dataIntegrityPassed: Bool
+    let dataIntegrityIssues: [String]
     let device: PrecisionDeviceMeasurement
     let releasePassed: Bool
     let failedThresholds: [String]
@@ -148,6 +153,8 @@ extension PrecisionEvaluationReport {
         case clubheadByView
         case inputRejections
         case unsupportedMetricsHaveNoMeasuredValues
+        case dataIntegrityPassed
+        case dataIntegrityIssues
         case device
         case releasePassed
         case failedThresholds
@@ -174,6 +181,8 @@ extension PrecisionEvaluationReport {
             unsupportedMetricsHaveNoMeasuredValues,
             forKey: .unsupportedMetricsHaveNoMeasuredValues
         )
+        try container.encode(dataIntegrityPassed, forKey: .dataIntegrityPassed)
+        try container.encode(dataIntegrityIssues, forKey: .dataIntegrityIssues)
         try container.encode(device, forKey: .device)
         try container.encode(releasePassed, forKey: .releasePassed)
         try container.encode(failedThresholds, forKey: .failedThresholds)
@@ -255,6 +264,15 @@ enum PrecisionEvaluationReportBuilder {
     static let maximumBodyLandmarkMedianError = 0.03
     static let minimumClubheadVisibleFrameHitRate = 0.90
     static let clubheadMaximumAcceptedError = 0.02
+    private static let requiredBodyLandmarks: Set<String> = [
+        "head",
+        "leftShoulder", "rightShoulder",
+        "leftElbow", "rightElbow",
+        "leftWrist", "rightWrist",
+        "leftHip", "rightHip",
+        "leftKnee", "rightKnee",
+        "leftAnkle", "rightAnkle"
+    ]
 
     private static let orderedSplits: [DatasetSplit] = [
         .development,
@@ -269,7 +287,10 @@ enum PrecisionEvaluationReportBuilder {
 
     static func makeReport(from input: PrecisionEvaluationInput) -> PrecisionEvaluationReport {
         let heldOutClips = input.clips.filter { $0.split == .heldOut }
+        let classifiedHeldOutClips = heldOutClips.filter { $0.view != nil }
         let heldOutGolferCount = uniqueGolfers(in: heldOutClips).count
+        let dataIntegrityIssues = validateHeldOutData(heldOutClips)
+        let dataIntegrityPassed = dataIntegrityIssues.isEmpty
         let golferCounts = orderedSplits.flatMap { split in
             orderedViews.map { view in
                 PrecisionGolferCount(
@@ -302,11 +323,11 @@ enum PrecisionEvaluationReportBuilder {
                 )
             }
         }
-        let bodyLandmarks = summarizeBodyLandmarks(heldOutClips: heldOutClips)
-        let allBodyErrors = heldOutClips.flatMap(\.bodyLandmarks)
+        let bodyLandmarks = summarizeBodyLandmarks(heldOutClips: classifiedHeldOutClips)
+        let allBodyErrors = classifiedHeldOutClips.flatMap(\.bodyLandmarks)
             .compactMap { finiteValue($0.normalizedError) }
         let bodyLandmarkMedianError = percentile(allBodyErrors, percentile: 0.50)
-        let clubhead = summarizeClubhead(clips: heldOutClips)
+        let clubhead = summarizeClubhead(clips: classifiedHeldOutClips)
         let clubheadByView = orderedViews.map { view in
             PrecisionClubheadViewSummary(
                 view: view,
@@ -335,6 +356,7 @@ enum PrecisionEvaluationReportBuilder {
             && clubhead.visibleFrameHitRate >= minimumClubheadVisibleFrameHitRate
             && clubhead.maximumAcceptedError == clubheadMaximumAcceptedError
             && unsupportedMetricsHaveNoMeasuredValues
+            && dataIntegrityPassed
 
         let failedThresholds = failures(
             heldOutGolferCount: heldOutGolferCount,
@@ -342,7 +364,8 @@ enum PrecisionEvaluationReportBuilder {
             stageRates: stageRates,
             bodyLandmarkMedianError: bodyLandmarkMedianError,
             clubhead: clubhead,
-            unsupportedMetricsHaveNoMeasuredValues: unsupportedMetricsHaveNoMeasuredValues
+            unsupportedMetricsHaveNoMeasuredValues: unsupportedMetricsHaveNoMeasuredValues,
+            dataIntegrityPassed: dataIntegrityPassed
         )
 
         return PrecisionEvaluationReport(
@@ -367,6 +390,8 @@ enum PrecisionEvaluationReportBuilder {
                 )
             },
             unsupportedMetricsHaveNoMeasuredValues: unsupportedMetricsHaveNoMeasuredValues,
+            dataIntegrityPassed: dataIntegrityPassed,
+            dataIntegrityIssues: dataIntegrityIssues,
             device: input.device,
             releasePassed: releasePassed,
             failedThresholds: failedThresholds
@@ -376,7 +401,7 @@ enum PrecisionEvaluationReportBuilder {
     private static func uniqueGolfers(
         in clips: [PrecisionClipEvaluation]
     ) -> Set<String> {
-        Set(clips.compactMap(\.golferID).filter { !$0.isEmpty })
+        Set(clips.compactMap { canonicalIdentifier($0.golferID) })
     }
 
     private static func summarizeStage(
@@ -384,20 +409,26 @@ enum PrecisionEvaluationReportBuilder {
         view: DatasetView,
         stage: String
     ) -> PrecisionStageRate {
-        let records = heldOutClips
-            .filter { $0.view == view }
-            .flatMap(\.stages)
-            .filter { $0.stage == stage }
-        let references = records.filter { $0.referenceFrame != nil }
-        let hits = references.filter(isStageHit)
-        let unresolved = references.filter { record in
-            record.predictedFrame == nil || normalizedStatus(record.status) == "unresolved"
+        let clips = heldOutClips.filter { $0.view == view }
+        let recordsByClip = clips.map { clip in
+            clip.stages.filter { normalizedStage($0.stage) == stage }
         }
-        let falseConfirmations = records.filter(isFalseConfirmation)
-        let falseConfirmationDenominator = max(
-            references.count + records.filter { $0.referenceFrame == nil }.count,
-            1
-        )
+        let references = recordsByClip.filter {
+            $0.count == 1 && $0[0].referenceFrame != nil
+        }
+        let hits = recordsByClip.filter {
+            $0.count == 1 && isStageHit($0[0])
+        }
+        let unresolved = recordsByClip.filter { records in
+            guard records.count == 1 else { return true }
+            let record = records[0]
+            return record.referenceFrame == nil
+                || record.predictedFrame == nil
+                || normalizedStatus(record.status) == "unresolved"
+        }
+        let falseConfirmations = recordsByClip.filter { records in
+            records.contains(where: isFalseConfirmation)
+        }
         return PrecisionStageRate(
             view: view,
             stage: stage,
@@ -405,13 +436,15 @@ enum PrecisionEvaluationReportBuilder {
             hitCount: hits.count,
             unresolvedCount: unresolved.count,
             falseConfirmationCount: falseConfirmations.count,
-            hitRate: rate(numerator: hits.count, denominator: references.count),
+            hitRate: rate(numerator: hits.count, denominator: clips.count),
             unresolvedRate: rate(
                 numerator: unresolved.count,
-                denominator: references.count
+                denominator: clips.count
             ),
-            falseConfirmationRate: Double(falseConfirmations.count)
-                / Double(falseConfirmationDenominator)
+            falseConfirmationRate: rate(
+                numerator: falseConfirmations.count,
+                denominator: clips.count
+            )
         )
     }
 
@@ -439,6 +472,92 @@ enum PrecisionEvaluationReportBuilder {
 
     private static func normalizedStatus(_ status: String) -> String {
         status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func normalizedStage(_ stage: String) -> String {
+        stage.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private static func canonicalIdentifier(_ identifier: String?) -> String? {
+        guard let identifier else { return nil }
+        let normalized = identifier
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private static func validateHeldOutData(
+        _ clips: [PrecisionClipEvaluation]
+    ) -> [String] {
+        var issues: [String] = []
+        let requiredStageSet = Set(requiredStages)
+
+        let golferIdentifiersAreCanonical = clips.allSatisfy { clip in
+            guard let raw = clip.golferID,
+                  let canonical = canonicalIdentifier(raw) else { return false }
+            return raw == canonical
+        }
+        if !golferIdentifiersAreCanonical {
+            issues.append("held-out golfer IDs are canonical nonblank identifiers")
+        }
+
+        if !clips.allSatisfy({ $0.view != nil }) {
+            issues.append("held-out clips have classified views")
+        }
+
+        let stageRecordsAreComplete = clips.allSatisfy { clip in
+            let normalized = clip.stages.map { normalizedStage($0.stage) }
+            return normalized.count == requiredStages.count
+                && Set(normalized) == requiredStageSet
+        }
+        if !stageRecordsAreComplete {
+            issues.append("held-out clips have exactly one P1-P8 record")
+        }
+
+        let stageReferencesAreComplete = clips.allSatisfy { clip in
+            clip.stages.count == requiredStages.count
+                && clip.stages.allSatisfy { $0.referenceFrame != nil }
+        }
+        if !stageReferencesAreComplete {
+            issues.append("held-out P1-P8 references are complete")
+        }
+
+        let bodyObservationsAreComplete = clips.allSatisfy { clip in
+            let keys = clip.bodyLandmarks.map {
+                "\($0.sourceFrameIndex):\($0.landmark)"
+            }
+            let actualKeys = Set(keys)
+            let stageFrames = clip.stages.compactMap(\.referenceFrame)
+            let requiredKeys = Set(stageFrames.flatMap { frame in
+                requiredBodyLandmarks.map { "\(frame):\($0)" }
+            })
+            return clip.expectedBodyLandmarkCount > 0
+                && clip.bodyLandmarks.count == clip.expectedBodyLandmarkCount
+                && actualKeys.count == keys.count
+                && requiredKeys.isSubset(of: actualKeys)
+                && clip.bodyLandmarks.allSatisfy {
+                    $0.sourceFrameIndex >= 0
+                        && !$0.landmark
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                            .isEmpty
+                }
+        }
+        if !bodyObservationsAreComplete {
+            issues.append("held-out body observations are complete and unique")
+        }
+
+        let clubheadObservationsAreComplete = clips.allSatisfy { clip in
+            let indices = clip.clubheadFrames.map(\.sourceFrameIndex)
+            return clip.expectedClubheadFrameCount > 0
+                && clip.clubheadFrames.count == clip.expectedClubheadFrameCount
+                && Set(indices).count == indices.count
+                && clip.clubheadFrames.allSatisfy { $0.sourceFrameIndex >= 0 }
+        }
+        if !clubheadObservationsAreComplete {
+            issues.append("held-out clubhead visibility observations are complete and unique")
+        }
+
+        return issues
     }
 
     private static func summarizeBodyLandmarks(
@@ -523,7 +642,8 @@ enum PrecisionEvaluationReportBuilder {
         stageRates: [PrecisionStageRate],
         bodyLandmarkMedianError: Double?,
         clubhead: PrecisionClubheadSummary,
-        unsupportedMetricsHaveNoMeasuredValues: Bool
+        unsupportedMetricsHaveNoMeasuredValues: Bool,
+        dataIntegrityPassed: Bool
     ) -> [String] {
         var failures: [String] = []
         if heldOutGolferCount < minimumHeldOutGolferCount {
@@ -550,6 +670,9 @@ enum PrecisionEvaluationReportBuilder {
         }
         if !unsupportedMetricsHaveNoMeasuredValues {
             failures.append("unsupported metrics have no measured values")
+        }
+        if !dataIntegrityPassed {
+            failures.append("held-out data integrity passes")
         }
         return failures
     }
@@ -669,9 +792,9 @@ enum PrecisionEvaluationCLI {
         var lines = [
             "# Precision Swing Evaluation",
             "",
-            "- Dataset hash: `\(report.datasetHash)`",
-            "- Artifact version: `\(report.artifactVersion)`",
-            "- Model version: `\(report.modelVersion)`",
+            "- Dataset hash: \(escapeMarkdown(report.datasetHash))",
+            "- Artifact version: \(escapeMarkdown(report.artifactVersion))",
+            "- Model version: \(escapeMarkdown(report.modelVersion))",
             "- Held-out golfers: \(report.heldOutGolferCount)",
             "",
             "## Golfer counts by split and view",
@@ -710,7 +833,7 @@ enum PrecisionEvaluationCLI {
             "| --- | --- | ---: | ---: | ---: | ---: | ---: |"
         ]
         lines += report.bodyLandmarks.map {
-            "| \($0.view.rawValue) | \($0.landmark) | \($0.sampleCount) | \($0.measuredCount) | \(format($0.medianError)) | \(format($0.p90Error)) | \(format($0.missRate)) |"
+            "| \($0.view.rawValue) | \(escapeMarkdown($0.landmark)) | \($0.sampleCount) | \($0.measuredCount) | \(format($0.medianError)) | \(format($0.p90Error)) | \(format($0.missRate)) |"
         }
         lines += [
             "",
@@ -733,17 +856,18 @@ enum PrecisionEvaluationCLI {
             "| --- | --- | --- | --- | --- |"
         ]
         lines += report.inputRejections.map {
-            "| \($0.caseID) | \($0.expectedRejected) | \($0.actualRejected) | \($0.passed) | \($0.reason) |"
+            "| \(escapeMarkdown($0.caseID)) | \($0.expectedRejected) | \($0.actualRejected) | \($0.passed) | \(escapeMarkdown($0.reason)) |"
         }
         lines += [
             "",
             "## Runtime",
             "",
-            "- Device: \(report.device.device)",
-            "- OS: \(report.device.operatingSystem)",
+            "- Device: \(escapeMarkdown(report.device.device))",
+            "- OS: \(escapeMarkdown(report.device.operatingSystem))",
             "- Elapsed seconds: \(format(report.device.elapsedSeconds))",
             "- Peak memory MB: \(format(report.device.peakMemoryMB))",
             "- Unsupported metrics have no measured values: \(report.unsupportedMetricsHaveNoMeasuredValues)",
+            "- Held-out data integrity passed: \(report.dataIntegrityPassed)",
             "",
             "Release passed: **\(report.releasePassed)**",
             "",
@@ -753,7 +877,15 @@ enum PrecisionEvaluationCLI {
         if report.failedThresholds.isEmpty {
             lines.append("- None")
         } else {
-            lines += report.failedThresholds.map { "- \($0)" }
+            lines += report.failedThresholds.map { "- \(escapeMarkdown($0))" }
+        }
+        if !report.dataIntegrityIssues.isEmpty {
+            lines += [
+                "",
+                "## Data integrity issues",
+                ""
+            ]
+            lines += report.dataIntegrityIssues.map { "- \(escapeMarkdown($0))" }
         }
         return lines.joined(separator: "\n") + "\n"
     }
@@ -772,6 +904,18 @@ enum PrecisionEvaluationCLI {
             locale: Locale(identifier: "en_US_POSIX"),
             value
         )
+    }
+
+    private static func escapeMarkdown(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "|", with: "&#124;")
+            .replacingOccurrences(of: "`", with: "&#96;")
+            .replacingOccurrences(of: "\r\n", with: "<br>")
+            .replacingOccurrences(of: "\r", with: "<br>")
+            .replacingOccurrences(of: "\n", with: "<br>")
     }
 }
 

@@ -20,7 +20,7 @@ struct PrecisionEvaluationReportSmoke {
         precondition(passingReport.stageRates.allSatisfy { $0.hitRate == 1 })
         precondition(passingReport.stageRates.allSatisfy { $0.unresolvedRate == 0 })
         precondition(passingReport.stageRates.allSatisfy { $0.falseConfirmationRate == 0 })
-        precondition(passingReport.bodyLandmarks.count == 4)
+        precondition(passingReport.bodyLandmarks.count == 26)
         precondition(passingReport.bodyLandmarks.allSatisfy { $0.medianError == 0.02 })
         precondition(passingReport.bodyLandmarks.allSatisfy { $0.p90Error == 0.02 })
         precondition(passingReport.bodyLandmarks.allSatisfy { $0.missRate == 0 })
@@ -37,14 +37,21 @@ struct PrecisionEvaluationReportSmoke {
         precondition(passingReport.device.elapsedSeconds == 2.5)
         precondition(passingReport.device.peakMemoryMB == 384)
         precondition(passingReport.unsupportedMetricsHaveNoMeasuredValues)
+        precondition(passingReport.dataIntegrityPassed)
+        precondition(passingReport.dataIntegrityIssues.isEmpty)
         precondition(passingReport.releasePassed)
         precondition(passingReport.failedThresholds.isEmpty)
 
         verifyFewerThanTenHeldOutGolfersFails(passingInput)
         verifyEmptyViewFails(passingInput)
         verifyMissingStageFails(passingInput)
+        verifyDuplicateStageFails(passingInput)
+        verifyUnresolvedAndFalseConfirmationFail(passingInput)
+        verifyGolferIdentifiersCannotInflateCount(passingInput)
+        verifySparseAndViewlessEvidenceFails(passingInput)
         verifyMeasuredUnsupportedMetricFails(passingInput)
         try verifyDeterministicMachineAndHumanOutput(passingInput)
+        try verifyMarkdownEscapesFreeFormValues(passingInput)
     }
 
     private static func verifyFewerThanTenHeldOutGolfersFails(
@@ -80,26 +87,114 @@ struct PrecisionEvaluationReportSmoke {
     }
 
     private static func verifyMissingStageFails(_ passingInput: PrecisionEvaluationInput) {
-        let clips = passingInput.clips.map { clip in
-            PrecisionClipEvaluation(
-                clipID: clip.clipID,
-                golferID: clip.golferID,
-                split: clip.split,
-                view: clip.view,
-                stages: clip.stages.filter { $0.stage != "P8" },
-                bodyLandmarks: clip.bodyLandmarks,
-                clubheadFrames: clip.clubheadFrames,
-                metrics: clip.metrics
-            )
-        }
+        var clips = passingInput.clips
+        clips[0] = replacing(
+            clips[0],
+            stages: clips[0].stages.filter { $0.stage != "P8" }
+        )
         let report = PrecisionEvaluationReportBuilder.makeReport(
             from: replacingClips(in: passingInput, with: clips)
         )
-        precondition(
-            report.stageRates
-                .filter { $0.stage == "P8" }
-                .allSatisfy { $0.hitRate == 0 }
+        let p8DTL = report.stageRates.first {
+            $0.view == .downTheLine && $0.stage == "P8"
+        }
+        precondition(p8DTL?.hitRate == 0.8)
+        precondition(!report.dataIntegrityPassed)
+        precondition(report.dataIntegrityIssues.contains("held-out clips have exactly one P1-P8 record"))
+        precondition(!report.releasePassed)
+    }
+
+    private static func verifyUnresolvedAndFalseConfirmationFail(
+        _ passingInput: PrecisionEvaluationInput
+    ) {
+        var clips = passingInput.clips
+        clips[0] = replacing(
+            clips[0],
+            stages: clips[0].stages.map { stage in
+                guard stage.stage == "P7" else { return stage }
+                return PrecisionStageEvaluation(
+                    stage: stage.stage,
+                    referenceFrame: stage.referenceFrame,
+                    predictedFrame: nil,
+                    status: "unresolved"
+                )
+            }
         )
+        clips[1] = replacing(
+            clips[1],
+            stages: clips[1].stages.map { stage in
+                guard stage.stage == "P6" else { return stage }
+                return PrecisionStageEvaluation(
+                    stage: stage.stage,
+                    referenceFrame: stage.referenceFrame,
+                    predictedFrame: 600,
+                    status: "confirmed"
+                )
+            }
+        )
+        let report = PrecisionEvaluationReportBuilder.makeReport(
+            from: replacingClips(in: passingInput, with: clips)
+        )
+        let p7DTL = report.stageRates.first {
+            $0.view == .downTheLine && $0.stage == "P7"
+        }
+        let p6DTL = report.stageRates.first {
+            $0.view == .downTheLine && $0.stage == "P6"
+        }
+        precondition(p7DTL?.hitRate == 0.8)
+        precondition(p7DTL?.unresolvedRate == 0.2)
+        precondition(p6DTL?.hitRate == 0.8)
+        precondition(p6DTL?.falseConfirmationRate == 0.2)
+        precondition(!report.releasePassed)
+    }
+
+    private static func verifyDuplicateStageFails(
+        _ passingInput: PrecisionEvaluationInput
+    ) {
+        var clips = passingInput.clips
+        clips[0] = replacing(
+            clips[0],
+            stages: clips[0].stages + [clips[0].stages[0]]
+        )
+        let report = PrecisionEvaluationReportBuilder.makeReport(
+            from: replacingClips(in: passingInput, with: clips)
+        )
+        precondition(!report.dataIntegrityPassed)
+        precondition(report.dataIntegrityIssues.contains("held-out clips have exactly one P1-P8 record"))
+        precondition(!report.releasePassed)
+    }
+
+    private static func verifyGolferIdentifiersCannotInflateCount(
+        _ passingInput: PrecisionEvaluationInput
+    ) {
+        var clips = passingInput.clips
+        clips[0] = replacing(clips[0], golferID: " golfer-001 ")
+        let report = PrecisionEvaluationReportBuilder.makeReport(
+            from: replacingClips(in: passingInput, with: clips)
+        )
+        precondition(report.heldOutGolferCount == 9)
+        precondition(!report.dataIntegrityPassed)
+        precondition(report.dataIntegrityIssues.contains("held-out golfer IDs are canonical nonblank identifiers"))
+        precondition(!report.releasePassed)
+    }
+
+    private static func verifySparseAndViewlessEvidenceFails(
+        _ passingInput: PrecisionEvaluationInput
+    ) {
+        var clips = passingInput.clips
+        clips[0] = replacing(
+            clips[0],
+            bodyLandmarks: Array(clips[0].bodyLandmarks.prefix(1))
+        )
+        clips[1] = replacing(clips[1], clubheadFrames: [])
+        clips[2] = replacing(clips[2], removeView: true)
+        let report = PrecisionEvaluationReportBuilder.makeReport(
+            from: replacingClips(in: passingInput, with: clips)
+        )
+        precondition(!report.dataIntegrityPassed)
+        precondition(report.dataIntegrityIssues.contains("held-out clips have classified views"))
+        precondition(report.dataIntegrityIssues.contains("held-out body observations are complete and unique"))
+        precondition(report.dataIntegrityIssues.contains("held-out clubhead visibility observations are complete and unique"))
         precondition(!report.releasePassed)
     }
 
@@ -108,14 +203,8 @@ struct PrecisionEvaluationReportSmoke {
     ) {
         var clips = passingInput.clips
         let first = clips[0]
-        clips[0] = PrecisionClipEvaluation(
-            clipID: first.clipID,
-            golferID: first.golferID,
-            split: first.split,
-            view: first.view,
-            stages: first.stages,
-            bodyLandmarks: first.bodyLandmarks,
-            clubheadFrames: first.clubheadFrames,
+        clips[0] = replacing(
+            first,
             metrics: [
                 SwingMetricValue(
                     id: .trueClubheadSpeed,
@@ -207,6 +296,39 @@ struct PrecisionEvaluationReportSmoke {
         precondition(clubhead.keys.contains("p90Error") && clubhead["p90Error"] is NSNull)
     }
 
+    private static func verifyMarkdownEscapesFreeFormValues(
+        _ input: PrecisionEvaluationInput
+    ) throws {
+        let hostile = PrecisionEvaluationInput(
+            datasetHash: "sha|tick`\nline",
+            artifactVersion: input.artifactVersion,
+            modelVersion: input.modelVersion,
+            clips: input.clips,
+            inputRejections: [
+                PrecisionInputRejectionResult(
+                    caseID: "case|one",
+                    expectedRejected: true,
+                    actualRejected: true,
+                    reason: "line one\nline | two"
+                )
+            ],
+            device: PrecisionDeviceMeasurement(
+                device: "phone|fixture",
+                operatingSystem: "iOS\nfixture",
+                elapsedSeconds: input.device.elapsedSeconds,
+                peakMemoryMB: input.device.peakMemoryMB
+            )
+        )
+        let markdown = PrecisionEvaluationCLI.markdown(
+            for: PrecisionEvaluationReportBuilder.makeReport(from: hostile)
+        )
+        precondition(markdown.contains("sha&#124;tick&#96;<br>line"))
+        precondition(markdown.contains("case&#124;one"))
+        precondition(markdown.contains("line one<br>line &#124; two"))
+        precondition(markdown.contains("phone&#124;fixture"))
+        precondition(markdown.contains("iOS<br>fixture"))
+    }
+
     private static func makePassingInput() -> PrecisionEvaluationInput {
         let clips = (0..<10).map { index in
             makeClip(
@@ -248,22 +370,33 @@ struct PrecisionEvaluationReportSmoke {
                 status: "confirmed"
             )
         }
+        let bodyLandmarkNames = [
+            "head",
+            "leftShoulder", "rightShoulder",
+            "leftElbow", "rightElbow",
+            "leftWrist", "rightWrist",
+            "leftHip", "rightHip",
+            "leftKnee", "rightKnee",
+            "leftAnkle", "rightAnkle"
+        ]
+        let bodyLandmarks = (1...8).flatMap { stage in
+            bodyLandmarkNames.map { landmark in
+                PrecisionBodyLandmarkEvaluation(
+                    sourceFrameIndex: stage * 10,
+                    landmark: landmark,
+                    normalizedError: 0.02
+                )
+            }
+        }
         return PrecisionClipEvaluation(
             clipID: "\(golferID)-\(view.rawValue)",
             golferID: golferID,
             split: .heldOut,
             view: view,
             stages: stages,
-            bodyLandmarks: [
-                PrecisionBodyLandmarkEvaluation(
-                    landmark: "leftWrist",
-                    normalizedError: 0.02
-                ),
-                PrecisionBodyLandmarkEvaluation(
-                    landmark: "rightWrist",
-                    normalizedError: 0.02
-                )
-            ],
+            expectedBodyLandmarkCount: bodyLandmarks.count,
+            bodyLandmarks: bodyLandmarks,
+            expectedClubheadFrameCount: 2,
             clubheadFrames: [
                 PrecisionClubheadFrameEvaluation(
                     sourceFrameIndex: 70,
@@ -288,6 +421,29 @@ struct PrecisionEvaluationReportSmoke {
                     )
                 )
             ]
+        )
+    }
+
+    private static func replacing(
+        _ clip: PrecisionClipEvaluation,
+        golferID: String? = nil,
+        removeView: Bool = false,
+        stages: [PrecisionStageEvaluation]? = nil,
+        bodyLandmarks: [PrecisionBodyLandmarkEvaluation]? = nil,
+        clubheadFrames: [PrecisionClubheadFrameEvaluation]? = nil,
+        metrics: [SwingMetricValue]? = nil
+    ) -> PrecisionClipEvaluation {
+        PrecisionClipEvaluation(
+            clipID: clip.clipID,
+            golferID: golferID ?? clip.golferID,
+            split: clip.split,
+            view: removeView ? nil : clip.view,
+            stages: stages ?? clip.stages,
+            expectedBodyLandmarkCount: clip.expectedBodyLandmarkCount,
+            bodyLandmarks: bodyLandmarks ?? clip.bodyLandmarks,
+            expectedClubheadFrameCount: clip.expectedClubheadFrameCount,
+            clubheadFrames: clubheadFrames ?? clip.clubheadFrames,
+            metrics: metrics ?? clip.metrics
         )
     }
 
