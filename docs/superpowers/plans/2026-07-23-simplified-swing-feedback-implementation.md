@@ -2298,7 +2298,7 @@ Run:
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
 xcodebuild \
   -project SwingArcProject.xcodeproj \
-  -scheme SwingArc \
+  -scheme SwingArcProject \
   -configuration Debug \
   -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' \

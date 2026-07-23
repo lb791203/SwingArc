@@ -132,6 +132,19 @@ enum ManualStageDetectionPolicy {
 enum SwingTechniqueEvaluator {
     static let minimumAggregateConfidence: Float = 0.65
 
+    static func measuredMetricEvidence(
+        _ id: SwingMetricID,
+        metrics: [SwingMetricValue]
+    ) -> Double? {
+        guard id.isMotionAnalysisOutput,
+              let metric = metrics.first(where: { $0.id == id }),
+              metric.availability == .measured,
+              metric.confidence >= Double(minimumAggregateConfidence),
+              let value = metric.value,
+              value.isFinite else { return nil }
+        return value
+    }
+
     static func evaluate(
         samples: [SwingPoseSample],
         stages: [SwingStageDetection],

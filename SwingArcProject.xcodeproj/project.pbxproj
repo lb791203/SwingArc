@@ -47,6 +47,7 @@
 		F80000000000000000000009 /* SwingTrajectoryTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000A /* SwingTrajectoryTracker.swift */; };
 		F8000000000000000000000B /* GolfObjectObservationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000C /* GolfObjectObservationProvider.swift */; };
 		F8000000000000000000000D /* CoreMLGolfObjectDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */; };
+		F8000000000000000000000F /* SwingMetricEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000010 /* SwingMetricEngine.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -91,6 +92,7 @@
 		F8000000000000000000000A /* SwingTrajectoryTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingTrajectoryTracker.swift; sourceTree = "<group>"; };
 		F8000000000000000000000C /* GolfObjectObservationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GolfObjectObservationProvider.swift; sourceTree = "<group>"; };
 		F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreMLGolfObjectDetector.swift; sourceTree = "<group>"; };
+		F80000000000000000000010 /* SwingMetricEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingMetricEngine.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -160,6 +162,7 @@
 				F8000000000000000000000A /* SwingTrajectoryTracker.swift */,
 				F8000000000000000000000C /* GolfObjectObservationProvider.swift */,
 				F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */,
+				F80000000000000000000010 /* SwingMetricEngine.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -302,6 +305,7 @@
 				F80000000000000000000009 /* SwingTrajectoryTracker.swift in Sources */,
 				F8000000000000000000000B /* GolfObjectObservationProvider.swift in Sources */,
 				F8000000000000000000000D /* CoreMLGolfObjectDetector.swift in Sources */,
+				F8000000000000000000000F /* SwingMetricEngine.swift in Sources */,
 				C40000000000000000000001 /* BrandMarkView.swift in Sources */,
 			);
 		};

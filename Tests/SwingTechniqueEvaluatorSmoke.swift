@@ -71,6 +71,43 @@ struct SwingTechniqueEvaluatorSmoke {
             leadArm: .left
         ).isEmpty)
 
+        let unsupportedValue = SwingMetricValue(
+            id: .trueClubheadSpeed,
+            value: 105,
+            unit: "mph",
+            confidence: 0.99,
+            stage: "P7",
+            availability: .measured
+        )
+        precondition(SwingTechniqueEvaluator.measuredMetricEvidence(
+            .trueClubheadSpeed,
+            metrics: [unsupportedValue]
+        ) == nil)
+        let measuredProxy = SwingMetricValue(
+            id: .swingPlaneProxy2D,
+            value: 12.5,
+            unit: "deg",
+            confidence: 0.9,
+            stage: "P6",
+            availability: .measured
+        )
+        precondition(SwingTechniqueEvaluator.measuredMetricEvidence(
+            .swingPlaneProxy2D,
+            metrics: [measuredProxy]
+        ) == 12.5)
+        let estimatedProxy = SwingMetricValue(
+            id: .swingPlaneProxy2D,
+            value: 12.5,
+            unit: "deg",
+            confidence: 0.9,
+            stage: "P6",
+            availability: .estimated
+        )
+        precondition(SwingTechniqueEvaluator.measuredMetricEvidence(
+            .swingPlaneProxy2D,
+            metrics: [estimatedProxy]
+        ) == nil)
+
         let legacyFinishPresentation = TechniqueFeedbackPresentation.make(
             feedback: .unresolved,
             analysis: SwingAnalysisResult(
