@@ -45,5 +45,12 @@ struct RealVideoTrackingDiagnostics {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         FileHandle.standardOutput.write(try encoder.encode(report))
         FileHandle.standardOutput.write(Data("\n".utf8))
+
+        switch outcome {
+        case .failed(.frameExtractionFailed), .cancelled:
+            exit(EXIT_FAILURE)
+        case .completed, .failed:
+            break
+        }
     }
 }

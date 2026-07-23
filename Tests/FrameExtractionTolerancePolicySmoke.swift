@@ -28,6 +28,16 @@ struct FrameExtractionTolerancePolicySmoke {
             abs(centeredRequest!.seconds - 30.5 / 239.9) < 1.0 / 60_000.0,
             "VFR decoding must request the center of the estimated frame interval"
         )
+        for sourceFrameRate in [29.9995, 30.0005] {
+            let request = FrameExtractionTolerancePolicy.decodeRequestTime(
+                sourceFrameIndex: 86,
+                sourceFrameRate: sourceFrameRate
+            )
+            precondition(
+                abs(request!.seconds - 86.5 / sourceFrameRate) < 1.0 / 60_000.0,
+                "Non-integer rates must request the center of the estimated frame interval"
+            )
+        }
         for sourceFrameRate in [30.0, 60.0, 120.0, 240.0] {
             let sourceFrameIndex = 86
             let request = FrameExtractionTolerancePolicy.decodeRequestTime(
@@ -54,7 +64,7 @@ struct FrameExtractionTolerancePolicySmoke {
             )
             precondition(
                 analyzer.components(separatedBy: "FrameExtractionTolerancePolicy.decodeRequestTime").count >= 3,
-                "Both coarse and fine extraction must request the frame-interval center"
+                "Both coarse and fine extraction must use exact integer-CFR or centered fractional requests"
             )
             precondition(
                 analyzer.contains("requestedTimeToleranceBefore = decodeTolerance") &&
@@ -65,6 +75,21 @@ struct FrameExtractionTolerancePolicySmoke {
 
         if CommandLine.arguments.count > 2 {
             verifyHighSpeedAsset(at: URL(fileURLWithPath: CommandLine.arguments[2]))
+        }
+
+        if CommandLine.arguments.count > 3 {
+            let diagnostics = try! String(
+                contentsOfFile: CommandLine.arguments[3],
+                encoding: .utf8
+            )
+            precondition(
+                diagnostics.contains(
+                    "case .failed(.frameExtractionFailed), .cancelled:"
+                ) &&
+                    diagnostics.contains("case .completed, .failed:") &&
+                    diagnostics.components(separatedBy: "exit(EXIT_FAILURE)").count >= 3,
+                "The real-video diagnostic must fail only for frame extraction or cancellation"
+            )
         }
     }
 

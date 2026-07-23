@@ -29,7 +29,7 @@ enum FrameExtractionTolerancePolicy {
             return nil
         }
         let roundedFrameRate = sourceFrameRate.rounded()
-        if abs(sourceFrameRate - roundedFrameRate) < 0.001,
+        if sourceFrameRate == roundedFrameRate,
            roundedFrameRate <= Double(Int32.max) {
             return CMTime(
                 value: CMTimeValue(sourceFrameIndex),
