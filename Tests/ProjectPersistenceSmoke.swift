@@ -48,25 +48,11 @@ struct ProjectPersistenceSmoke {
         precondition(restored.stageCorrections == original.stageCorrections)
         precondition(restored.showPoseSkeleton)
         precondition(restored.showSpineAngle)
-        precondition(restored.feedbackConfiguration == nil)
+        precondition(restored.legacyFeedbackConfiguration == nil)
 
-        let configuration = FeedbackConfiguration.defaultValue(for: .downTheLine)
-        let configured = LocalAnalysisProject(
-            drawings: [],
-            keyframes: [],
-            isKeyframeMode: false,
-            showPoseSkeleton: false,
-            showHeadStability: false,
-            showSpineAngle: false,
-            showGrid: false,
-            practiceCameraView: .downTheLine,
-            stageCorrections: [],
-            feedbackConfiguration: configuration
-        )
-        let configuredRoundTrip = try JSONDecoder().decode(
-            LocalAnalysisProject.self,
-            from: JSONEncoder().encode(configured)
-        )
-        precondition(configuredRoundTrip.feedbackConfiguration == configuration)
+        let encodedObject = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(original)
+        ) as! [String: Any]
+        precondition(encodedObject["feedbackConfiguration"] == nil)
     }
 }

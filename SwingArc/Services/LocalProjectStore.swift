@@ -16,9 +16,9 @@ struct LocalAnalysisProject: Codable, Equatable {
     /// They are optional in stored payloads so projects saved before this
     /// feature continue to decode unchanged.
     var stageCorrections: [StageCorrection]
-    /// Replay feedback remains per-project so a player returns to the same
-    /// selected analysis topic without changing legacy project meaning.
-    var feedbackConfiguration: FeedbackConfiguration?
+    /// Decoded only so projects saved by the removed configuration UI remain
+    /// readable. New saves omit this field and the value never affects analysis.
+    private(set) var legacyFeedbackConfiguration: FeedbackConfiguration?
 
     init(
         drawings: [DrawingElement],
@@ -29,8 +29,7 @@ struct LocalAnalysisProject: Codable, Equatable {
         showSpineAngle: Bool,
         showGrid: Bool,
         practiceCameraView: PracticeCameraView? = nil,
-        stageCorrections: [StageCorrection] = [],
-        feedbackConfiguration: FeedbackConfiguration? = nil
+        stageCorrections: [StageCorrection] = []
     ) {
         self.drawings = drawings
         self.keyframes = keyframes
@@ -41,7 +40,7 @@ struct LocalAnalysisProject: Codable, Equatable {
         self.showGrid = showGrid
         self.practiceCameraView = practiceCameraView
         self.stageCorrections = stageCorrections
-        self.feedbackConfiguration = feedbackConfiguration
+        self.legacyFeedbackConfiguration = nil
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -71,11 +70,11 @@ struct LocalAnalysisProject: Codable, Equatable {
             stageCorrections: try container.decodeIfPresent(
                 [StageCorrection].self,
                 forKey: .stageCorrections
-            ) ?? [],
-            feedbackConfiguration: try container.decodeIfPresent(
-                FeedbackConfiguration.self,
-                forKey: .feedbackConfiguration
-            )
+            ) ?? []
+        )
+        legacyFeedbackConfiguration = try container.decodeIfPresent(
+            FeedbackConfiguration.self,
+            forKey: .feedbackConfiguration
         )
     }
 
@@ -90,7 +89,7 @@ struct LocalAnalysisProject: Codable, Equatable {
         try container.encode(showGrid, forKey: .showGrid)
         try container.encodeIfPresent(practiceCameraView, forKey: .practiceCameraView)
         try container.encode(stageCorrections, forKey: .stageCorrections)
-        try container.encodeIfPresent(feedbackConfiguration, forKey: .feedbackConfiguration)
+        // Intentionally omit the legacy feedbackConfiguration key.
     }
 }
 

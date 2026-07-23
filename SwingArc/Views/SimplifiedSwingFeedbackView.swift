@@ -26,6 +26,107 @@ enum SimplifiedFeedbackDisplayPolicy {
     }
 }
 
+#if DEBUG
+enum SimplifiedFeedbackPreview {
+    static func isEnabled(
+        _ arguments: [String]
+    ) -> Bool {
+        arguments.contains("-swingarc-preview-feedback")
+    }
+
+    static func expandsHandPath(
+        _ arguments: [String]
+    ) -> Bool {
+        arguments.contains("-swingarc-preview-feedback-expanded")
+    }
+
+    static let feedback = SimplifiedSwingFeedback(
+        summary: SwingFeedbackSummary(
+            title: "本次动作整体稳定",
+            observation: "准备和身体控制较稳定，手部路径需要重点复核。",
+            recommendation: "先检查 P3 到 P6 的手部运动，再修正对应阶段。",
+            stages: [.leadArmParallelBackswing, .shaftParallelDownswing]
+        ),
+        cards: [
+            card(.setup, .good, "站姿与身体轴线保持稳定。", [.address], .measured, 0.92),
+            card(
+                .bodyStability,
+                .good,
+                "头部与髋部位移处于稳定范围。",
+                [.takeaway, .top, .impact],
+                .measured,
+                0.88
+            ),
+            card(
+                .handPath,
+                .attention,
+                "下杆阶段手部路径略偏外。",
+                [.leadArmParallelBackswing, .shaftParallelDownswing, .impact],
+                .measured,
+                0.84,
+                metrics: [
+                    metric(.handPathLength, 0.86, "身高", "P2-P7"),
+                    metric(.leadElbowAngle, 151, "°", "P6")
+                ]
+            ),
+            card(
+                .swingPlane,
+                .insufficientEvidence,
+                "部分杆身点被遮挡，暂不判断挥杆平面。",
+                [.takeaway, .top, .followThrough],
+                .estimated,
+                0.54
+            ),
+            card(
+                .impactAndRelease,
+                .insufficientEvidence,
+                "击球区杆头与球位证据不足。",
+                [.shaftParallelDownswing, .impact, .followThrough],
+                .unavailable,
+                0.38
+            )
+        ]
+    )
+
+    private static func card(
+        _ category: SwingFeedbackCategory,
+        _ status: SwingFeedbackStatus,
+        _ conclusion: String,
+        _ stages: [SwingStage],
+        _ evidenceState: SwingFeedbackEvidenceState,
+        _ confidence: Double,
+        metrics: [SwingMetricValue] = []
+    ) -> SwingFeedbackCard {
+        SwingFeedbackCard(
+            category: category,
+            status: status,
+            conclusion: conclusion,
+            stages: stages,
+            metrics: metrics,
+            evidenceState: evidenceState,
+            evidenceConfidence: confidence,
+            attentionSeverity: status == .attention ? 2 : nil
+        )
+    }
+
+    private static func metric(
+        _ id: SwingMetricID,
+        _ value: Double,
+        _ unit: String,
+        _ stage: String
+    ) -> SwingMetricValue {
+        SwingMetricValue(
+            id: id,
+            value: value,
+            unit: unit,
+            confidence: 0.86,
+            stage: stage,
+            availability: .measured
+        )
+    }
+}
+#endif
+
 struct SimplifiedSwingFeedbackView: View {
     let feedback: SimplifiedSwingFeedback
     @Binding var expandedCategory: SwingFeedbackCategory?

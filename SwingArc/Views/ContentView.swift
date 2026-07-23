@@ -44,7 +44,8 @@ struct ContentView: View {
     init() {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let previewView = PracticePreviewConfiguration.view(for: arguments) {
+        if PracticePreviewConfiguration.importPath(for: arguments) == nil,
+           let previewView = PracticePreviewConfiguration.view(for: arguments) {
             _selectedPracticeView = State(initialValue: previewView)
         }
         if PracticePreviewConfiguration.showsLibrary(for: arguments) {
@@ -110,7 +111,12 @@ struct ContentView: View {
                   ) else { return }
 
             didLoadPreviewImport = true
-            loadVideoFromURL(URL(fileURLWithPath: path))
+            loadVideoFromURL(
+                URL(fileURLWithPath: path),
+                practiceView: PracticePreviewConfiguration.view(
+                    for: ProcessInfo.processInfo.arguments
+                )
+            )
             #endif
         }
         .onChange(of: drawings) { _, _ in persistCurrentProject() }

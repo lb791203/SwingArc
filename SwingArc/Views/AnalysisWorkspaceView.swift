@@ -36,7 +36,14 @@ struct AnalysisWorkspaceView: View {
     }
 
     private var simplifiedFeedback: SimplifiedSwingFeedback? {
-        playbackManager.simplifiedFeedback(
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if SimplifiedFeedbackPreview.isEnabled(arguments) {
+            return SimplifiedFeedbackPreview.feedback
+        }
+        #endif
+
+        return playbackManager.simplifiedFeedback(
             view: practiceCameraView,
             manualMarkers: keyframes
         )
@@ -136,8 +143,18 @@ struct AnalysisWorkspaceView: View {
         }
         .task(id: project.id) {
             #if DEBUG
+            let arguments = ProcessInfo.processInfo.arguments
+            if SimplifiedFeedbackPreview.isEnabled(arguments) {
+                if SimplifiedFeedbackPreview.expandsHandPath(arguments) {
+                    expandedFeedbackCategory = .handPath
+                }
+                try? await Task.sleep(for: .milliseconds(250))
+                showsResultsSheet = true
+                return
+            }
+
             guard PracticePreviewConfiguration.autoAnalyzes(
-                for: ProcessInfo.processInfo.arguments
+                for: arguments
             ) else { return }
 
             try? await Task.sleep(for: .milliseconds(250))
