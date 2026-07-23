@@ -7,6 +7,23 @@ consented practice-range clips in `/Users/liangbo/Desktop/test`. It is a
 development baseline, not a held-out accuracy claim and not training
 authorization.
 
+## In-app ground-truth annotation infrastructure
+
+The in-app annotation infrastructure has now been implemented on branch
+`codex/precision-swing-analysis`. It provides exact VFR source-frame
+navigation, isolated A/B passes, revision history, adjudication, manual
+locks, keypoint visibility/review, autosave/restore, and validation-gated
+JSON export.
+
+Infrastructure tests, a signed Release build, and deterministic parsing of
+the 1526-frame original `IMG_4692.MOV` passed. However, the wireless iPhone
+was unavailable and the Mac was locked during the UI-verification step, so
+the complete real-device human annotation loop is not yet verified. This
+baseline therefore remains `development-only / release failed`; the new
+infrastructure does not change any P1–P8 or trajectory accuracy figures
+below. See
+`docs/validation/in-app-annotation-verification-2026-07-23.md`.
+
 ## Dataset identity and timing
 
 - Dataset SHA-256: `06ef5671e33c5463525f9d6d839f7f01c615a555704de0dd72fe037a4bd7cfd1`

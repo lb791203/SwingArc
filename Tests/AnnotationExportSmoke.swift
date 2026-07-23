@@ -3,7 +3,9 @@ import Foundation
 @main
 struct AnnotationExportSmoke {
     static func main() throws {
-        let directory = FileManager.default.temporaryDirectory
+        let directory = CommandLine.arguments.dropFirst().first.map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        } ?? FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(
             at: directory,
@@ -25,6 +27,7 @@ struct AnnotationExportSmoke {
             from: Data(contentsOf: receipt.url)
         )
         precondition(restored == package)
+        print("EXPORTED \(receipt.url.path) \(receipt.sha256)")
 
         var unreviewed = AnnotationFixture.completeReviewedPackage()
         unreviewed.passes[0].frameLabels[0].reviewed = false
