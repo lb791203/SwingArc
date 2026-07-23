@@ -109,7 +109,7 @@ enum GroundTruthManifestValidationError: Error, CustomStringConvertible {
         case let .annotationPasses(passes):
             return "manifest requires at least 2 annotation passes; found \(passes)"
         case let .maximumAcceptedFrameError(error):
-            return "manifest threshold must be exactly 1 frame; found \(error)"
+            return "manifest threshold must be exactly 2 frames; found \(error)"
         case let .stageCodes(system, codes):
             return "manifest \(system.rawValue) has invalid stage codes \(codes)"
         case let .stageDefinitions(system):
@@ -159,7 +159,7 @@ enum GroundTruthManifestValidator {
         guard manifest.annotationPasses >= 2 else {
             throw GroundTruthManifestValidationError.annotationPasses(manifest.annotationPasses)
         }
-        guard manifest.maximumAcceptedFrameError == 1 else {
+        guard manifest.maximumAcceptedFrameError == 2 else {
             throw GroundTruthManifestValidationError.maximumAcceptedFrameError(
                 manifest.maximumAcceptedFrameError
             )
@@ -204,7 +204,7 @@ struct StageAcceptance: Codable {
 }
 
 enum RealVideoAcceptance {
-    static let maximumAcceptedFrameError = 1
+    static let maximumAcceptedFrameError = 2
 
     static func evaluate(
         manifest: GroundTruthManifest,
@@ -241,5 +241,51 @@ enum RealVideoAcceptance {
                     && (error.map { $0 <= maximumAcceptedFrameError } ?? false)
             )
         }
+    }
+}
+
+enum PrecisionCameraView: String, Codable, Hashable {
+    case downTheLine = "dtl"
+    case faceOn = "face-on"
+}
+
+struct PrecisionStageRecord: Codable, Equatable {
+    let view: PrecisionCameraView
+    let stage: String
+    let expectedFrame: Int
+    let actualFrame: Int?
+    let status: String
+}
+
+struct PrecisionStageKey: Hashable {
+    let view: PrecisionCameraView
+    let stage: String
+}
+
+struct PrecisionAcceptanceSummary: Equatable {
+    let stageRates: [PrecisionStageKey: Double]
+    let passed: Bool
+}
+
+enum SwingPrecisionAcceptance {
+    static let maximumFrameError = 2
+    static let minimumStageRate = 0.90
+
+    static func summarize(records: [PrecisionStageRecord]) -> PrecisionAcceptanceSummary {
+        let grouped = Dictionary(grouping: records) {
+            PrecisionStageKey(view: $0.view, stage: $0.stage)
+        }
+        let rates = grouped.mapValues { items in
+            Double(items.filter { item in
+                guard item.status != "unresolved", let actual = item.actualFrame else {
+                    return false
+                }
+                return abs(actual - item.expectedFrame) <= maximumFrameError
+            }.count) / Double(items.count)
+        }
+        return PrecisionAcceptanceSummary(
+            stageRates: rates,
+            passed: !rates.isEmpty && rates.values.allSatisfy { $0 >= minimumStageRate }
+        )
     }
 }

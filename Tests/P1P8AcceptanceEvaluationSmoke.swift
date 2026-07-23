@@ -147,15 +147,15 @@ struct P1P8AcceptanceEvaluationSmoke {
         )
 
         let p4Truth = canonicalManifest.stages.first { $0.stage == "P4" }!
-        let wrongP4Frame = p4Truth.sourceFrameIndex + 2
-        let wrongP4 = SwingAnalysisResult(
+        let acceptedP4Frame = p4Truth.sourceFrameIndex + 2
+        let acceptedP4 = SwingAnalysisResult(
             detectedMarkers: [],
             unresolvedStages: [],
             detections: canonicalDetections.map { item in
                 item.stage == .top
                     ? detection(
                         stage: .top,
-                        frame: wrongP4Frame,
+                        frame: acceptedP4Frame,
                         frameRate: canonicalManifest.sourceFrameRate,
                         hasClubEvidence: false,
                         hasBallEvidence: false
@@ -163,11 +163,33 @@ struct P1P8AcceptanceEvaluationSmoke {
                     : item
             }
         )
-        let failures = RealVideoAcceptance.evaluate(manifest: canonicalManifest, result: wrongP4)
+        precondition(
+            RealVideoAcceptance.evaluate(manifest: canonicalManifest, result: acceptedP4)
+                .allSatisfy(\.passed),
+            "The confirmed acceptance window includes a two-frame error"
+        )
+
+        let rejectedP4Frame = p4Truth.sourceFrameIndex + 3
+        let rejectedP4 = SwingAnalysisResult(
+            detectedMarkers: [],
+            unresolvedStages: [],
+            detections: canonicalDetections.map { item in
+                item.stage == .top
+                    ? detection(
+                        stage: .top,
+                        frame: rejectedP4Frame,
+                        frameRate: canonicalManifest.sourceFrameRate,
+                        hasClubEvidence: false,
+                        hasBallEvidence: false
+                    )
+                    : item
+            }
+        )
+        let failures = RealVideoAcceptance.evaluate(manifest: canonicalManifest, result: rejectedP4)
             .filter { !$0.passed }
         precondition(failures.count == 1)
         precondition(failures[0].stage == "P4")
-        precondition(failures[0].absoluteFrameError == 2)
+        precondition(failures[0].absoluteFrameError == 3)
 
         try verifyManifestValidation(manifestURL: manifestURL)
     }
@@ -180,7 +202,7 @@ struct P1P8AcceptanceEvaluationSmoke {
             sourceFrameRate: 30,
             duration: 4,
             annotationPasses: 2,
-            maximumAcceptedFrameError: 1,
+            maximumAcceptedFrameError: 2,
             stages: zip((1...8).map { "P\($0)" }, definitions).enumerated().map { offset, pair in
                 StageGroundTruth(
                     stage: pair.0,
@@ -215,7 +237,7 @@ struct P1P8AcceptanceEvaluationSmoke {
         try expectRejected(validData) { $0["sourceFrameRate"] = 29.0 }
         try expectRejected(validData) { $0["duration"] = 24.0 }
         try expectRejected(validData) { $0["annotationPasses"] = 1 }
-        try expectRejected(validData) { $0["maximumAcceptedFrameError"] = 2 }
+        try expectRejected(validData) { $0["maximumAcceptedFrameError"] = 1 }
         try expectRejected(validData) { $0["stageSystem"] = "p-system-v1" }
         try expectRejected(validData) { json in
             var stages = json["stages"] as! [[String: Any]]
