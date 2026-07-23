@@ -51,6 +51,14 @@
 - Bundle ID：`com.liangbo.swingarc`
 - Team ID：`RCP42Y96T8`
 
+无线 iPhone 16 Pro 恢复在线后，已完成 Release App 安装和启动：
+
+- 设备：`ECE6D973-A2C0-50A1-B4F1-AFD6ACA2ACF3`
+- 安装结果：`com.liangbo.swingarc`，版本 `1.0`，Build `1`
+- 真机安装路径：
+  `/private/var/containers/Bundle/Application/1A80F6EE-5680-4AD9-AC08-86400E8FB8D0/SwingArcProject.app/`
+- 启动结果：成功，进程 PID `8254`
+
 模拟器已安装该 App，并用 `IMG_4692.MOV` 的模拟器沙盒副本启动。
 日志证明原片被读取和解码。iOS 27 beta 模拟器缺少
 `cnn_human_pose.espresso.weights`，因此模拟器内 Apple Vision 人体姿态
@@ -92,10 +100,8 @@
 
 以下项目没有完成，不能标记为通过：
 
-1. 无线 iPhone 16 Pro
-   `ECE6D973-A2C0-50A1-B4F1-AFD6ACA2ACF3` 在 `devicectl` 中为
-   `unavailable`，因此本次未能安装 Release App、启动进程或完成真机
-   标注闭环。
+1. 无线 iPhone 16 Pro 已完成安装和启动，但尚未由真人在手机屏幕上走完
+   原片导入、A/B 双标注、裁决和导出闭环。
 2. 尚未在常规宽度 iPad 上实际点按完整标注闭环。
 3. 尚无两位真人标注者对 `IMG_4692.MOV` 完成独立 P1–P8 和关键点标注；
    因此没有真实两人分歧、裁决结果或人体/球杆坐标误差统计。
