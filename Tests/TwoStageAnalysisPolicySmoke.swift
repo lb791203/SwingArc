@@ -30,5 +30,14 @@ struct TwoStageAnalysisPolicySmoke {
         for (failure, message) in expectedCopy {
             precondition(AnalysisFailurePresentation(failure: failure).message == message)
         }
+
+        let unsupported = AnalysisFailure.unsupportedInput([
+            .fullBodyNotVisible,
+            .motionBlur
+        ])
+        precondition(
+            AnalysisFailurePresentation(failure: unsupported).message
+                == "当前视频不适合自动分析：请确保人物全身入镜；画面运动模糊，请提高光线或帧率。视频仍可播放和手工标注。"
+        )
     }
 }

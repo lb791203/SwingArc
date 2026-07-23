@@ -130,6 +130,24 @@ struct AnalysisFailurePresentation: Equatable {
             return "找不到击球后动作边界"
         case .incompleteSwingClip:
             return "视频缺少完整挥杆前段或后段"
+        case let .unsupportedInput(issues):
+            let guidance = issues.map { issue in
+                switch issue {
+                case .personNotStable:
+                    return "人物检测不稳定，请保持单人入镜并避免遮挡"
+                case .fullBodyNotVisible:
+                    return "请确保人物全身入镜"
+                case .clubNotVisible:
+                    return "球杆不可见，请调整机位和光线"
+                case .clubVisibilityNotAssessed:
+                    return "暂时无法确认球杆可见性"
+                case .cameraMoved:
+                    return "机位不稳定，请固定手机"
+                case .motionBlur:
+                    return "画面运动模糊，请提高光线或帧率"
+                }
+            }.joined(separator: "；")
+            return "当前视频不适合自动分析：\(guidance)。视频仍可播放和手工标注。"
         case .analysisCancelled:
             return "分析已取消"
         }

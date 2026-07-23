@@ -112,6 +112,7 @@ xcrun swiftc -parse-as-library \
   SwingArc/Models/WorkspaceModels.swift \
   SwingArc/Models/FrameExtractionTolerancePolicy.swift \
   SwingArc/Services/StageCalibration.swift \
+  SwingArc/Services/SwingInputQualityEvaluator.swift \
   SwingArc/Services/VisionPoseDetector.swift \
   SwingArc/Services/SwingStageDetector.swift \
   Tests/P1P8AcceptanceSupport.swift \

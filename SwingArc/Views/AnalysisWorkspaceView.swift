@@ -535,6 +535,8 @@ struct AnalysisWorkspaceView: View {
             return "未找到击球瞬间"
         case .missingPostImpactBoundary:
             return "未找到击球后释放边界"
+        case .unsupportedInput:
+            return AnalysisFailurePresentation(failure: failure).message
         case .analysisCancelled:
             return "AI 分析已取消"
         }

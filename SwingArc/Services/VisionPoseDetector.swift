@@ -880,6 +880,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             min(coarseScanWindow.endTime, coarseScanWindow.startTime + $0)
         }
         var coarseSamples: [CoarseSwingSample] = []
+        var coarseQualityFrames: [(time: Double, frame: SwingInputQualityFrame)] = []
         let maximumSourceFrameIndex = SourceFrameBounds.maximumSourceFrameIndex(
             duration: duration,
             sourceFrameRate: nominalFrameRate
@@ -892,7 +893,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 maximumSourceFrameIndex,
                 max(0, Int((seconds * nominalFrameRate).rounded()))
             )
-            let sample: CoarseSwingSample? = autoreleasepool {
+            let extraction: (sample: CoarseSwingSample, quality: SwingInputQualityFrame)? = autoreleasepool {
                 guard let requestedTime = FrameExtractionTolerancePolicy.decodeRequestTime(
                     sourceFrameIndex: requestedSourceFrameIndex,
                     sourceFrameRate: nominalFrameRate
@@ -915,15 +916,50 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                     time: actualSeconds,
                     recordsCoreAnchorCandidate: true
                 )
-                return CoarseSwingSample(
-                    time: actualSeconds,
-                    pose: selectedPose.map { SwingPoseSample(time: actualSeconds, pose: $0) }
+                let subjectCenter = selectedPose.flatMap { pose -> SwingInputQualityPoint? in
+                    let center: CGPoint?
+                    if let shoulder = pose.shoulderMid, let hip = pose.hipMid {
+                        center = CGPoint(
+                            x: (shoulder.x + hip.x) / 2,
+                            y: (shoulder.y + hip.y) / 2
+                        )
+                    } else {
+                        center = pose.hipMid ?? pose.shoulderMid
+                    }
+                    return center.map {
+                        SwingInputQualityPoint(x: Double($0.x), y: Double($0.y))
+                    }
+                }
+                let luminance = SwingInputQualityEvaluator.luminanceGrid(from: image)
+                let blurScore = luminance.map {
+                    SwingInputQualityEvaluator.blurScore(
+                        luminance: $0.values,
+                        width: $0.width,
+                        height: $0.height
+                    )
+                } ?? 0
+                return (
+                    sample: CoarseSwingSample(
+                        time: actualSeconds,
+                        pose: selectedPose.map { SwingPoseSample(time: actualSeconds, pose: $0) }
+                    ),
+                    quality: SwingInputQualityFrame(
+                        poseDetected: selectedPose != nil,
+                        fullBodyVisible: selectedPose.map {
+                            SwingInputQualityEvaluator.isFullBodyVisible(
+                                landmarks: Set($0.keypoints.keys)
+                            )
+                        } ?? false,
+                        subjectCenter: subjectCenter,
+                        blurScore: blurScore
+                    )
                 )
             }
-            guard let sample else {
+            guard let extraction else {
                 return activeFrameExtractionFailure(runID: runID, gate: gate)
             }
-            coarseSamples.append(sample)
+            coarseSamples.append(extraction.sample)
+            coarseQualityFrames.append((extraction.sample.time, extraction.quality))
             publish(
                 .locating,
                 progress: Double(index + 1) / Double(max(1, coarseTimes.count)) * 0.20,
@@ -996,6 +1032,27 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             }
         } else {
             coreSamples = coarseSamples
+        }
+
+        let qualityStartTime = coreSamples.first?.time ?? coarseScanWindow.startTime
+        let qualityEndTime = coreSamples.last?.time ?? coarseScanWindow.endTime
+        let qualityFrames: [SwingInputQualityFrame] = coarseQualityFrames.compactMap {
+            sample -> SwingInputQualityFrame? in
+            guard sample.time >= qualityStartTime,
+                  sample.time <= qualityEndTime else { return nil }
+            return sample.frame
+        }
+        let qualitySignals = SwingInputQualityEvaluator.summarize(
+            frames: qualityFrames,
+            clubCoverage: nil
+        )
+        let qualityReport = SwingInputQualityEvaluator.evaluate(qualitySignals)
+        guard qualityReport.isSupported else {
+            return activeFailure(
+                .unsupportedInput(qualityReport.blockingIssues),
+                runID: runID,
+                gate: gate
+            )
         }
 
         let core: SwingCore

@@ -42,6 +42,7 @@
 		E70000000000000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E70000000000000000000002 /* PrivacyInfo.xcprivacy */; };
 		F80000000000000000000001 /* SwingObservationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000002 /* SwingObservationModels.swift */; };
 		F80000000000000000000003 /* SwingMetricModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000004 /* SwingMetricModels.swift */; };
+		F80000000000000000000005 /* SwingInputQualityEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000006 /* SwingInputQualityEvaluator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -81,6 +82,7 @@
 		E70000000000000000000002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		F80000000000000000000002 /* SwingObservationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingObservationModels.swift; sourceTree = "<group>"; };
 		F80000000000000000000004 /* SwingMetricModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingMetricModels.swift; sourceTree = "<group>"; };
+		F80000000000000000000006 /* SwingInputQualityEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingInputQualityEvaluator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -145,6 +147,7 @@
 				D60000000000000000000008 /* LiveSwingTriggerDetector.swift */,
 				D6000000000000000000000A /* LivePoseSampler.swift */,
 				D6000000000000000000000C /* CapturedVideoStore.swift */,
+				F80000000000000000000006 /* SwingInputQualityEvaluator.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -282,6 +285,7 @@
 				D6000000000000000000000B /* CapturedVideoStore.swift in Sources */,
 				F80000000000000000000001 /* SwingObservationModels.swift in Sources */,
 				F80000000000000000000003 /* SwingMetricModels.swift in Sources */,
+				F80000000000000000000005 /* SwingInputQualityEvaluator.swift in Sources */,
 				C40000000000000000000001 /* BrandMarkView.swift in Sources */,
 			);
 		};

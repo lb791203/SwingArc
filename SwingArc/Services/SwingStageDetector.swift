@@ -2678,6 +2678,7 @@ enum AnalysisFailure: Equatable {
     case noImpactCorridor
     case missingPostImpactBoundary
     case incompleteSwingClip
+    case unsupportedInput([SwingInputQualityIssue])
     case analysisCancelled
 }
 
