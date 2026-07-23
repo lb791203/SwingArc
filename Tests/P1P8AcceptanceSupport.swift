@@ -200,6 +200,7 @@ struct StageAcceptance: Codable {
     let hasClubEvidence: Bool
     let hasBallEvidence: Bool
     let hasBallChangeEvidence: Bool
+    let evidenceSources: [String]
     let passed: Bool
 }
 
@@ -217,7 +218,11 @@ enum RealVideoAcceptance {
             let error = detection?.sourceFrameIndex.map { abs($0 - truth.sourceFrameIndex) }
             let isResolved = detection?.status != .unresolved
             let requiresShaft = manifest.stageSystem == .canonicalP1P8
-                && (expectedStage == .shaftParallelDownswing || expectedStage == .followThrough)
+                && expectedStage.map { [
+                    SwingStage.takeaway,
+                    .shaftParallelDownswing,
+                    .followThrough
+                ].contains($0) } == true
             let hasRequiredShaftEvidence = !requiresShaft || detection?.hasClubEvidence == true
             let hasRequiredImpactEvidence = expectedStage != .impact
                 || detection?.status != .confirmed
@@ -234,6 +239,9 @@ enum RealVideoAcceptance {
                 hasClubEvidence: detection?.hasClubEvidence ?? false,
                 hasBallEvidence: detection?.hasBallEvidence ?? false,
                 hasBallChangeEvidence: detection?.hasBallChangeEvidence ?? false,
+                evidenceSources: detection?.evidence.sources
+                    .map(\.rawValue)
+                    .sorted() ?? [],
                 passed: matchingDetections.count == 1
                     && isResolved
                     && hasRequiredShaftEvidence

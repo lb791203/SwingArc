@@ -1569,9 +1569,14 @@ enum ImpactCorridorResolver {
             )
             guard score >= minimumCandidateScore else { continue }
 
-            let hasRequiredObjects = shaftBallAlignment >= 0.55
-                || ballLocalChange >= 0.55
             let objectEvidence = frame.objectEvidence
+            let hasDetectedClubhead = objectEvidence.trackedPoints[.clubhead]?.state
+                == .detected
+            let hasDetectedBall = objectEvidence.ball != nil
+                || objectEvidence.stableBall != nil
+                || objectEvidence.trackedPoints[.ball]?.state == .detected
+            let hasRequiredObjects = (hasDetectedClubhead && hasDetectedBall)
+                || ballLocalChange >= 0.55
             candidates.append(StageCandidate(
                 stage: .impact,
                 evidenceIndex: evidenceIndex,
@@ -1580,8 +1585,8 @@ enum ImpactCorridorResolver {
                 score: score,
                 requirementsSatisfied: hasRequiredObjects,
                 maximumStatus: hasRequiredObjects ? .confirmed : .lowConfidence,
-                hasClubEvidence: objectEvidence.shaft != nil,
-                hasBallEvidence: objectEvidence.ball != nil || objectEvidence.stableBall != nil,
+                hasClubEvidence: objectEvidence.shaft != nil || hasDetectedClubhead,
+                hasBallEvidence: hasDetectedBall,
                 hasBallChangeEvidence: ballLocalChange >= 0.55
             ))
         }
@@ -1683,17 +1688,29 @@ enum BidirectionalStageCandidateResolver {
             before: impact.evidenceIndex,
             timeline: timeline
         )
-        let p6ForThisPass = p6.isEmpty && includesProvisionalDeliveryShaft
-            ? provisionalDeliveryShaftCandidates(
-                before: impact.evidenceIndex,
-                timeline: timeline
-            )
-            : p6
-        let p8 = followThroughCandidates(
+        let provisionalP6 = provisionalDeliveryShaftCandidates(
+            before: impact.evidenceIndex,
+            timeline: timeline
+        )
+        let p6ForThisPass: [StageCandidate]
+        if p6.isEmpty {
+            p6ForThisPass = includesProvisionalDeliveryShaft
+                ? provisionalP6
+                : unresolvedCandidates(provisionalP6)
+        } else {
+            p6ForThisPass = p6
+        }
+        let detectedP8 = followThroughCandidates(
             after: impact.evidenceIndex,
             impact: impact,
             timeline: timeline
         )
+        let p8 = detectedP8.isEmpty
+            ? unresolvedCandidates(provisionalFollowThroughCandidates(
+                after: impact.evidenceIndex,
+                timeline: timeline
+            ))
+            : detectedP8
 
         return StageCandidateSet(
             impact: impact,
@@ -2158,6 +2175,62 @@ enum BidirectionalStageCandidateResolver {
         )
     }
 
+    private static func provisionalFollowThroughCandidates(
+        after lowerBound: Int,
+        timeline: [SwingTemporalFrame]
+    ) -> [StageCandidate] {
+        guard lowerBound < timeline.index(before: timeline.endIndex) else { return [] }
+        return retainedCandidates(
+            ((lowerBound + 1)..<timeline.endIndex).compactMap { index in
+                let temporal = timeline[index]
+                let frame = temporal.frame
+                guard temporal.sustainedFollowThrough else { return nil }
+                let armHorizontal = closeness(
+                    frame.leadArmAngle,
+                    target: 0,
+                    tolerance: 18
+                )
+                let postImpactRise = ramp(
+                    -Double(frame.handVelocity.y),
+                    minimum: 0.15,
+                    maximum: 1
+                )
+                let score = clamp(
+                    armHorizontal * 0.36
+                        + postImpactRise * 0.34
+                        + frame.poseCoverage * 0.30
+                )
+                guard score >= 0.32 else { return nil }
+                return candidate(
+                    stage: .followThrough,
+                    index: index,
+                    score: score,
+                    requirementsSatisfied: false,
+                    timeline: timeline
+                )
+            }
+        )
+    }
+
+    private static func unresolvedCandidates(
+        _ candidates: [StageCandidate]
+    ) -> [StageCandidate] {
+        candidates.map {
+            StageCandidate(
+                stage: $0.stage,
+                evidenceIndex: $0.evidenceIndex,
+                sourceFrameIndex: $0.sourceFrameIndex,
+                time: $0.time,
+                score: $0.score,
+                requirementsSatisfied: false,
+                maximumStatus: .unresolved,
+                hasClubEvidence: $0.hasClubEvidence,
+                hasBallEvidence: $0.hasBallEvidence,
+                hasBallChangeEvidence: $0.hasBallChangeEvidence
+            )
+        }
+    }
+
     private static func reliableHorizontalShaftEvidence(
         _ frame: SwingFrameEvidence
     ) -> Double? {
@@ -2322,6 +2395,7 @@ struct SwingStageDetection: Equatable {
     let hasClubEvidence: Bool
     let hasBallEvidence: Bool
     let hasBallChangeEvidence: Bool
+    let evidence: StageEvidenceSummary
 
     init(
         stage: SwingStage,
@@ -2331,7 +2405,8 @@ struct SwingStageDetection: Equatable {
         status: SwingStageDetectionStatus,
         hasClubEvidence: Bool = false,
         hasBallEvidence: Bool = false,
-        hasBallChangeEvidence: Bool = false
+        hasBallChangeEvidence: Bool = false,
+        evidence: StageEvidenceSummary = .empty
     ) {
         self.stage = stage
         self.time = time
@@ -2341,11 +2416,62 @@ struct SwingStageDetection: Equatable {
         self.hasClubEvidence = hasClubEvidence
         self.hasBallEvidence = hasBallEvidence
         self.hasBallChangeEvidence = hasBallChangeEvidence
+        self.evidence = evidence
     }
 
     var marker: KeyframeMarker? {
         guard let time, status != .unresolved else { return nil }
         return KeyframeMarker(time: time, stage: stage, source: .automatic)
+    }
+}
+
+enum StageEvidenceSource: String, Codable, Hashable {
+    case bodyPose
+    case grip
+    case shaft
+    case clubhead
+    case ball
+    case temporalTransition
+    case manual
+}
+
+struct StageEvidenceSummary: Codable, Equatable {
+    let sources: Set<StageEvidenceSource>
+    let detectedPointCount: Int
+    let estimatedPointCount: Int
+
+    static let empty = StageEvidenceSummary(
+        sources: [],
+        detectedPointCount: 0,
+        estimatedPointCount: 0
+    )
+
+    static func make(
+        frame: SwingFrameEvidence,
+        candidate: StageCandidate
+    ) -> StageEvidenceSummary {
+        let points = frame.objectEvidence.trackedPoints
+        var sources: Set<StageEvidenceSource> = [.temporalTransition]
+        if frame.pose != nil { sources.insert(.bodyPose) }
+        if points[.grip]?.state == .detected { sources.insert(.grip) }
+        if frame.objectEvidence.shaft != nil { sources.insert(.shaft) }
+        if points[.clubhead]?.state == .detected { sources.insert(.clubhead) }
+        if frame.objectEvidence.ball != nil
+            || frame.objectEvidence.stableBall != nil
+            || points[.ball]?.state == .detected {
+            sources.insert(.ball)
+        }
+        if points.values.contains(where: { $0.source == .manual }) {
+            sources.insert(.manual)
+        }
+        if candidate.hasBallChangeEvidence {
+            sources.insert(.ball)
+        }
+        return StageEvidenceSummary(
+            sources: sources,
+            detectedPointCount: points.values.filter { $0.state == .detected }.count,
+            estimatedPointCount: points.values.filter { $0.state == .estimated }.count
+        )
     }
 }
 
@@ -2421,7 +2547,7 @@ enum ConstrainedSwingPathSolver {
                     + frame.poseCoverage * 0.20
                     + min(0.10, pathMargin)
             )
-            let status: SwingStageDetectionStatus
+            var status: SwingStageDetectionStatus
             switch candidate.maximumStatus {
             case .unresolved:
                 confidence = 0
@@ -2431,6 +2557,18 @@ enum ConstrainedSwingPathSolver {
                 status = .lowConfidence
             case .confirmed:
                 status = confidence >= 0.72 ? .confirmed : .lowConfidence
+            }
+            let evidence = StageEvidenceSummary.make(
+                frame: frame,
+                candidate: candidate
+            )
+            if !hasCanonicalEvidence(
+                for: stage,
+                summary: evidence,
+                candidate: candidate
+            ) {
+                confidence = 0
+                status = .unresolved
             }
             return SwingStageDetection(
                 stage: stage,
@@ -2442,7 +2580,8 @@ enum ConstrainedSwingPathSolver {
                 status: status,
                 hasClubEvidence: candidate.hasClubEvidence,
                 hasBallEvidence: candidate.hasBallEvidence,
-                hasBallChangeEvidence: candidate.hasBallChangeEvidence
+                hasBallChangeEvidence: candidate.hasBallChangeEvidence,
+                evidence: evidence
             )
         }
         let unresolved = Set(
@@ -2691,6 +2830,22 @@ enum ConstrainedSwingPathSolver {
             confidence: 0,
             status: .unresolved
         )
+    }
+
+    private static func hasCanonicalEvidence(
+        for stage: SwingStage,
+        summary: StageEvidenceSummary,
+        candidate: StageCandidate
+    ) -> Bool {
+        switch stage {
+        case .takeaway, .shaftParallelDownswing, .followThrough:
+            return summary.sources.contains(.shaft)
+        case .impact:
+            return candidate.hasBallChangeEvidence
+                || summary.sources.isSuperset(of: [.clubhead, .ball])
+        default:
+            return true
+        }
     }
 
     private static func unresolvedResult() -> SwingAnalysisResult {
