@@ -61,9 +61,32 @@ class GolfKeypointDataset(Dataset):
     def __getitem__(self, index):
         sample = self.samples[index]
         image = self.image_loader(sample).convert("RGB")
-        image = transforms.resize(image, [256, 256], antialias=True)
+        image, coordinates = self._aspect_fit(image, sample.coordinates)
         image_tensor = transforms.to_tensor(image)
-        return image_tensor, sample.coordinates.clone(), sample.visibility.clone()
+        return image_tensor, coordinates, sample.visibility.clone()
+
+    @staticmethod
+    def _aspect_fit(image, coordinates, target_size=256):
+        scale = min(target_size / image.width, target_size / image.height)
+        content_width = max(1, round(image.width * scale))
+        content_height = max(1, round(image.height * scale))
+        offset_x = (target_size - content_width) // 2
+        offset_y = (target_size - content_height) // 2
+        resized = transforms.resize(
+            image,
+            [content_height, content_width],
+            antialias=True,
+        )
+        canvas = Image.new("RGB", (target_size, target_size), "black")
+        canvas.paste(resized, (offset_x, offset_y))
+        transformed = coordinates.clone()
+        transformed[:, 0] = (
+            coordinates[:, 0] * content_width + offset_x
+        ) / target_size
+        transformed[:, 1] = (
+            coordinates[:, 1] * content_height + offset_y
+        ) / target_size
+        return canvas, transformed
 
     def _read_samples(self):
         if not self.manifest_path.is_file():

@@ -45,6 +45,8 @@
 		F80000000000000000000005 /* SwingInputQualityEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000006 /* SwingInputQualityEvaluator.swift */; };
 		F80000000000000000000007 /* SwingPoseObservationAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000008 /* SwingPoseObservationAdapter.swift */; };
 		F80000000000000000000009 /* SwingTrajectoryTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000A /* SwingTrajectoryTracker.swift */; };
+		F8000000000000000000000B /* GolfObjectObservationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000C /* GolfObjectObservationProvider.swift */; };
+		F8000000000000000000000D /* CoreMLGolfObjectDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -87,6 +89,8 @@
 		F80000000000000000000006 /* SwingInputQualityEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingInputQualityEvaluator.swift; sourceTree = "<group>"; };
 		F80000000000000000000008 /* SwingPoseObservationAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingPoseObservationAdapter.swift; sourceTree = "<group>"; };
 		F8000000000000000000000A /* SwingTrajectoryTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingTrajectoryTracker.swift; sourceTree = "<group>"; };
+		F8000000000000000000000C /* GolfObjectObservationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GolfObjectObservationProvider.swift; sourceTree = "<group>"; };
+		F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreMLGolfObjectDetector.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -154,6 +158,8 @@
 				F80000000000000000000006 /* SwingInputQualityEvaluator.swift */,
 				F80000000000000000000008 /* SwingPoseObservationAdapter.swift */,
 				F8000000000000000000000A /* SwingTrajectoryTracker.swift */,
+				F8000000000000000000000C /* GolfObjectObservationProvider.swift */,
+				F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -294,6 +300,8 @@
 				F80000000000000000000005 /* SwingInputQualityEvaluator.swift in Sources */,
 				F80000000000000000000007 /* SwingPoseObservationAdapter.swift in Sources */,
 				F80000000000000000000009 /* SwingTrajectoryTracker.swift in Sources */,
+				F8000000000000000000000B /* GolfObjectObservationProvider.swift in Sources */,
+				F8000000000000000000000D /* CoreMLGolfObjectDetector.swift in Sources */,
 				C40000000000000000000001 /* BrandMarkView.swift in Sources */,
 			);
 		};

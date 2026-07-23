@@ -53,6 +53,8 @@ def test_dataset_requires_authorized_reviewed_labels(tmp_path):
     image, coordinates, visibility = dataset[0]
     assert image.shape == (3, 256, 256)
     assert coordinates.shape == (5, 2)
+    assert abs(float(coordinates[0, 0]) - 0.1) < 1e-6
+    assert abs(float(coordinates[0, 1]) - 0.33125) < 1e-6
     assert visibility.tolist() == [1, 1, 1, 1, 0]
 
     manifest.write_text(

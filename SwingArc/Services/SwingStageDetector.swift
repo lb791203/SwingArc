@@ -204,6 +204,21 @@ struct SwingObjectEvidence: Equatable {
     let ball: BallEvidence?
     let stableBall: CGPoint?
     let ballLocalChange: Double
+    let trackedPoints: [SwingLandmark: TrackedSwingPoint]
+
+    init(
+        shaft: ClubShaftEvidence?,
+        ball: BallEvidence?,
+        stableBall: CGPoint?,
+        ballLocalChange: Double,
+        trackedPoints: [SwingLandmark: TrackedSwingPoint] = [:]
+    ) {
+        self.shaft = shaft
+        self.ball = ball
+        self.stableBall = stableBall
+        self.ballLocalChange = ballLocalChange
+        self.trackedPoints = trackedPoints
+    }
 
     static let empty = SwingObjectEvidence(
         shaft: nil,

@@ -107,7 +107,7 @@ Automatic stages always reference observed source frames. For DTL and Face-on se
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
 xcrun swiftc -parse-as-library \
   -framework AVFoundation -framework Vision -framework ImageIO \
-  -framework SwiftUI -framework CoreVideo \
+  -framework SwiftUI -framework CoreVideo -framework CoreML \
   SwingArc/Models/DrawingModels.swift \
   SwingArc/Models/SwingMetricModels.swift \
   SwingArc/Models/SwingObservationModels.swift \
@@ -117,6 +117,8 @@ xcrun swiftc -parse-as-library \
   SwingArc/Services/SwingInputQualityEvaluator.swift \
   SwingArc/Services/SwingTrajectoryTracker.swift \
   SwingArc/Services/SwingPoseObservationAdapter.swift \
+  SwingArc/Services/GolfObjectObservationProvider.swift \
+  SwingArc/Services/CoreMLGolfObjectDetector.swift \
   SwingArc/Services/VisionPoseDetector.swift \
   SwingArc/Services/SwingStageDetector.swift \
   Tests/P1P8AcceptanceSupport.swift \

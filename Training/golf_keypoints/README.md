@@ -12,7 +12,7 @@ Only manifest clips with `authorization: training-allowed` and the requested gol
 4. `clubhead`
 5. `ball`
 
-Hidden or out-of-frame points remain in the label schema but do not contribute coordinate loss. Frame extraction uses the source-frame index and source FPS through the locally installed `ffmpeg` command.
+Hidden or out-of-frame points remain in the label schema but do not contribute coordinate loss. Frame extraction uses the source-frame index and source FPS through the locally installed `ffmpeg` command. Images are resized with aspect fit onto a black 256 × 256 canvas, and label coordinates are transformed into that padded model space; the iOS decoder applies the inverse transform back to full-frame normalized coordinates.
 
 ## Environment and checks
 

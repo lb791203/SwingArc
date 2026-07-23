@@ -1235,6 +1235,11 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         )
         let objectDetector = SwingObjectDetector()
         var objectEvidenceByFrame: [Int: SwingObjectEvidence] = [:]
+        var rawGolfObservationByFrame: [Int: GolfObjectObservation] = [:]
+        let promotedGolfProvider = Bundle.main.url(
+            forResource: "GolfKeypoints",
+            withExtension: "mlmodelc"
+        ).flatMap { try? CoreMLGolfObjectDetector(modelURL: $0) }
         publish(.evidence, progress: 0.70, runID: runID, gate: gate, handler: progress)
 
         for (index, reference) in objectReferences.enumerated() {
@@ -1252,6 +1257,19 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 )
             }
             objectEvidenceByFrame[reference.sourceFrameIndex] = detected
+            let contourObservation = ContourGolfObjectObservationAdapter.observation(
+                from: detected
+            )
+            var mergedPoints = contourObservation.points
+            if let promotedGolfProvider,
+               let promotedObservation = try? promotedGolfProvider.observe(
+                    image: image,
+                    pose: rawPosesByFrame[reference.sourceFrameIndex]
+               ) {
+                mergedPoints.merge(promotedObservation.points) { _, promoted in promoted }
+            }
+            rawGolfObservationByFrame[reference.sourceFrameIndex] =
+                GolfObjectObservation(points: mergedPoints)
             publish(
                 .evidence,
                 progress: SwingVideoAnalysisProgressPolicy.evidenceProgress(
@@ -1265,25 +1283,52 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         }
 
         let stableBall = objectDetector.stableBall?.center
+        var golfTracker = GolfObjectTrajectoryTracker(maximumPredictionFrames: 2)
+        let trackedGolfFrames = fineFrames.map { frame in
+            golfTracker.update(
+                observation: rawGolfObservationByFrame[frame.sourceFrameIndex] ?? .empty,
+                sourceFrameIndex: frame.sourceFrameIndex,
+                time: frame.time
+            )
+        }
+        let trackedGolfByFrame = Dictionary(uniqueKeysWithValues: trackedGolfFrames.map {
+            ($0.sourceFrameIndex, $0)
+        })
         let mergedFrames = fineFrames.map { frame in
             let detected = objectEvidenceByFrame[frame.sourceFrameIndex] ?? .empty
-            let mergedObjects: SwingObjectEvidence
-            if detected.stableBall == nil, let stableBall {
-                mergedObjects = SwingObjectEvidence(
-                    shaft: detected.shaft,
-                    ball: detected.ball,
-                    stableBall: stableBall,
-                    ballLocalChange: detected.ballLocalChange
+            let tracked = trackedGolfByFrame[frame.sourceFrameIndex]
+                ?? SwingFrameObservation(
+                    sourceFrameIndex: frame.sourceFrameIndex,
+                    time: frame.time,
+                    landmarks: [:]
                 )
-            } else {
-                mergedObjects = detected
-            }
+            let mergedObjects = TrackedGolfObjectEvidenceAdapter.evidence(
+                from: tracked,
+                stableBall: detected.stableBall ?? stableBall,
+                ballLocalChange: detected.ballLocalChange
+            )
             return SwingFrameSample(
                 sourceFrameIndex: frame.sourceFrameIndex,
                 time: frame.time,
                 pose: frame.pose,
                 rawPose: frame.rawPose,
                 objectEvidence: mergedObjects
+            )
+        }
+        trackedBodyFrames = trackedBodyFrames.map { bodyFrame in
+            guard let golfFrame = trackedGolfByFrame[bodyFrame.sourceFrameIndex] else {
+                return bodyFrame
+            }
+            let rawGolf = rawGolfObservationByFrame[bodyFrame.sourceFrameIndex]?.points ?? [:]
+            var landmarks = bodyFrame.landmarks
+            landmarks.merge(golfFrame.landmarks) { _, golf in golf }
+            var rawLandmarks = bodyFrame.rawLandmarks
+            rawLandmarks.merge(rawGolf) { _, golf in golf }
+            return SwingFrameObservation(
+                sourceFrameIndex: bodyFrame.sourceFrameIndex,
+                time: bodyFrame.time,
+                landmarks: landmarks,
+                rawLandmarks: rawLandmarks
             )
         }
         finalTimeline = SwingEvidenceTimeline.build(
