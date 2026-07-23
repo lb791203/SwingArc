@@ -28,6 +28,20 @@ struct FrameExtractionTolerancePolicySmoke {
             abs(centeredRequest!.seconds - 30.5 / 239.9) < 1.0 / 60_000.0,
             "VFR decoding must request the center of the estimated frame interval"
         )
+        for sourceFrameRate in [30.0, 60.0, 120.0, 240.0] {
+            let sourceFrameIndex = 86
+            let request = FrameExtractionTolerancePolicy.decodeRequestTime(
+                sourceFrameIndex: sourceFrameIndex,
+                sourceFrameRate: sourceFrameRate
+            )
+            precondition(
+                request == CMTime(
+                    value: CMTimeValue(sourceFrameIndex),
+                    timescale: CMTimeScale(sourceFrameRate)
+                ),
+                "Integer CFR decoding must request the exact source-frame timestamp"
+            )
+        }
 
         if CommandLine.arguments.count > 1 {
             let analyzer = try! String(

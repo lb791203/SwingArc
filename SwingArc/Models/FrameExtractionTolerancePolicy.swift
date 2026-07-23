@@ -14,11 +14,11 @@ enum FrameExtractionTolerancePolicy {
         return CMTime(seconds: seconds, preferredTimescale: 60_000)
     }
 
-    /// AVAssetImageGenerator seeks to a sample at or before the requested
-    /// timestamp. Fractional/VFR metadata can place the nominal frame time
-    /// just before its real presentation timestamp, selecting the prior
-    /// frame. Asking for the interval center keeps the intended sample inside
-    /// the bounded half-frame search window.
+    /// Integer CFR timelines use their exact source-frame timestamp. For
+    /// fractional/VFR metadata, AVAssetImageGenerator can place a nominal
+    /// frame time just before its real presentation timestamp and select the
+    /// prior frame; asking for the interval center keeps the intended sample
+    /// inside the bounded half-frame search window.
     static func decodeRequestTime(
         sourceFrameIndex: Int,
         sourceFrameRate: Double
@@ -27,6 +27,14 @@ enum FrameExtractionTolerancePolicy {
               sourceFrameRate.isFinite,
               sourceFrameRate > 0 else {
             return nil
+        }
+        let roundedFrameRate = sourceFrameRate.rounded()
+        if abs(sourceFrameRate - roundedFrameRate) < 0.001,
+           roundedFrameRate <= Double(Int32.max) {
+            return CMTime(
+                value: CMTimeValue(sourceFrameIndex),
+                timescale: CMTimeScale(roundedFrameRate)
+            )
         }
         return CMTime(
             seconds: (Double(sourceFrameIndex) + 0.5) / sourceFrameRate,
