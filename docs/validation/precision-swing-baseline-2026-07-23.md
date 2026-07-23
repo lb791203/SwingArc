@@ -21,8 +21,21 @@ authorization.
 
 Capture rate and exported source-track rate are intentionally separate.
 The exported clips contain 497–1365 source frames on a 30 FPS playback
-timeline. The unmodified 240 FPS originals are still required for paired
-testing of identical swings.
+timeline.
+
+The paired unmodified originals were subsequently exported and tested:
+
+- Codec/resolution: HEVC, 1920×1080 plus rotation metadata
+- Declared rate: 240 FPS
+- Decodable average rate: approximately 209.1–210.4 FPS
+- Bitrate: approximately 50–52 Mbps
+- Duration: 4.07–8.56 seconds
+- Frame count: 856–1790
+
+The processed H.264 exports are approximately 10.5 Mbps and contain
+226–1032 fewer frames per clip. They are not simple timestamp-only copies;
+the original files preserve substantially more temporal and compression
+evidence for shaft and clubhead work.
 
 The reference P frames came from two independent AI-assisted visual passes
 and a third dispute-resolution pass. They are useful development labels but
@@ -80,6 +93,43 @@ rather than counted as successes.
 
 No scored stage reaches the required 90% held-out hit rate.
 
+## Paired unmodified-original result
+
+The first run of an unmodified original failed at the eighth coarse sample
+because the decoder assumed `sourceFrameIndex / averageFrameRate` identified
+every iPhone high-rate frame. The original tracks are variable frame rate,
+so that arithmetic is false.
+
+The media pipeline now creates an ordinal source-frame index from each
+decoded sample's actual presentation timestamp. The fix:
+
+- reads all 8/8 originals without `frameExtractionFailed`;
+- keeps integer-CFR 30 FPS output identical on the regression clip;
+- maps every automatic marker back to a real decoded source-frame ordinal.
+
+After that media fix, the original files produced:
+
+| Clip | Result on unmodified original |
+| --- | --- |
+| IMG_4691 | Failed: `incompleteSwingClip` |
+| IMG_4692 | Completed: P1 655, P2 U, P3 797, P4 878, P5 908, P6–P8 U |
+| IMG_4693 | Failed: `incompleteSwingClip` |
+| IMG_4694 | Failed: `incompleteSwingClip` |
+| IMG_4695 | Failed: `incompleteSwingClip` |
+| IMG_4696 | Failed: `insufficientPoseEvidence` |
+| IMG_4697 | Failed: `incompleteSwingClip` |
+| IMG_4698 | Failed: `insufficientPoseEvidence` |
+
+Original-file completion is 1/8 (12.5%), compared with 3/8 (37.5%) on the
+processed slow-motion timelines. The originals improve media fidelity but
+expose that the stage solver is not tempo-normalized: second-based motion,
+padding, and boundary rules behave differently on the same swing represented
+on a normal high-rate timeline versus an edited slow-motion timeline.
+
+The original source-frame ordinals have not yet received two independent
+human-reviewed P1–P8 annotations. Therefore the original result is a
+completion/diagnostic comparison, not a frame-accuracy score.
+
 ## Body, shaft, and clubhead evidence
 
 Apple Vision body-pose coverage is not the main failure in the three
@@ -123,13 +173,12 @@ The evidence separates the failures:
 
 ## Required next work
 
-1. Export and pair the unmodified 240 FPS originals with these 30 FPS
-   playback-timeline files; compare frame count, bitrate, source-frame
-   identity, solver output, and runtime.
-2. Infer or read the effective time scale for each swing attempt instead of
+1. Infer or read the effective time scale for each swing attempt instead of
    applying normal-speed second-based limits to every clip.
-3. Preserve Vision for body landmarks, then correct P1–P8 from source-frame
+2. Preserve Vision for body landmarks, then correct P1–P8 from source-frame
    geometry and tempo-normalized ordering.
+3. Label the unmodified originals independently, then map paired visual
+   frames only as a cross-check rather than copying 30 FPS frame numbers.
 4. Label grip, shaft endpoints, clubhead, and ball on authorized high-rate
    frames; train and bundle a real replaceable Core ML golf-keypoint model.
 5. Run golf-object inference on a high-resolution golfer/club ROI and track
@@ -153,4 +202,4 @@ Failed gates:
 - Clubhead visible-frame hit rate is 0% in completed clips.
 - Clubhead error and gap metrics are unavailable.
 - The development labels are not yet locked human-expert truth.
-- The unmodified 240 FPS originals have not yet been paired and tested.
+- The unmodified originals do not yet have locked human-expert frame truth.
