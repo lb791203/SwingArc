@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import CoreMedia
 
 struct SwingPoseSample: Equatable {
     let time: Double
@@ -3959,6 +3960,52 @@ struct FineFrameReference: Equatable {
 
 enum FineSwingSamplingPlan {
     static let maximumSamplesPerSecond = 120.0
+
+    static func frames(
+        window: SwingWindow,
+        sourceFrameTimeline: SourceFrameTimeline
+    ) -> [FineFrameReference] {
+        guard window.duration > 0,
+              sourceFrameTimeline.count > 0 else { return [] }
+        let firstFrame = sourceFrameTimeline.firstSourceFrameIndex(
+            atOrAfter: window.startTime
+        )
+        guard firstFrame <= sourceFrameTimeline.maximumSourceFrameIndex,
+              let lastFrame = sourceFrameTimeline.lastSourceFrameIndex(
+                atOrBefore: window.endTime
+              ),
+              firstFrame <= lastFrame else { return [] }
+
+        let minimumInterval = 1.0 / maximumSamplesPerSecond
+        var references: [FineFrameReference] = []
+        var sourceFrameIndex = firstFrame
+        while sourceFrameIndex <= lastFrame {
+            guard let time = sourceFrameTimeline.presentationTime(
+                sourceFrameIndex: sourceFrameIndex
+            )?.seconds else { break }
+            references.append(FineFrameReference(
+                sourceFrameIndex: sourceFrameIndex,
+                time: time
+            ))
+            let candidate = sourceFrameTimeline.firstSourceFrameIndex(
+                atOrAfter: time + minimumInterval
+            )
+            sourceFrameIndex = max(sourceFrameIndex + 1, candidate)
+        }
+
+        if references.last?.sourceFrameIndex != lastFrame,
+           let previousTime = references.last?.time,
+           let lastTime = sourceFrameTimeline.presentationTime(
+               sourceFrameIndex: lastFrame
+           )?.seconds,
+           lastTime - previousTime >= minimumInterval {
+            references.append(FineFrameReference(
+                sourceFrameIndex: lastFrame,
+                time: lastTime
+            ))
+        }
+        return references
+    }
 
     static func frames(
         window: SwingWindow,

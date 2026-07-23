@@ -837,6 +837,33 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         let rawPose: PoseEstimationResult?
     }
 
+    private static func sourceFrameTimeline(
+        asset: AVAsset,
+        videoTrack: AVAssetTrack
+    ) -> SourceFrameTimeline? {
+        guard let reader = try? AVAssetReader(asset: asset) else { return nil }
+        let output = AVAssetReaderTrackOutput(
+            track: videoTrack,
+            outputSettings: [
+                kCVPixelBufferPixelFormatTypeKey as String:
+                    kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+            ]
+        )
+        guard reader.canAdd(output) else { return nil }
+        reader.add(output)
+        guard reader.startReading() else { return nil }
+
+        var presentationTimes: [CMTime] = []
+        while let sample = output.copyNextSampleBuffer() {
+            let time = CMSampleBufferGetPresentationTimeStamp(sample)
+            if time.isValid, time.isNumeric {
+                presentationTimes.append(time)
+            }
+        }
+        guard reader.status == .completed else { return nil }
+        return SourceFrameTimeline(presentationTimes: presentationTimes)
+    }
+
     func analyze(
         url: URL,
         runID: UUID,
@@ -863,12 +890,30 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         guard let videoTrack = asset.tracks(withMediaType: .video).first else {
             return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)
         }
-        let nominalFrameRate = Double(videoTrack.nominalFrameRate)
-        guard nominalFrameRate.isFinite, nominalFrameRate > 0 else {
+        let metadataFrameRate = Double(videoTrack.nominalFrameRate)
+        guard metadataFrameRate.isFinite, metadataFrameRate > 0 else {
             return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)
         }
+        let sourceFrameTimeline: SourceFrameTimeline?
+        if metadataFrameRate == metadataFrameRate.rounded(),
+           metadataFrameRate <= FineSwingSamplingPlan.maximumSamplesPerSecond {
+            sourceFrameTimeline = SourceFrameTimeline(
+                duration: duration,
+                constantFrameRate: metadataFrameRate
+            )
+        } else {
+            sourceFrameTimeline = Self.sourceFrameTimeline(
+                asset: asset,
+                videoTrack: videoTrack
+            )
+        }
+        guard let sourceFrameTimeline else {
+            return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)
+        }
+        let sourceFrameRate = sourceFrameTimeline.averageFrameRate
+            ?? metadataFrameRate
         guard let decodeTolerance = FrameExtractionTolerancePolicy.halfFrameTime(
-            sourceFrameRate: nominalFrameRate
+            sourceFrameRate: sourceFrameRate
         ) else {
             return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)
         }
@@ -891,22 +936,18 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         }
         var coarseSamples: [CoarseSwingSample] = []
         var coarseQualityFrames: [(time: Double, frame: SwingInputQualityFrame)] = []
-        let maximumSourceFrameIndex = SourceFrameBounds.maximumSourceFrameIndex(
-            duration: duration,
-            sourceFrameRate: nominalFrameRate
-        )
         publish(.locating, progress: 0, runID: runID, gate: gate, handler: progress)
 
         for (index, seconds) in coarseTimes.enumerated() {
             guard gate.isActive(runID) else { return .cancelled }
-            let requestedSourceFrameIndex = min(
-                maximumSourceFrameIndex,
-                max(0, Int((seconds * nominalFrameRate).rounded()))
-            )
+            guard let requestedSourceFrameIndex = sourceFrameTimeline
+                .nearestSourceFrameIndex(at: seconds) else {
+                return activeFrameExtractionFailure(runID: runID, gate: gate)
+            }
             let extraction: (sample: CoarseSwingSample, quality: SwingInputQualityFrame)? = autoreleasepool {
                 guard let requestedTime = FrameExtractionTolerancePolicy.decodeRequestTime(
                     sourceFrameIndex: requestedSourceFrameIndex,
-                    sourceFrameRate: nominalFrameRate
+                    sourceFrameTimeline: sourceFrameTimeline
                 ) else { return nil }
                 var actualTime = CMTime.invalid
                 guard let image = try? generator.copyCGImage(
@@ -915,10 +956,9 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 ),
                 actualTime.isValid,
                 actualTime.seconds.isFinite,
-                case .matched = SourceFrameMatchPolicy.validate(
+                sourceFrameTimeline.matches(
                     requestedSourceFrameIndex: requestedSourceFrameIndex,
-                    actualTime: actualTime.seconds,
-                    sourceFrameRate: nominalFrameRate
+                    actualTime: actualTime
                 ) else { return nil }
                 let actualSeconds = actualTime.seconds
                 let selectedPose = trackedPoseDetector.selectPose(
@@ -1088,18 +1128,16 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         var finalTimeline: [SwingTemporalFrame] = []
         var windowSearchState = AdaptiveWindowSearchState()
         let fineDecodeLedger = AdaptiveFineDecodeLedger()
-        let maximumFrameBudget = adaptiveFrameBudget(sourceFrameRate: nominalFrameRate)
+        let maximumFrameBudget = adaptiveFrameBudget(sourceFrameRate: sourceFrameRate)
         let fineFrameImageCache = FineFrameImageCache(
-            maximumEntryCount: adaptiveFrameCacheBudget(sourceFrameRate: nominalFrameRate)
+            maximumEntryCount: adaptiveFrameCacheBudget(sourceFrameRate: sourceFrameRate)
         )
         publish(.expanding, progress: 0.20, runID: runID, gate: gate, handler: progress)
 
         adaptiveExtraction: while gate.isActive(runID) {
             let references = FineSwingSamplingPlan.frames(
                 window: window,
-                sourceFrameRate: nominalFrameRate,
-                duration: duration,
-                maximumSourceFrameIndex: maximumSourceFrameIndex
+                sourceFrameTimeline: sourceFrameTimeline
             ).filter { samplesByFrame[$0.sourceFrameIndex] == nil }
 
             guard !references.isEmpty || !samplesByFrame.isEmpty else {
@@ -1111,7 +1149,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                     reference: reference,
                     generator: generator,
                     detector: trackedPoseDetector,
-                    sourceFrameRate: nominalFrameRate,
+                    sourceFrameTimeline: sourceFrameTimeline,
                     frameImageCache: fineFrameImageCache,
                     decodeLedger: fineDecodeLedger
                 ) else {
@@ -1173,9 +1211,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             case let .expand(next):
                 let retainedSourceFrames = Set(FineSwingSamplingPlan.frames(
                     window: next,
-                    sourceFrameRate: nominalFrameRate,
-                    duration: duration,
-                    maximumSourceFrameIndex: maximumSourceFrameIndex
+                    sourceFrameTimeline: sourceFrameTimeline
                 ).map(\.sourceFrameIndex))
                 samplesByFrame = samplesByFrame.filter {
                     retainedSourceFrames.contains($0.key)
@@ -1379,7 +1415,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 .map(\.frame.leadArm)
                 .first(where: { $0 != .unknown }) ?? .unknown,
             adaptiveWindow: window,
-            sourceFrameRate: nominalFrameRate,
+            sourceFrameRate: sourceFrameRate,
             elapsedSeconds: ProcessInfo.processInfo.systemUptime - startedAt,
             trackingDiagnostics: trackedPoseDetector.diagnostics,
             observationFrames: trackedBodyFrames
@@ -1390,7 +1426,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         reference: FineFrameReference,
         generator: AVAssetImageGenerator,
         detector: TrackedPoseDetector,
-        sourceFrameRate: Double,
+        sourceFrameTimeline: SourceFrameTimeline,
         frameImageCache: FineFrameImageCache,
         decodeLedger: AdaptiveFineDecodeLedger
     ) -> PoseFrameExtraction? {
@@ -1403,7 +1439,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 ) else { return nil }
                 guard let requestedTime = FrameExtractionTolerancePolicy.decodeRequestTime(
                     sourceFrameIndex: reference.sourceFrameIndex,
-                    sourceFrameRate: sourceFrameRate
+                    sourceFrameTimeline: sourceFrameTimeline
                 ) else { return nil }
                 var actualTime = CMTime.invalid
                 guard let image = try? generator.copyCGImage(
@@ -1412,13 +1448,12 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 ),
                 actualTime.isValid,
                 actualTime.seconds.isFinite,
-                case let .matched(matchedSourceFrameIndex) = SourceFrameMatchPolicy.validate(
+                sourceFrameTimeline.matches(
                     requestedSourceFrameIndex: reference.sourceFrameIndex,
-                    actualTime: actualTime.seconds,
-                    sourceFrameRate: sourceFrameRate
+                    actualTime: actualTime
                 ) else { return nil }
                 observedTime = actualTime.seconds
-                observedSourceFrameIndex = matchedSourceFrameIndex
+                observedSourceFrameIndex = reference.sourceFrameIndex
                 return image
             }
             guard case let .decoded(image) = load,

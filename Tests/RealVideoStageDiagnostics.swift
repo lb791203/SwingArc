@@ -62,6 +62,9 @@ struct RealVideoStageDiagnostics {
         } else {
             metadataSourceFrameRate = nil
         }
+        let timelineInterpretation = (metadataSourceFrameRate ?? 0) > 120
+            ? "unmodified high-frame-rate capture timeline"
+            : "processed slow-motion playback timeline"
         let gate = AnalysisRunGate()
         let runID = gate.begin()
         let engine = SwingVideoAnalysisEngine(
@@ -102,7 +105,7 @@ struct RealVideoStageDiagnostics {
                 video: videoURL.lastPathComponent,
                 captureFrameRate: captureFrameRate,
                 sourceFrameRate: output.sourceFrameRate,
-                timelineInterpretation: "processed slow-motion playback timeline",
+                timelineInterpretation: timelineInterpretation,
                 motionBlurHandling: "warning-only development diagnostic",
                 outcome: "completed",
                 elapsedSeconds: output.elapsedSeconds,
@@ -118,7 +121,7 @@ struct RealVideoStageDiagnostics {
                 video: videoURL.lastPathComponent,
                 captureFrameRate: captureFrameRate,
                 sourceFrameRate: metadataSourceFrameRate,
-                timelineInterpretation: "processed slow-motion playback timeline",
+                timelineInterpretation: timelineInterpretation,
                 motionBlurHandling: "warning-only development diagnostic",
                 outcome: "failed: \(reason)",
                 elapsedSeconds: nil,
@@ -134,7 +137,7 @@ struct RealVideoStageDiagnostics {
                 video: videoURL.lastPathComponent,
                 captureFrameRate: captureFrameRate,
                 sourceFrameRate: metadataSourceFrameRate,
-                timelineInterpretation: "processed slow-motion playback timeline",
+                timelineInterpretation: timelineInterpretation,
                 motionBlurHandling: "warning-only development diagnostic",
                 outcome: "cancelled",
                 elapsedSeconds: nil,

@@ -1,3 +1,4 @@
+import CoreMedia
 import Foundation
 
 @main
@@ -48,5 +49,28 @@ struct FineSwingSamplingPlanSmoke {
         precondition(
             SourceFrameBounds.maximumSourceFrameIndex(duration: 1, sourceFrameRate: 30) == 29
         )
+
+        let variableTimeline = SourceFrameTimeline(presentationTimes: [
+            CMTime(seconds: 0.000, preferredTimescale: 60_000),
+            CMTime(seconds: 0.004, preferredTimescale: 60_000),
+            CMTime(seconds: 0.008, preferredTimescale: 60_000),
+            CMTime(seconds: 0.016, preferredTimescale: 60_000),
+            CMTime(seconds: 0.020, preferredTimescale: 60_000)
+        ])!
+        let variableFrames = FineSwingSamplingPlan.frames(
+            window: SwingWindow(startTime: 0, endTime: 0.020),
+            sourceFrameTimeline: variableTimeline
+        )
+        precondition(!variableFrames.isEmpty)
+        precondition(variableFrames.first?.sourceFrameIndex == 0)
+        precondition(variableFrames.last?.sourceFrameIndex == 3)
+        precondition(variableFrames.allSatisfy {
+            variableTimeline.presentationTime(
+                sourceFrameIndex: $0.sourceFrameIndex
+            )?.seconds == $0.time
+        })
+        precondition(zip(variableFrames, variableFrames.dropFirst()).allSatisfy {
+            $0.sourceFrameIndex < $1.sourceFrameIndex
+        })
     }
 }

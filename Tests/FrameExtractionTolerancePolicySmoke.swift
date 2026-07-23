@@ -53,6 +53,54 @@ struct FrameExtractionTolerancePolicySmoke {
             )
         }
 
+        let variableTimeline = SourceFrameTimeline(presentationTimes: [
+            CMTime(value: 0, timescale: 240),
+            CMTime(value: 1, timescale: 240),
+            CMTime(value: 2, timescale: 240),
+            CMTime(value: 4, timescale: 240),
+            CMTime(value: 5, timescale: 240)
+        ])!
+        precondition(variableTimeline.count == 5)
+        precondition(variableTimeline.maximumSourceFrameIndex == 4)
+        precondition(
+            variableTimeline.presentationTime(sourceFrameIndex: 3)
+                == CMTime(value: 4, timescale: 240)
+        )
+        precondition(
+            variableTimeline.nearestSourceFrameIndex(at: 3.8 / 240.0) == 3
+        )
+        precondition(
+            variableTimeline.nearestSourceFrameIndex(at: 3.0 / 240.0) == 3,
+            "Exact midpoint ties must preserve Swift rounded() forward selection"
+        )
+        precondition(
+            variableTimeline.matches(
+                requestedSourceFrameIndex: 3,
+                actualTime: CMTime(value: 4, timescale: 240)
+            )
+        )
+        precondition(
+            !variableTimeline.matches(
+                requestedSourceFrameIndex: 2,
+                actualTime: CMTime(value: 4, timescale: 240)
+            )
+        )
+        precondition(
+            FrameExtractionTolerancePolicy.decodeRequestTime(
+                sourceFrameIndex: 3,
+                sourceFrameTimeline: variableTimeline
+            ) == CMTime(value: 4, timescale: 240)
+        )
+        let constantTimeline = SourceFrameTimeline(
+            duration: 1,
+            constantFrameRate: 30
+        )!
+        precondition(constantTimeline.count == 30)
+        precondition(
+            constantTimeline.presentationTime(sourceFrameIndex: 29)
+                == CMTime(value: 29, timescale: 30)
+        )
+
         if CommandLine.arguments.count > 1 {
             let analyzer = try! String(
                 contentsOfFile: CommandLine.arguments[1],
@@ -97,26 +145,42 @@ struct FrameExtractionTolerancePolicySmoke {
         let asset = AVURLAsset(url: url)
         let duration = asset.duration.seconds
         let track = asset.tracks(withMediaType: .video).first!
-        let sourceFrameRate = Double(track.nominalFrameRate)
+        let reader = try! AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(
+            track: track,
+            outputSettings: [
+                kCVPixelBufferPixelFormatTypeKey as String:
+                    kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+            ]
+        )
+        reader.add(output)
+        precondition(reader.startReading())
+        var presentationTimes: [CMTime] = []
+        while let sample = output.copyNextSampleBuffer() {
+            presentationTimes.append(
+                CMSampleBufferGetPresentationTimeStamp(sample)
+            )
+        }
+        precondition(reader.status == .completed)
+        let timeline = SourceFrameTimeline(
+            presentationTimes: presentationTimes
+        )!
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         let tolerance = FrameExtractionTolerancePolicy.halfFrameTime(
-            sourceFrameRate: sourceFrameRate
+            sourceFrameRate: timeline.averageFrameRate!
         )!
         generator.requestedTimeToleranceBefore = tolerance
         generator.requestedTimeToleranceAfter = tolerance
 
-        let maximumSourceFrameIndex = max(0, Int(ceil(duration * sourceFrameRate)) - 1)
         let sampleCount = Int(ceil(duration * 8))
         for index in 0...sampleCount {
             let seconds = min(duration, Double(index) / 8.0)
-            let requestedSourceFrameIndex = min(
-                maximumSourceFrameIndex,
-                max(0, Int((seconds * sourceFrameRate).rounded()))
-            )
+            let requestedSourceFrameIndex = timeline
+                .nearestSourceFrameIndex(at: seconds)!
             let requestedTime = FrameExtractionTolerancePolicy.decodeRequestTime(
                 sourceFrameIndex: requestedSourceFrameIndex,
-                sourceFrameRate: sourceFrameRate
+                sourceFrameTimeline: timeline
             )!
             var actualTime = CMTime.invalid
             do {
@@ -127,12 +191,13 @@ struct FrameExtractionTolerancePolicySmoke {
                         "time \(requestedTime.seconds): \(error)"
                 )
             }
-            let framePosition = actualTime.seconds * sourceFrameRate
-            let distance = abs(framePosition - Double(requestedSourceFrameIndex))
             precondition(
-                distance + 1e-9 < 0.5,
+                timeline.matches(
+                    requestedSourceFrameIndex: requestedSourceFrameIndex,
+                    actualTime: actualTime
+                ),
                 "frame mismatch at sample \(index): requested \(requestedSourceFrameIndex), " +
-                    "actual time \(actualTime.seconds), position \(framePosition), distance \(distance)"
+                    "requested time \(requestedTime.seconds), actual time \(actualTime.seconds)"
             )
         }
     }
