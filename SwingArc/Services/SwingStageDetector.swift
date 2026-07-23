@@ -217,7 +217,35 @@ struct SwingFrameSample: Equatable {
     let sourceFrameIndex: Int
     let time: Double
     let pose: SwingPoseSample?
+    let rawPose: SwingPoseSample?
     let objectEvidence: SwingObjectEvidence
+
+    init(
+        sourceFrameIndex: Int,
+        time: Double,
+        pose: SwingPoseSample?,
+        objectEvidence: SwingObjectEvidence
+    ) {
+        self.sourceFrameIndex = sourceFrameIndex
+        self.time = time
+        self.pose = pose
+        self.rawPose = pose
+        self.objectEvidence = objectEvidence
+    }
+
+    init(
+        sourceFrameIndex: Int,
+        time: Double,
+        pose: SwingPoseSample?,
+        rawPose: SwingPoseSample?,
+        objectEvidence: SwingObjectEvidence
+    ) {
+        self.sourceFrameIndex = sourceFrameIndex
+        self.time = time
+        self.pose = pose
+        self.rawPose = rawPose
+        self.objectEvidence = objectEvidence
+    }
 }
 
 struct SwingFrameEvidence: Equatable {
@@ -986,7 +1014,7 @@ enum SwingFeatureExtractor {
                 sourceFrameIndex: frame.sourceFrameIndex,
                 time: frame.time,
                 pose: pose,
-                rawPose: sortedFrames[index].pose,
+                rawPose: sortedFrames[index].rawPose,
                 objectEvidence: frame.objectEvidence,
                 leadArm: leadArm,
                 leadArmAngle: angleFromHorizontal(armPoints.shoulder, armPoints.wrist),
@@ -1038,6 +1066,7 @@ enum SwingFeatureExtractor {
                 sourceFrameIndex: frame.sourceFrameIndex,
                 time: frame.time,
                 pose: pose,
+                rawPose: frame.rawPose,
                 objectEvidence: frame.objectEvidence
             )
         }

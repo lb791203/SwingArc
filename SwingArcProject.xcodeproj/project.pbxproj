@@ -43,6 +43,8 @@
 		F80000000000000000000001 /* SwingObservationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000002 /* SwingObservationModels.swift */; };
 		F80000000000000000000003 /* SwingMetricModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000004 /* SwingMetricModels.swift */; };
 		F80000000000000000000005 /* SwingInputQualityEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000006 /* SwingInputQualityEvaluator.swift */; };
+		F80000000000000000000007 /* SwingPoseObservationAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000008 /* SwingPoseObservationAdapter.swift */; };
+		F80000000000000000000009 /* SwingTrajectoryTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000A /* SwingTrajectoryTracker.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -83,6 +85,8 @@
 		F80000000000000000000002 /* SwingObservationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingObservationModels.swift; sourceTree = "<group>"; };
 		F80000000000000000000004 /* SwingMetricModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingMetricModels.swift; sourceTree = "<group>"; };
 		F80000000000000000000006 /* SwingInputQualityEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingInputQualityEvaluator.swift; sourceTree = "<group>"; };
+		F80000000000000000000008 /* SwingPoseObservationAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingPoseObservationAdapter.swift; sourceTree = "<group>"; };
+		F8000000000000000000000A /* SwingTrajectoryTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingTrajectoryTracker.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -148,6 +152,8 @@
 				D6000000000000000000000A /* LivePoseSampler.swift */,
 				D6000000000000000000000C /* CapturedVideoStore.swift */,
 				F80000000000000000000006 /* SwingInputQualityEvaluator.swift */,
+				F80000000000000000000008 /* SwingPoseObservationAdapter.swift */,
+				F8000000000000000000000A /* SwingTrajectoryTracker.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -286,6 +292,8 @@
 				F80000000000000000000001 /* SwingObservationModels.swift in Sources */,
 				F80000000000000000000003 /* SwingMetricModels.swift in Sources */,
 				F80000000000000000000005 /* SwingInputQualityEvaluator.swift in Sources */,
+				F80000000000000000000007 /* SwingPoseObservationAdapter.swift in Sources */,
+				F80000000000000000000009 /* SwingTrajectoryTracker.swift in Sources */,
 				C40000000000000000000001 /* BrandMarkView.swift in Sources */,
 			);
 		};

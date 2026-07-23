@@ -109,10 +109,14 @@ xcrun swiftc -parse-as-library \
   -framework AVFoundation -framework Vision -framework ImageIO \
   -framework SwiftUI -framework CoreVideo \
   SwingArc/Models/DrawingModels.swift \
+  SwingArc/Models/SwingMetricModels.swift \
+  SwingArc/Models/SwingObservationModels.swift \
   SwingArc/Models/WorkspaceModels.swift \
   SwingArc/Models/FrameExtractionTolerancePolicy.swift \
   SwingArc/Services/StageCalibration.swift \
   SwingArc/Services/SwingInputQualityEvaluator.swift \
+  SwingArc/Services/SwingTrajectoryTracker.swift \
+  SwingArc/Services/SwingPoseObservationAdapter.swift \
   SwingArc/Services/VisionPoseDetector.swift \
   SwingArc/Services/SwingStageDetector.swift \
   Tests/P1P8AcceptanceSupport.swift \

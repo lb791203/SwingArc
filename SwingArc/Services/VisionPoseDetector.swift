@@ -590,6 +590,7 @@ struct SwingVideoAnalysisOutput: Equatable {
     let sourceFrameRate: Double
     let elapsedSeconds: Double
     let trackingDiagnostics: PrimaryGolferTrackingDiagnostics
+    let bodyFrames: [SwingFrameObservation]
 
     init(
         result: SwingAnalysisResult,
@@ -598,7 +599,8 @@ struct SwingVideoAnalysisOutput: Equatable {
         adaptiveWindow: SwingWindow,
         sourceFrameRate: Double,
         elapsedSeconds: Double,
-        trackingDiagnostics: PrimaryGolferTrackingDiagnostics = .init()
+        trackingDiagnostics: PrimaryGolferTrackingDiagnostics = .init(),
+        bodyFrames: [SwingFrameObservation] = []
     ) {
         self.result = result
         self.poseSamples = poseSamples
@@ -607,6 +609,7 @@ struct SwingVideoAnalysisOutput: Equatable {
         self.sourceFrameRate = sourceFrameRate
         self.elapsedSeconds = elapsedSeconds
         self.trackingDiagnostics = trackingDiagnostics
+        self.bodyFrames = bodyFrames
     }
 }
 
@@ -1068,6 +1071,8 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         var window = AdaptiveSwingWindowPlanner.initialWindow(core: core, duration: duration)
         var samplesByFrame: [Int: SwingFrameSample] = [:]
         var rawPosesByFrame: [Int: PoseEstimationResult] = [:]
+        var rawBodyFramesBySourceFrame: [Int: SwingFrameObservation] = [:]
+        var trackedBodyFrames: [SwingFrameObservation] = []
         var finalTimeline: [SwingTemporalFrame] = []
         var windowSearchState = AdaptiveWindowSearchState()
         let fineDecodeLedger = AdaptiveFineDecodeLedger()
@@ -1104,6 +1109,12 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 if let rawPose = extraction.rawPose {
                     rawPosesByFrame[extraction.sample.sourceFrameIndex] = rawPose
                 }
+                rawBodyFramesBySourceFrame[extraction.sample.sourceFrameIndex] =
+                    SwingPoseObservationAdapter.frame(
+                        pose: extraction.rawPose,
+                        sourceFrameIndex: extraction.sample.sourceFrameIndex,
+                        time: extraction.sample.time
+                    )
                 publish(
                     .expanding,
                     progress: SwingVideoAnalysisProgressPolicy.expansionProgress(
@@ -1116,6 +1127,25 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 )
             }
 
+            trackedBodyFrames = SwingTrajectoryTracker.track(
+                Array(rawBodyFramesBySourceFrame.values),
+                maximumPredictionFrames: 2
+            )
+            samplesByFrame = Dictionary(uniqueKeysWithValues: trackedBodyFrames.map { bodyFrame in
+                let rawFrame = rawBodyFramesBySourceFrame[bodyFrame.sourceFrameIndex]
+                let existingObjects = samplesByFrame[bodyFrame.sourceFrameIndex]?.objectEvidence
+                    ?? .empty
+                return (
+                    bodyFrame.sourceFrameIndex,
+                    SwingFrameSample(
+                        sourceFrameIndex: bodyFrame.sourceFrameIndex,
+                        time: bodyFrame.time,
+                        pose: SwingPoseObservationAdapter.poseSample(from: bodyFrame),
+                        rawPose: rawFrame.flatMap(SwingPoseObservationAdapter.poseSample(from:)),
+                        objectEvidence: existingObjects
+                    )
+                )
+            })
             let frames = samplesByFrame.values.sorted {
                 $0.sourceFrameIndex < $1.sourceFrameIndex
             }
@@ -1140,6 +1170,12 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 }
                 rawPosesByFrame = rawPosesByFrame.filter {
                     retainedSourceFrames.contains($0.key)
+                }
+                rawBodyFramesBySourceFrame = rawBodyFramesBySourceFrame.filter {
+                    retainedSourceFrames.contains($0.key)
+                }
+                trackedBodyFrames = trackedBodyFrames.filter {
+                    retainedSourceFrames.contains($0.sourceFrameIndex)
                 }
                 fineFrameImageCache.retainSourceFrames(retainedSourceFrames)
                 window = next
@@ -1246,6 +1282,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 sourceFrameIndex: frame.sourceFrameIndex,
                 time: frame.time,
                 pose: frame.pose,
+                rawPose: frame.rawPose,
                 objectEvidence: mergedObjects
             )
         }
@@ -1287,7 +1324,8 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             adaptiveWindow: window,
             sourceFrameRate: nominalFrameRate,
             elapsedSeconds: ProcessInfo.processInfo.systemUptime - startedAt,
-            trackingDiagnostics: trackedPoseDetector.diagnostics
+            trackingDiagnostics: trackedPoseDetector.diagnostics,
+            bodyFrames: trackedBodyFrames
         ))
     }
 
