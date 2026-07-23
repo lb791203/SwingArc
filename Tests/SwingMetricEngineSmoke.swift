@@ -5,6 +5,7 @@ struct SwingMetricEngineSmoke {
     static func main() {
         testMotionOnlyOutputs()
         testEstimatedEvidenceIsUnavailable()
+        testPersonHeightUsesMeasuredStageFrames()
     }
 
     private static func testMotionOnlyOutputs() {
@@ -59,6 +60,23 @@ struct SwingMetricEngineSmoke {
         )
 
         precondition(value.availability == .unavailable(reason: .estimatedInput))
+    }
+
+    private static func testPersonHeightUsesMeasuredStageFrames() {
+        let frame = bodyFrame(
+            index: 30,
+            time: 3.0,
+            handX: 0.3,
+            headX: 0.5
+        )
+        let height = SwingMetricEvidence.personHeight(
+            frames: [frame],
+            detections: [
+                detection(.address, frame: 30, time: 3.0)
+            ]
+        )
+
+        precondition(abs(height - 0.8) < 0.000_001)
     }
 
     private static let forbiddenMetricIDs: Set<SwingMetricID> = [

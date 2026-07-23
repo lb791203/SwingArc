@@ -120,7 +120,12 @@ enum ManualStageDetectionPolicy {
                 status: availableFrames.contains(frame) ? .confirmed : .lowConfidence,
                 hasClubEvidence: detection.hasClubEvidence,
                 hasBallEvidence: detection.hasBallEvidence,
-                hasBallChangeEvidence: detection.hasBallChangeEvidence
+                hasBallChangeEvidence: detection.hasBallChangeEvidence,
+                evidence: StageEvidenceSummary(
+                    sources: [.manual],
+                    detectedPointCount: 0,
+                    estimatedPointCount: 0
+                )
             )
         }
     }

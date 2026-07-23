@@ -50,6 +50,8 @@
 		F8000000000000000000000F /* SwingMetricEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000010 /* SwingMetricEngine.swift */; };
 		F80000000000000000000011 /* SimplifiedSwingFeedbackModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000012 /* SimplifiedSwingFeedbackModels.swift */; };
 		F80000000000000000000013 /* SwingFeedbackAssembler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000014 /* SwingFeedbackAssembler.swift */; };
+		F80000000000000000000015 /* SwingAnalysisArtifactBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000016 /* SwingAnalysisArtifactBuilder.swift */; };
+		F80000000000000000000017 /* SwingFeedbackPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000018 /* SwingFeedbackPipeline.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -97,6 +99,8 @@
 		F80000000000000000000010 /* SwingMetricEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingMetricEngine.swift; sourceTree = "<group>"; };
 		F80000000000000000000012 /* SimplifiedSwingFeedbackModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimplifiedSwingFeedbackModels.swift; sourceTree = "<group>"; };
 		F80000000000000000000014 /* SwingFeedbackAssembler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingFeedbackAssembler.swift; sourceTree = "<group>"; };
+		F80000000000000000000016 /* SwingAnalysisArtifactBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingAnalysisArtifactBuilder.swift; sourceTree = "<group>"; };
+		F80000000000000000000018 /* SwingFeedbackPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingFeedbackPipeline.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -169,6 +173,8 @@
 				F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */,
 				F80000000000000000000010 /* SwingMetricEngine.swift */,
 				F80000000000000000000014 /* SwingFeedbackAssembler.swift */,
+				F80000000000000000000016 /* SwingAnalysisArtifactBuilder.swift */,
+				F80000000000000000000018 /* SwingFeedbackPipeline.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -314,6 +320,8 @@
 				F8000000000000000000000D /* CoreMLGolfObjectDetector.swift in Sources */,
 				F8000000000000000000000F /* SwingMetricEngine.swift in Sources */,
 				F80000000000000000000013 /* SwingFeedbackAssembler.swift in Sources */,
+				F80000000000000000000015 /* SwingAnalysisArtifactBuilder.swift in Sources */,
+				F80000000000000000000017 /* SwingFeedbackPipeline.swift in Sources */,
 				C40000000000000000000001 /* BrandMarkView.swift in Sources */,
 			);
 		};

@@ -96,6 +96,7 @@ struct TechniqueFeedbackPresentationSmoke {
         )
         precondition(corrected[0].sourceFrameIndex == 14)
         precondition(corrected[0].status == .confirmed)
+        precondition(corrected[0].evidence.sources == [.manual])
         let unsupportedCorrection = ManualStageDetectionPolicy.applying(
             manualMarkers: [manualTop],
             sourceFrameRate: 240,
@@ -103,6 +104,9 @@ struct TechniqueFeedbackPresentationSmoke {
             availablePoseSamples: []
         )
         precondition(unsupportedCorrection[0].status == .lowConfidence)
+        precondition(
+            unsupportedCorrection[0].evidence.sources == [.manual]
+        )
     }
 
     private static func sample(frame: Int) -> SwingPoseSample {

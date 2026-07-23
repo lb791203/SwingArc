@@ -590,7 +590,9 @@ struct SwingVideoAnalysisOutput: Equatable {
     let sourceFrameRate: Double
     let elapsedSeconds: Double
     let trackingDiagnostics: PrimaryGolferTrackingDiagnostics
-    let bodyFrames: [SwingFrameObservation]
+    /// Fine-frame observations after body and available golf-object points
+    /// have been merged and temporally tracked. Point state and source remain.
+    let observationFrames: [SwingFrameObservation]
 
     init(
         result: SwingAnalysisResult,
@@ -600,7 +602,7 @@ struct SwingVideoAnalysisOutput: Equatable {
         sourceFrameRate: Double,
         elapsedSeconds: Double,
         trackingDiagnostics: PrimaryGolferTrackingDiagnostics = .init(),
-        bodyFrames: [SwingFrameObservation] = []
+        observationFrames: [SwingFrameObservation] = []
     ) {
         self.result = result
         self.poseSamples = poseSamples
@@ -609,7 +611,7 @@ struct SwingVideoAnalysisOutput: Equatable {
         self.sourceFrameRate = sourceFrameRate
         self.elapsedSeconds = elapsedSeconds
         self.trackingDiagnostics = trackingDiagnostics
-        self.bodyFrames = bodyFrames
+        self.observationFrames = observationFrames
     }
 }
 
@@ -1370,7 +1372,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             sourceFrameRate: nominalFrameRate,
             elapsedSeconds: ProcessInfo.processInfo.systemUptime - startedAt,
             trackingDiagnostics: trackedPoseDetector.diagnostics,
-            bodyFrames: trackedBodyFrames
+            observationFrames: trackedBodyFrames
         ))
     }
 

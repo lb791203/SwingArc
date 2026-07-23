@@ -445,6 +445,50 @@ class VideoPlaybackManager: ObservableObject {
             leadArm: output.leadArm
         ))
     }
+
+    func correctedDetections(
+        manualMarkers: [KeyframeMarker]
+    ) -> [SwingStageDetection] {
+        guard let output = analysisOutput else { return [] }
+        return ManualStageDetectionPolicy.applying(
+            manualMarkers: manualMarkers,
+            sourceFrameRate: output.sourceFrameRate,
+            automatic: output.result.detections,
+            availablePoseSamples: output.poseSamples
+        )
+    }
+
+    func analysisArtifact(
+        view: PracticeCameraView?,
+        manualMarkers: [KeyframeMarker]
+    ) -> SwingAnalysisArtifact? {
+        feedbackPipeline(
+            view: view,
+            manualMarkers: manualMarkers
+        )?.artifact
+    }
+
+    func simplifiedFeedback(
+        view: PracticeCameraView?,
+        manualMarkers: [KeyframeMarker]
+    ) -> SimplifiedSwingFeedback? {
+        feedbackPipeline(
+            view: view,
+            manualMarkers: manualMarkers
+        )?.feedback
+    }
+
+    private func feedbackPipeline(
+        view: PracticeCameraView?,
+        manualMarkers: [KeyframeMarker]
+    ) -> SwingFeedbackPipelineResult? {
+        guard let output = analysisOutput else { return nil }
+        return SwingFeedbackPipeline.make(
+            output: output,
+            view: view,
+            manualMarkers: manualMarkers
+        )
+    }
 }
 
 // MARK: - UIKit AVPlayerLayer 桥接视图

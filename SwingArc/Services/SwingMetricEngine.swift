@@ -405,3 +405,33 @@ enum SwingMetricEngine {
         )
     }
 }
+
+enum SwingMetricEvidence {
+    static func personHeight(
+        frames: [SwingFrameObservation],
+        detections: [SwingStageDetection]
+    ) -> Double {
+        let stageFrames = Set(detections.compactMap(\.sourceFrameIndex))
+        let heights = frames
+            .filter { stageFrames.contains($0.sourceFrameIndex) }
+            .compactMap { frame -> Double? in
+                guard let head = frame.landmarks[.head],
+                      let leftAnkle = frame.landmarks[.leftAnkle],
+                      let rightAnkle = frame.landmarks[.rightAnkle],
+                      head.isMeasured,
+                      leftAnkle.isMeasured,
+                      rightAnkle.isMeasured,
+                      let headPoint = head.point,
+                      let leftPoint = leftAnkle.point,
+                      let rightPoint = rightAnkle.point else {
+                    return nil
+                }
+                let ankleY = (leftPoint.y + rightPoint.y) / 2
+                let height = abs(headPoint.y - ankleY)
+                return height.isFinite && height > 0 ? height : nil
+            }
+            .sorted()
+        guard !heights.isEmpty else { return 0 }
+        return heights[heights.count / 2]
+    }
+}
