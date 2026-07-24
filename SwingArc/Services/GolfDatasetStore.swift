@@ -46,6 +46,14 @@ public final class GolfDatasetStore: @unchecked Sendable {
         self.fileManager = fileManager
     }
 
+    // MARK: - Locking
+
+    private func withLock<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
+    }
+
     // MARK: - Encoder / Decoder
 
     private static func encoder() -> JSONEncoder {
@@ -173,9 +181,9 @@ public final class GolfDatasetStore: @unchecked Sendable {
     // MARK: - Registry
 
     public func saveRegistry(_ registry: GolferRegistry) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        try atomicWrite(registry, to: registryURL(), allowOverwrite: true)
+        try withLock {
+            try atomicWrite(registry, to: registryURL(), allowOverwrite: true)
+        }
     }
 
     public func loadRegistry() throws -> GolferRegistry {
@@ -187,9 +195,9 @@ public final class GolfDatasetStore: @unchecked Sendable {
 
     public func saveClip(_ clip: GolfClipIdentity) throws {
         try validateID(clip.clipID)
-        lock.lock()
-        defer { lock.unlock() }
-        try atomicWrite(clip, to: clipJSONURL(clipID: clip.clipID), allowOverwrite: true)
+        try withLock {
+            try atomicWrite(clip, to: clipJSONURL(clipID: clip.clipID), allowOverwrite: true)
+        }
     }
 
     public func loadClip(clipID: String) throws -> GolfClipIdentity {
@@ -203,18 +211,12 @@ public final class GolfDatasetStore: @unchecked Sendable {
     public func appendPrediction(_ prediction: GolfPredictionRun) throws {
         try validateID(prediction.predictionRunID)
         try validateID(prediction.clipID)
-        lock.lock()
-        let url = predictionJSONURL(clipID: prediction.clipID, predictionRunID: prediction.predictionRunID)
-        if fileManager.fileExists(atPath: url.path) {
-            lock.unlock()
-            throw GolfDatasetStoreError.predictionAlreadyExists(prediction.predictionRunID)
-        }
-        do {
+        try withLock {
+            let url = predictionJSONURL(clipID: prediction.clipID, predictionRunID: prediction.predictionRunID)
+            if fileManager.fileExists(atPath: url.path) {
+                throw GolfDatasetStoreError.predictionAlreadyExists(prediction.predictionRunID)
+            }
             try atomicWriteImmutable(prediction, to: url)
-            lock.unlock()
-        } catch {
-            lock.unlock()
-            throw error
         }
     }
 
@@ -230,25 +232,18 @@ public final class GolfDatasetStore: @unchecked Sendable {
     public func saveRevision(_ revision: GolfAnnotationRevision) throws {
         try validateID(revision.revisionID)
         try validateID(revision.clipID)
-        lock.lock()
-        let url = revisionJSONURL(clipID: revision.clipID, revisionID: revision.revisionID)
+        try withLock {
+            let url = revisionJSONURL(clipID: revision.clipID, revisionID: revision.revisionID)
 
-        if fileManager.fileExists(atPath: url.path) {
-            let existing = try Data(contentsOf: url)
-            let newData = try Self.encoder().encode(revision)
-            guard existing == newData else {
-                lock.unlock()
-                throw GolfDatasetStoreError.revisionConflict(revision.revisionID)
+            if fileManager.fileExists(atPath: url.path) {
+                let existing = try Data(contentsOf: url)
+                let newData = try Self.encoder().encode(revision)
+                guard existing == newData else {
+                    throw GolfDatasetStoreError.revisionConflict(revision.revisionID)
+                }
+                return
             }
-            lock.unlock()
-            return
-        }
-        do {
             try atomicWriteImmutable(revision, to: url)
-            lock.unlock()
-        } catch {
-            lock.unlock()
-            throw error
         }
     }
 

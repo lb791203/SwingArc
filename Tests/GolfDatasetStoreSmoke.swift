@@ -159,35 +159,137 @@ struct GolfDatasetStoreSmoke {
             preconditionFailure("whitespace ID must be rejected")
         } catch GolfDatasetStoreError.pathTraversal {}
 
-        // 12. Concurrent prediction writes: exactly one succeeds
+        // 12. Concurrent prediction writes: collect both results, exactly one succeeds
         do {
             let concurrentStore = GolfDatasetStore(rootDirectory: tmpRoot)
             let predA = makePrediction(id: "pred-concurrent", clipID: "clip-001")
             let predB = makePrediction(id: "pred-concurrent", clipID: "clip-001")
-            var successCount = 0
             let group = DispatchGroup()
-            let lock = NSLock()
+            var resultA: Error?
+            var resultB: Error?
+            let resultLock = NSLock()
             group.enter()
             DispatchQueue.global().async {
-                do { try concurrentStore.appendPrediction(predA); lock.lock(); successCount += 1; lock.unlock() } catch {}
+                do { try concurrentStore.appendPrediction(predA) } catch { resultLock.lock(); resultA = error; resultLock.unlock() }
                 group.leave()
             }
             group.enter()
             DispatchQueue.global().async {
-                do { try concurrentStore.appendPrediction(predB); lock.lock(); successCount += 1; lock.unlock() } catch {}
+                do { try concurrentStore.appendPrediction(predB) } catch { resultLock.lock(); resultB = error; resultLock.unlock() }
                 group.leave()
             }
             group.wait()
-            precondition(successCount == 1, "Exactly one concurrent prediction must succeed, got \(successCount)")
+            let aSucceeded = resultA == nil
+            let bSucceeded = resultB == nil
+            precondition(
+                (aSucceeded && !bSucceeded) || (!aSucceeded && bSucceeded),
+                "Exactly one must succeed: A=\(aSucceeded) B=\(bSucceeded)"
+            )
+            if let errA = resultA {
+                guard case GolfDatasetStoreError.predictionAlreadyExists("pred-concurrent") = errA else {
+                    preconditionFailure("Failed prediction must be .predictionAlreadyExists, got \(errA)")
+                }
+            }
+            if let errB = resultB {
+                guard case GolfDatasetStoreError.predictionAlreadyExists("pred-concurrent") = errB else {
+                    preconditionFailure("Failed prediction must be .predictionAlreadyExists, got \(errB)")
+                }
+            }
             let loaded = try concurrentStore.loadPrediction(clipID: "clip-001", predictionRunID: "pred-concurrent")
             precondition(loaded == predA || loaded == predB, "Prediction file must be intact")
         }
 
-        // 13. Snapshot directory read errors must not be silently swallowed
+        // 13. Concurrent revision writes: same content = both succeed, different = conflict
         do {
-            let badStore = GolfDatasetStore(rootDirectory: tmpRoot.appendingPathComponent("nonexistent"))
-            _ = try badStore.loadSnapshot()
-            // If the directory doesn't exist, loadSnapshot should return empty snapshot, not crash
+            let concurrentStore = GolfDatasetStore(rootDirectory: tmpRoot)
+            let revSameA = makeRevision(id: "rev-concurrent", clipID: "clip-001", predRunID: "pred-run-1")
+            let revSameB = makeRevision(id: "rev-concurrent", clipID: "clip-001", predRunID: "pred-run-1")
+            let group = DispatchGroup()
+            var resultA: Error?
+            var resultB: Error?
+            let resultLock = NSLock()
+            group.enter()
+            DispatchQueue.global().async {
+                do { try concurrentStore.saveRevision(revSameA) } catch { resultLock.lock(); resultA = error; resultLock.unlock() }
+                group.leave()
+            }
+            group.enter()
+            DispatchQueue.global().async {
+                do { try concurrentStore.saveRevision(revSameB) } catch { resultLock.lock(); resultB = error; resultLock.unlock() }
+                group.leave()
+            }
+            group.wait()
+            precondition(resultA == nil && resultB == nil, "Same-content revisions must both succeed")
+            let loadedRev = try concurrentStore.loadRevision(clipID: "clip-001", revisionID: "rev-concurrent")
+            precondition(loadedRev == revSameA, "Revision must be intact")
+
+            // Different content: exactly one succeeds
+            let revDiffB = GolfAnnotationRevision(
+                revisionID: "rev-conflict",
+                clipID: "clip-001",
+                parentPredictionRunID: "pred-run-1",
+                annotatorID: "reviewer-x",
+                createdAt: Date(timeIntervalSince1970: 3000),
+                completedAt: nil,
+                frameRevisions: [],
+                notes: "conflict"
+            )
+            let group2 = DispatchGroup()
+            var result2A: Error?
+            var result2B: Error?
+            group2.enter()
+            DispatchQueue.global().async {
+                do { try concurrentStore.saveRevision(GolfAnnotationRevision(
+                    revisionID: "rev-conflict",
+                    clipID: "clip-001",
+                    parentPredictionRunID: "pred-run-1",
+                    annotatorID: "reviewer-1",
+                    createdAt: Date(timeIntervalSince1970: 1100),
+                    completedAt: nil,
+                    frameRevisions: [],
+                    notes: nil
+                )) } catch { resultLock.lock(); result2A = error; resultLock.unlock() }
+                group2.leave()
+            }
+            group2.enter()
+            DispatchQueue.global().async {
+                do { try concurrentStore.saveRevision(revDiffB) } catch { resultLock.lock(); result2B = error; resultLock.unlock() }
+                group2.leave()
+            }
+            group2.wait()
+            let a2OK = result2A == nil
+            let b2OK = result2B == nil
+            precondition(
+                (a2OK && !b2OK) || (!a2OK && b2OK),
+                "Different-content revisions: exactly one must succeed"
+            )
+        }
+
+        // 14. Lock released after error: normal write succeeds after failed write
+        do {
+            let lockStore = GolfDatasetStore(rootDirectory: tmpRoot)
+            // This will fail (duplicate prediction)
+            do { try lockStore.appendPrediction(prediction) } catch {}
+            // This should succeed (new prediction)
+            let newPred = makePrediction(id: "pred-after-error", clipID: "clip-001")
+            try lockStore.appendPrediction(newPred)
+            let loaded = try lockStore.loadPrediction(clipID: "clip-001", predictionRunID: "pred-after-error")
+            precondition(loaded == newPred, "Write after error must succeed")
+        }
+
+        // 15. Snapshot with real directory read error
+        do {
+            // Create a clip directory with unreadable clip.json
+            let badClipDir = tmpRoot.appendingPathComponent("clips").appendingPathComponent("bad-clip")
+            try FileManager.default.createDirectory(at: badClipDir, withIntermediateDirectories: true)
+            // Write garbage data
+            try "not json".data(using: .utf8)!.write(to: badClipDir.appendingPathComponent("clip.json"))
+            do {
+                _ = try store.loadSnapshot()
+                preconditionFailure("Corrupt clip.json must cause error")
+            } catch {
+                // Expected: error must propagate, not be swallowed
+            }
         }
 
         print("All GolfDatasetStore tests passed.")
