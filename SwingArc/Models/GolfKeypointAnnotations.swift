@@ -39,6 +39,9 @@ public enum GolfAnnotationContractError: Error, Equatable, CustomStringConvertib
     case missingAnnotator
     case unresolvedPointCannotBeResolved
     case missingParentPredictionRun
+    case acceptedPredictionRequiresPrediction
+    case acceptedPredictionMissingCoordinate
+    case acceptedPredictionCoordinateMismatch
 
     public var description: String {
         switch self {
@@ -53,7 +56,13 @@ public enum GolfAnnotationContractError: Error, Equatable, CustomStringConvertib
         case .unresolvedPointCannotBeResolved:
             return "Unresolved points cannot be converted to resolved landmarks"
         case .missingParentPredictionRun:
-            return "Revision must specify a parent prediction run ID"
+            return "Revision must specify a non-empty parent prediction run ID"
+        case .acceptedPredictionRequiresPrediction:
+            return "Accepted prediction decision requires a valid prediction run object"
+        case .acceptedPredictionMissingCoordinate:
+            return "Accepted prediction decision requires a prediction with a valid full-frame coordinate"
+        case .acceptedPredictionCoordinateMismatch:
+            return "Accepted prediction coordinate does not match the target prediction coordinate"
         }
     }
 }
@@ -122,12 +131,28 @@ public struct GolfAnnotationDecision: Codable, Equatable, Sendable, Hashable {
     public func resolvedLandmark(prediction: GolfPredictionPoint? = nil) throws -> GolfResolvedLandmark? {
         let validatedDecision = try self.validated()
         switch validatedDecision.kind {
-        case .acceptedPrediction, .correctedPoint:
+        case .acceptedPrediction:
+            guard let pred = prediction else {
+                throw GolfAnnotationContractError.acceptedPredictionRequiresPrediction
+            }
+            guard let predPoint = pred.resolvedFullFramePoint else {
+                throw GolfAnnotationContractError.acceptedPredictionMissingCoordinate
+            }
+            if let decisionPoint = fullFramePoint, decisionPoint != predPoint {
+                throw GolfAnnotationContractError.acceptedPredictionCoordinateMismatch
+            }
+            return GolfResolvedLandmark(
+                landmark: landmark,
+                visibility: .visible,
+                point: predPoint,
+                source: .acceptedPrediction
+            )
+        case .correctedPoint:
             return GolfResolvedLandmark(
                 landmark: landmark,
                 visibility: .visible,
                 point: fullFramePoint,
-                source: validatedDecision.kind
+                source: .correctedPoint
             )
         case .occluded:
             return GolfResolvedLandmark(
@@ -190,5 +215,20 @@ public struct GolfAnnotationRevision: Codable, Equatable, Sendable, Hashable {
         self.completedAt = completedAt
         self.frameRevisions = frameRevisions
         self.notes = notes
+    }
+
+    public func validated() throws -> GolfAnnotationRevision {
+        guard !parentPredictionRunID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw GolfAnnotationContractError.missingParentPredictionRun
+        }
+        guard !annotatorID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw GolfAnnotationContractError.missingAnnotator
+        }
+        for frameRev in frameRevisions {
+            for decision in frameRev.decisions {
+                _ = try decision.validated()
+            }
+        }
+        return self
     }
 }
