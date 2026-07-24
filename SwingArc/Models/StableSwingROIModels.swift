@@ -1,6 +1,6 @@
 import Foundation
 
-public struct GolfAxisAlignedRect: Equatable, Sendable {
+public struct GolfNormalizedRect: Equatable, Sendable {
     public let x: Double
     public let y: Double
     public let width: Double
@@ -16,11 +16,25 @@ public struct GolfAxisAlignedRect: Equatable, Sendable {
     public var isEmpty: Bool { width <= 0 || height <= 0 }
 }
 
+public struct GolfSourcePixelRect: Equatable, Sendable {
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
+
+    public init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
+}
+
 public struct GolfPoseTrackFrame: Equatable, Sendable {
     public let sourceFrameIndex: Int
     public let sourceTime: Double
     public let bodyCenter: GolfNormalizedPoint
-    public let bodyBounds: GolfAxisAlignedRect
+    public let bodyBounds: GolfNormalizedRect
     public let handCenter: GolfNormalizedPoint?
     public let identityConfidence: Double
 
@@ -28,7 +42,7 @@ public struct GolfPoseTrackFrame: Equatable, Sendable {
         sourceFrameIndex: Int,
         sourceTime: Double,
         bodyCenter: GolfNormalizedPoint,
-        bodyBounds: GolfAxisAlignedRect,
+        bodyBounds: GolfNormalizedRect,
         handCenter: GolfNormalizedPoint?,
         identityConfidence: Double
     ) {
@@ -59,7 +73,7 @@ public struct StableSwingROIFrame: Equatable, Sendable {
     public let sourceFrameIndex: Int
     public let sourceTime: Double
     public let transform: GolfROIAffineTransform
-    public let cropRect: GolfAxisAlignedRect
+    public let cropRect: GolfSourcePixelRect
     public let paddingLeft: Double
     public let paddingTop: Double
     public let paddingRight: Double
@@ -73,7 +87,7 @@ public struct StableSwingROIFrame: Equatable, Sendable {
         sourceFrameIndex: Int,
         sourceTime: Double,
         transform: GolfROIAffineTransform,
-        cropRect: GolfAxisAlignedRect,
+        cropRect: GolfSourcePixelRect,
         paddingLeft: Double,
         paddingTop: Double,
         paddingRight: Double,

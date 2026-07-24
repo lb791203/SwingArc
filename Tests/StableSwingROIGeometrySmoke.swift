@@ -7,12 +7,14 @@ struct StableSwingROIGeometrySmoke {
         testCropCornerMapping()
         testBodyBoundsEnterROI()
         testSmoothingSatisfiesThreshold()
-        testSmoothingRemovalFails()
+        testSmoothingPureFunction()
+        testSmoothingDeterministic()
         testDeterministicOutput()
         testInterpolatedGap()
         testInterpolatedFrameFlag()
         testOriginalFrameFlag()
         testPoseGapTooLong()
+        testPoseGapExactThreshold()
         testNonMonotonicTime()
         testIdentityUnstable()
         testSingleLowConfidenceFrame()
@@ -25,6 +27,8 @@ struct StableSwingROIGeometrySmoke {
         testSourceFrameIndexOffset()
         testNominalFrameDurationFromTimestamps()
         testPaddingRecorded()
+        testEdgeProximityPadding()
+        testEdgeProximityRoundTrip()
         print("All StableSwingROIGeometry tests passed.")
     }
 
@@ -110,13 +114,13 @@ struct StableSwingROIGeometrySmoke {
             targetSize: 512
         )
         let frame = track.frames[0]
-        // All four corners of body bounds should map into [0,1] ROI space
         let bounds = frames[0].bodyBounds
+        // bounds is now GolfNormalizedRect (normalized [0,1])
         let corners = [
-            GolfNormalizedPoint(x: bounds.x / 1080.0, y: bounds.y / 1920.0),
-            GolfNormalizedPoint(x: (bounds.x + bounds.width) / 1080.0, y: bounds.y / 1920.0),
-            GolfNormalizedPoint(x: bounds.x / 1080.0, y: (bounds.y + bounds.height) / 1920.0),
-            GolfNormalizedPoint(x: (bounds.x + bounds.width) / 1080.0, y: (bounds.y + bounds.height) / 1920.0),
+            GolfNormalizedPoint(x: bounds.x, y: bounds.y),
+            GolfNormalizedPoint(x: bounds.x + bounds.width, y: bounds.y),
+            GolfNormalizedPoint(x: bounds.x, y: bounds.y + bounds.height),
+            GolfNormalizedPoint(x: bounds.x + bounds.width, y: bounds.y + bounds.height),
         ]
         for corner in corners {
             let roi = frame.transform.fullFramePointToROI(corner)
@@ -151,28 +155,61 @@ struct StableSwingROIGeometrySmoke {
         )
     }
 
-    // MARK: - Smoothing removal fails
+    // MARK: - Smoothing pure function
 
-    static func testSmoothingRemovalFails() {
-        var frames = makeDriftFrames(count: 60, driftPixels: 2, fps: 30)
-        frames[30] = GolfPoseTrackFrame(
-            sourceFrameIndex: 30,
-            sourceTime: frames[30].sourceTime,
-            bodyCenter: GolfNormalizedPoint(x: (540.0 + 80.0) / 1080.0, y: 960.0 / 1920.0),
-            bodyBounds: frames[30].bodyBounds,
-            handCenter: frames[30].handCenter,
-            identityConfidence: 0.95
-        )
-        // With smoothing, P95 should be <= 12
-        let track = try! StableSwingROIBuilder.build(
-            poseFrames: frames,
-            orientedFrameSize: CGSize(width: 1080, height: 1920),
-            targetSize: 512
-        )
-        precondition(
-            track.centerMovementP95InTargetPixels <= 12,
-            "Smoothed P95 must satisfy threshold"
-        )
+    static func testSmoothingPureFunction() {
+        // Synthetic sequence with a large spike
+        let centers: [(Double, Double)] = [
+            (100, 100), (101, 100), (102, 100), (103, 100),
+            (200, 100),  // spike
+            (104, 100), (105, 100), (106, 100), (107, 100),
+        ]
+        let maxCorrection = 10.0
+        let smoothed = StableSwingROIBuilder.bidirectionalSmooth(centers, maxCorrection: maxCorrection)
+
+        // Verify each step <= maxCorrection
+        for i in 1..<smoothed.count {
+            let dist = hypot(smoothed[i].0 - smoothed[i-1].0, smoothed[i].1 - smoothed[i-1].1)
+            precondition(
+                dist <= maxCorrection + 0.001,
+                "Step \(i) distance \(dist) exceeds maxCorrection \(maxCorrection)"
+            )
+        }
+
+        // Unsmoothed P95 would exceed threshold
+        var rawMovements: [Double] = []
+        for i in 1..<centers.count {
+            rawMovements.append(hypot(centers[i].0 - centers[i-1].0, centers[i].1 - centers[i-1].1))
+        }
+        rawMovements.sort()
+        let rawP95 = rawMovements[rawMovements.count * 95 / 100]
+        precondition(rawP95 > 12, "Raw P95 (\(rawP95)) should exceed 12 for unsmoothed spike")
+
+        // Smoothed P95 must be <= 12
+        var smoothMovements: [Double] = []
+        for i in 1..<smoothed.count {
+            smoothMovements.append(hypot(smoothed[i].0 - smoothed[i-1].0, smoothed[i].1 - smoothed[i-1].1))
+        }
+        smoothMovements.sort()
+        let smoothP95 = smoothMovements[smoothMovements.count * 95 / 100]
+        precondition(smoothP95 <= 12, "Smoothed P95 (\(smoothP95)) must be <= 12")
+    }
+
+    // MARK: - Smoothing deterministic
+
+    static func testSmoothingDeterministic() {
+        let centers: [(Double, Double)] = [
+            (0, 0), (5, 0), (10, 0), (50, 0), (15, 0), (20, 0),
+        ]
+        let r1 = StableSwingROIBuilder.bidirectionalSmooth(centers, maxCorrection: 8)
+        let r2 = StableSwingROIBuilder.bidirectionalSmooth(centers, maxCorrection: 8)
+        precondition(r1.count == r2.count, "Smoothing must produce same count")
+        for i in 0..<r1.count {
+            precondition(
+                r1[i].0 == r2[i].0 && r1[i].1 == r2[i].1,
+                "Smoothing must be deterministic at index \(i)"
+            )
+        }
     }
 
     // MARK: - Deterministic output
@@ -251,6 +288,21 @@ struct StableSwingROIGeometrySmoke {
         }
     }
 
+    // MARK: - Pose gap exact threshold
+
+    static func testPoseGapExactThreshold() {
+        // 4 missing frames at 30fps: gap = 5 * 33.3ms = 166.7ms
+        // missingDuration = 166.7 - 33.3 = 133.3ms < 150ms → should pass
+        var frames = makeDriftFrames(count: 20, driftPixels: 5, fps: 30)
+        frames = frames.filter { $0.sourceFrameIndex < 8 || $0.sourceFrameIndex > 11 }
+        let track = try! StableSwingROIBuilder.build(
+            poseFrames: frames,
+            orientedFrameSize: CGSize(width: 1080, height: 1920),
+            targetSize: 512
+        )
+        precondition(track.frames.count == 20, "4-frame gap must pass, got \(track.frames.count)")
+    }
+
     // MARK: - Non-monotonic time must fail
 
     static func testNonMonotonicTime() {
@@ -293,7 +345,7 @@ struct StableSwingROIGeometrySmoke {
                 sourceFrameIndex: i,
                 sourceTime: Double(i) / 30.0,
                 bodyCenter: GolfNormalizedPoint(x: 0.5, y: 0.5),
-                bodyBounds: GolfAxisAlignedRect(x: 340, y: 560, width: 400, height: 800),
+                bodyBounds: GolfNormalizedRect(x: 0.3, y: 0.25, width: 0.37, height: 0.42),
                 handCenter: nil,
                 identityConfidence: 0.3
             )
@@ -342,7 +394,7 @@ struct StableSwingROIGeometrySmoke {
                 sourceFrameIndex: i,
                 sourceTime: Double(i) / 30.0,
                 bodyCenter: GolfNormalizedPoint(x: 0.5, y: 0.5),
-                bodyBounds: GolfAxisAlignedRect(x: 0, y: 0, width: 0, height: 0),
+                bodyBounds: GolfNormalizedRect(x: 0.5, y: 0.5, width: 0, height: 0),
                 handCenter: nil,
                 identityConfidence: 0.9
             )
@@ -406,7 +458,6 @@ struct StableSwingROIGeometrySmoke {
 
     static func testDuplicateFrameConflict() {
         var frames = makeDriftFrames(count: 10, driftPixels: 0, fps: 30)
-        // Add conflicting duplicate of frame 5
         let conflicting = GolfPoseTrackFrame(
             sourceFrameIndex: 5,
             sourceTime: frames[5].sourceTime + 1.0,
@@ -455,7 +506,7 @@ struct StableSwingROIGeometrySmoke {
                 sourceFrameIndex: i,
                 sourceTime: Double(i) / 30.0,
                 bodyCenter: GolfNormalizedPoint(x: 0.5, y: 0.5),
-                bodyBounds: GolfAxisAlignedRect(x: 340, y: 560, width: 400, height: 800),
+                bodyBounds: GolfNormalizedRect(x: 0.3, y: 0.25, width: 0.37, height: 0.42),
                 handCenter: nil,
                 identityConfidence: 0.95
             )
@@ -473,13 +524,12 @@ struct StableSwingROIGeometrySmoke {
     // MARK: - Nominal frame duration from timestamps
 
     static func testNominalFrameDurationFromTimestamps() {
-        // Create frames at 60fps (not 30fps) to verify duration calculation
         let frames = (0..<10).map { i in
             GolfPoseTrackFrame(
                 sourceFrameIndex: i,
                 sourceTime: Double(i) / 60.0,
                 bodyCenter: GolfNormalizedPoint(x: 0.5, y: 0.5),
-                bodyBounds: GolfAxisAlignedRect(x: 340, y: 560, width: 400, height: 800),
+                bodyBounds: GolfNormalizedRect(x: 0.3, y: 0.25, width: 0.37, height: 0.42),
                 handCenter: nil,
                 identityConfidence: 0.95
             )
@@ -502,12 +552,80 @@ struct StableSwingROIGeometrySmoke {
             targetSize: 512
         )
         let frame = track.frames[0]
-        // With a centered body, padding should be zero or minimal
         let totalPad = frame.paddingLeft + frame.paddingTop + frame.paddingRight + frame.paddingBottom
-        precondition(
-            totalPad >= 0,
-            "Padding values must be non-negative"
+        precondition(totalPad >= 0, "Padding values must be non-negative")
+    }
+
+    // MARK: - Edge proximity padding
+
+    static func testEdgeProximityPadding() {
+        // Body near top-left corner
+        let frames = (0..<10).map { i in
+            GolfPoseTrackFrame(
+                sourceFrameIndex: i,
+                sourceTime: Double(i) / 30.0,
+                bodyCenter: GolfNormalizedPoint(x: 0.1, y: 0.1),
+                bodyBounds: GolfNormalizedRect(x: 0.0, y: 0.0, width: 0.2, height: 0.2),
+                handCenter: GolfNormalizedPoint(x: 0.05, y: 0.05),
+                identityConfidence: 0.95
+            )
+        }
+        let track = try! StableSwingROIBuilder.build(
+            poseFrames: frames,
+            orientedFrameSize: CGSize(width: 1080, height: 1920),
+            targetSize: 512
         )
+        let frame = track.frames[0]
+        // Crop should extend beyond frame boundary → padding > 0
+        precondition(
+            frame.paddingLeft > 0 || frame.paddingTop > 0,
+            "Near top-left should have padding, got L=\(frame.paddingLeft) T=\(frame.paddingTop)"
+        )
+        // Crop origin can be negative (stored in cropRect)
+        precondition(
+            frame.cropRect.x < 0 || frame.cropRect.y < 0,
+            "Crop origin should be negative for edge-proximate body"
+        )
+        // Transform must still map body into ROI
+        let bodyCenter = GolfNormalizedPoint(x: 0.1, y: 0.1)
+        let roi = frame.transform.fullFramePointToROI(bodyCenter)
+        precondition(
+            roi.x >= -0.01 && roi.x <= 1.01 && roi.y >= -0.01 && roi.y <= 1.01,
+            "Body center must be in ROI: \(roi)"
+        )
+    }
+
+    // MARK: - Edge proximity round-trip
+
+    static func testEdgeProximityRoundTrip() {
+        let frames = (0..<10).map { i in
+            GolfPoseTrackFrame(
+                sourceFrameIndex: i,
+                sourceTime: Double(i) / 30.0,
+                bodyCenter: GolfNormalizedPoint(x: 0.1, y: 0.1),
+                bodyBounds: GolfNormalizedRect(x: 0.0, y: 0.0, width: 0.2, height: 0.2),
+                handCenter: GolfNormalizedPoint(x: 0.05, y: 0.05),
+                identityConfidence: 0.95
+            )
+        }
+        let track = try! StableSwingROIBuilder.build(
+            poseFrames: frames,
+            orientedFrameSize: CGSize(width: 1080, height: 1920),
+            targetSize: 512
+        )
+        for frame in track.frames {
+            let source = GolfNormalizedPoint(x: 0.15, y: 0.15)
+            let roi = frame.transform.fullFramePointToROI(source)
+            let restored = frame.transform.roiPointToFullFrame(roi)
+            let error = hypot(
+                (restored.x - source.x) * 1080,
+                (restored.y - source.y) * 1920
+            )
+            precondition(
+                error <= 0.5,
+                "Edge round-trip error \(error) exceeds 0.5 pixels at frame \(frame.sourceFrameIndex)"
+            )
+        }
     }
 
     // MARK: - Helpers
@@ -522,7 +640,12 @@ struct StableSwingROIGeometrySmoke {
                 sourceFrameIndex: i,
                 sourceTime: t,
                 bodyCenter: GolfNormalizedPoint(x: cx, y: cy),
-                bodyBounds: GolfAxisAlignedRect(x: cx * 1080 - 200, y: cy * 1920 - 400, width: 400, height: 800),
+                bodyBounds: GolfNormalizedRect(
+                    x: (cx * 1080 - 200) / 1080.0,
+                    y: (cy * 1920 - 400) / 1920.0,
+                    width: 400.0 / 1080.0,
+                    height: 800.0 / 1920.0
+                ),
                 handCenter: GolfNormalizedPoint(x: cx, y: cy + 0.1),
                 identityConfidence: 0.95
             )

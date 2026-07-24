@@ -97,7 +97,7 @@ public enum StableSwingROIBuilder {
                                 x: prev.bodyCenter.x + t * (curr.bodyCenter.x - prev.bodyCenter.x),
                                 y: prev.bodyCenter.y + t * (curr.bodyCenter.y - prev.bodyCenter.y)
                             ),
-                            bodyBounds: GolfAxisAlignedRect(
+                            bodyBounds: GolfNormalizedRect(
                                 x: prev.bodyBounds.x + t * (curr.bodyBounds.x - prev.bodyBounds.x),
                                 y: prev.bodyBounds.y + t * (curr.bodyBounds.y - prev.bodyBounds.y),
                                 width: prev.bodyBounds.width + t * (curr.bodyBounds.width - prev.bodyBounds.width),
@@ -113,67 +113,63 @@ public enum StableSwingROIBuilder {
             interpolatedFrames.append(sortedFrames[i])
         }
 
-        // 6. Compute clip anchor from motion envelope
-        let allBounds = interpolatedFrames.map(\.bodyBounds)
-        let minX = allBounds.map(\.x).min()!
-        let minY = allBounds.map(\.y).min()!
-        let maxX = allBounds.map({ $0.x + $0.width }).max()!
-        let maxY = allBounds.map({ $0.y + $0.height }).max()!
-        let envelopeW = maxX - minX
-        let envelopeH = maxY - minY
+        // 6. Convert all bounds/centers to source pixels and compute envelope
+        struct PixelPoint { let x: Double; let y: Double }
 
-        let centers = interpolatedFrames.map(\.bodyCenter)
-        let sortedX = centers.map(\.x).sorted()
-        let sortedY = centers.map(\.y).sorted()
-        let p10 = max(0, sortedX.count / 10)
-        let p90 = min(sortedX.count - 1, sortedX.count * 9 / 10)
-        let anchorCenterX = (sortedX[p10] + sortedX[p90]) / 2.0
-        let anchorCenterY = (sortedY[p10] + sortedY[p90]) / 2.0
+        var allPixelPoints: [PixelPoint] = []
+        for frame in interpolatedFrames {
+            // Body bounds corners (normalized → pixels)
+            let bx = frame.bodyBounds.x * frameW
+            let by = frame.bodyBounds.y * frameH
+            let bw = frame.bodyBounds.width * frameW
+            let bh = frame.bodyBounds.height * frameH
+            allPixelPoints.append(PixelPoint(x: bx, y: by))
+            allPixelPoints.append(PixelPoint(x: bx + bw, y: by))
+            allPixelPoints.append(PixelPoint(x: bx, y: by + bh))
+            allPixelPoints.append(PixelPoint(x: bx + bw, y: by + bh))
+            // Body center (pixels)
+            allPixelPoints.append(PixelPoint(x: frame.bodyCenter.x * frameW, y: frame.bodyCenter.y * frameH))
+            // Hand center (pixels)
+            if let hand = frame.handCenter {
+                allPixelPoints.append(PixelPoint(x: hand.x * frameW, y: hand.y * frameH))
+            }
+        }
 
+        let minX = allPixelPoints.map(\.x).min()!
+        let minY = allPixelPoints.map(\.y).min()!
+        let maxX = allPixelPoints.map(\.x).max()!
+        let maxY = allPixelPoints.map(\.y).max()!
+
+        // 7. Robust anchor from body center percentiles (pixels)
+        let centers = interpolatedFrames.map { PixelPoint(x: $0.bodyCenter.x * frameW, y: $0.bodyCenter.y * frameH) }
+        let sortedCX = centers.map(\.x).sorted()
+        let sortedCY = centers.map(\.y).sorted()
+        let p10 = max(0, sortedCX.count / 10)
+        let p90 = min(sortedCX.count - 1, sortedCX.count * 9 / 10)
+        let anchorCX = (sortedCX[p10] + sortedCX[p90]) / 2.0
+        let anchorCY = (sortedCY[p10] + sortedCY[p90]) / 2.0
+
+        // 8. Compute cropSide to cover entire envelope from anchor
+        let halfSide = max(
+            anchorCX - minX,
+            maxX - anchorCX,
+            anchorCY - minY,
+            maxY - anchorCY
+        )
         let safetyMargin = configuration.clubBallSafetyMarginFraction + configuration.framePaddingFraction
-        let envelopeSide = max(envelopeW, envelopeH)
-        let anchorToEdge = envelopeSide / 2.0
-        let cropSideHalf = anchorToEdge * (1.0 + safetyMargin)
-        let cropSide = cropSideHalf * 2.0
+        let cropSide = 2.0 * halfSide * (1.0 + safetyMargin)
 
         guard cropSide > 0 else {
             throw StableSwingROIError.coverageFailed
         }
 
-        let cropOriginX = anchorCenterX * frameW - cropSide / 2.0
-        let cropOriginY = anchorCenterY * frameH - cropSide / 2.0
-
-        // 7. Verify all body bounds corners and hand centers map into ROI
-        for frame in interpolatedFrames {
-            let corners = [
-                GolfNormalizedPoint(x: frame.bodyBounds.x / frameW, y: frame.bodyBounds.y / frameH),
-                GolfNormalizedPoint(x: (frame.bodyBounds.x + frame.bodyBounds.width) / frameW, y: frame.bodyBounds.y / frameH),
-                GolfNormalizedPoint(x: frame.bodyBounds.x / frameW, y: (frame.bodyBounds.y + frame.bodyBounds.height) / frameH),
-                GolfNormalizedPoint(x: (frame.bodyBounds.x + frame.bodyBounds.width) / frameW, y: (frame.bodyBounds.y + frame.bodyBounds.height) / frameH),
-            ]
-            for corner in corners {
-                let roiX = (corner.x * frameW - cropOriginX) / cropSide
-                let roiY = (corner.y * frameH - cropOriginY) / cropSide
-                guard roiX >= -0.01 && roiX <= 1.01 && roiY >= -0.01 && roiY <= 1.01 else {
-                    throw StableSwingROIError.coverageFailed
-                }
-            }
-            if let hand = frame.handCenter {
-                let roiHX = (hand.x * frameW - cropOriginX) / cropSide
-                let roiHY = (hand.y * frameH - cropOriginY) / cropSide
-                guard roiHX >= -0.01 && roiHX <= 1.01 && roiHY >= -0.01 && roiHY <= 1.01 else {
-                    throw StableSwingROIError.coverageFailed
-                }
-            }
-        }
-
-        // 8. Per-frame correction (only when envelope approaches edge)
-        let maxCorrection = cropSide * configuration.maxBidirectionalCorrectionFraction
+        // 9. Per-frame raw centers = anchor (fixed clip anchor)
         var rawCenters = interpolatedFrames.map { _ -> (Double, Double) in
-            (anchorCenterX * frameW, anchorCenterY * frameH)
+            (anchorCX, anchorCY)
         }
 
-        // Compute raw crop origins and check if any approach edge
+        // 11. Per-frame correction only when approaching edge
+        let maxCorrection = cropSide * configuration.maxBidirectionalCorrectionFraction
         for i in 0..<interpolatedFrames.count {
             let cx = rawCenters[i].0
             let cy = rawCenters[i].1
@@ -186,9 +182,8 @@ public enum StableSwingROIBuilder {
             let minDist = min(distToLeft, distToTop, distToRight, distToBottom)
 
             if minDist < maxCorrection * 2.0 {
-                // Envelope approaches edge: compute minimal correction
-                let clampOx = max(0, min(ox, frameW - cropSide))
-                let clampOy = max(0, min(oy, frameH - cropSide))
+                let clampOx = max(-cropSide * 0.1, min(ox, frameW - cropSide + cropSide * 0.1))
+                let clampOy = max(-cropSide * 0.1, min(oy, frameH - cropSide + cropSide * 0.1))
                 let correctedCx = clampOx + cropSide / 2.0
                 let correctedCy = clampOy + cropSide / 2.0
                 let dcx = correctedCx - cx
@@ -203,27 +198,25 @@ public enum StableSwingROIBuilder {
             }
         }
 
-        // 9. Bidirectional smoothing
+        // 12. Bidirectional smoothing
         let smoothedCenters = bidirectionalSmooth(rawCenters, maxCorrection: maxCorrection)
 
-        // 10. Build ROI frames
+        // 13. Build ROI frames with real padding (no clamping of crop origin)
         var roiFrames: [StableSwingROIFrame] = []
 
         for (i, frame) in interpolatedFrames.enumerated() {
             let cx = smoothedCenters[i].0
             let cy = smoothedCenters[i].1
-            var cropX = cx - cropSide / 2.0
-            var cropY = cy - cropSide / 2.0
+            let cropX = cx - cropSide / 2.0
+            let cropY = cy - cropSide / 2.0
 
             let padLeft = max(0, -cropX)
             let padTop = max(0, -cropY)
             let padRight = max(0, cropX + cropSide - frameW)
             let padBottom = max(0, cropY + cropSide - frameH)
 
-            cropX = max(0, min(cropX, frameW - cropSide))
-            cropY = max(0, min(cropY, frameH - cropSide))
-
             // Normalized transform: source normalized [0,1] -> ROI normalized [0,1]
+            // roiX = (srcX * frameW - cropX) / cropSide
             let a = frameW / cropSide
             let b = 0.0
             let c = 0.0
@@ -231,6 +224,7 @@ public enum StableSwingROIBuilder {
             let tx = -cropX / cropSide
             let ty = -cropY / cropSide
 
+            // Inverse: srcX = (roiX * cropSide + cropX) / frameW
             let invA = cropSide / frameW
             let invB = 0.0
             let invC = 0.0
@@ -243,13 +237,37 @@ public enum StableSwingROIBuilder {
                 invA: invA, invB: invB, invC: invC, invD: invD, invTx: invTx, invTy: invTy
             )
 
+            // Verify all body corners and hand center map into ROI
+            var frameCoverageOK = true
+            let bodyCorners = [
+                GolfNormalizedPoint(x: frame.bodyBounds.x, y: frame.bodyBounds.y),
+                GolfNormalizedPoint(x: frame.bodyBounds.x + frame.bodyBounds.width, y: frame.bodyBounds.y),
+                GolfNormalizedPoint(x: frame.bodyBounds.x, y: frame.bodyBounds.y + frame.bodyBounds.height),
+                GolfNormalizedPoint(x: frame.bodyBounds.x + frame.bodyBounds.width, y: frame.bodyBounds.y + frame.bodyBounds.height),
+            ]
+            for corner in bodyCorners {
+                let roi = transform.fullFramePointToROI(corner)
+                if roi.x < -0.01 || roi.x > 1.01 || roi.y < -0.01 || roi.y > 1.01 {
+                    frameCoverageOK = false
+                }
+            }
+            if let hand = frame.handCenter {
+                let roiH = transform.fullFramePointToROI(hand)
+                if roiH.x < -0.01 || roiH.x > 1.01 || roiH.y < -0.01 || roiH.y > 1.01 {
+                    frameCoverageOK = false
+                }
+            }
+            if !frameCoverageOK {
+                throw StableSwingROIError.coverageFailed
+            }
+
             let isInterpolated = !seen.keys.contains(frame.sourceFrameIndex)
 
             roiFrames.append(StableSwingROIFrame(
                 sourceFrameIndex: frame.sourceFrameIndex,
                 sourceTime: frame.sourceTime,
                 transform: transform,
-                cropRect: GolfAxisAlignedRect(x: cropX, y: cropY, width: cropSide, height: cropSide),
+                cropRect: GolfSourcePixelRect(x: cropX, y: cropY, width: cropSide, height: cropSide),
                 paddingLeft: padLeft,
                 paddingTop: padTop,
                 paddingRight: padRight,
@@ -261,7 +279,7 @@ public enum StableSwingROIBuilder {
             ))
         }
 
-        // 11. Compute P95 center movement in target pixels
+        // 14. Compute P95 center movement in target pixels
         var movements: [Double] = []
         for i in 1..<smoothedCenters.count {
             let dx = smoothedCenters[i].0 - smoothedCenters[i - 1].0
@@ -279,7 +297,7 @@ public enum StableSwingROIBuilder {
         )
     }
 
-    private static func bidirectionalSmooth(
+    public static func bidirectionalSmooth(
         _ centers: [(Double, Double)],
         maxCorrection: Double
     ) -> [(Double, Double)] {
