@@ -60,8 +60,10 @@ public struct StableSwingROIFrame: Equatable, Sendable {
     public let sourceTime: Double
     public let transform: GolfROIAffineTransform
     public let cropRect: GolfAxisAlignedRect
-    public let paddingApplied: Bool
-    public let touchesEdge: Bool
+    public let paddingLeft: Double
+    public let paddingTop: Double
+    public let paddingRight: Double
+    public let paddingBottom: Double
     public let configurationVersion: String
     public let interpolated: Bool
     public let coverageOK: Bool
@@ -72,8 +74,10 @@ public struct StableSwingROIFrame: Equatable, Sendable {
         sourceTime: Double,
         transform: GolfROIAffineTransform,
         cropRect: GolfAxisAlignedRect,
-        paddingApplied: Bool,
-        touchesEdge: Bool,
+        paddingLeft: Double,
+        paddingTop: Double,
+        paddingRight: Double,
+        paddingBottom: Double,
         configurationVersion: String,
         interpolated: Bool,
         coverageOK: Bool,
@@ -83,8 +87,10 @@ public struct StableSwingROIFrame: Equatable, Sendable {
         self.sourceTime = sourceTime
         self.transform = transform
         self.cropRect = cropRect
-        self.paddingApplied = paddingApplied
-        self.touchesEdge = touchesEdge
+        self.paddingLeft = paddingLeft
+        self.paddingTop = paddingTop
+        self.paddingRight = paddingRight
+        self.paddingBottom = paddingBottom
         self.configurationVersion = configurationVersion
         self.interpolated = interpolated
         self.coverageOK = coverageOK
@@ -114,6 +120,7 @@ public enum StableSwingROIError: Error, Equatable, CustomStringConvertible {
     case coverageFailed
     case nonMonotonicTime
     case invalidDimensions
+    case duplicateFrameConflict(Int)
 
     public var description: String {
         switch self {
@@ -127,6 +134,8 @@ public enum StableSwingROIError: Error, Equatable, CustomStringConvertible {
             return "Source timestamps are not monotonically increasing"
         case .invalidDimensions:
             return "Frame or target dimensions are invalid"
+        case .duplicateFrameConflict(let index):
+            return "Conflicting data for sourceFrameIndex \(index)"
         }
     }
 }

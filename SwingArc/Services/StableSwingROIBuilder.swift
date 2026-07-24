@@ -23,78 +23,97 @@ public enum StableSwingROIBuilder {
         let frameW = orientedFrameSize.width
         let frameH = orientedFrameSize.height
 
-        // 1. Sort and deduplicate by source frame
-        var unique: [Int: GolfPoseTrackFrame] = [:]
-        for frame in poseFrames {
-            unique[frame.sourceFrameIndex] = frame
+        // 1. Sort and deduplicate with conflict detection
+        var seen: [Int: GolfPoseTrackFrame] = [:]
+        var sortedFrames: [GolfPoseTrackFrame] = []
+        let sorted = poseFrames.sorted { $0.sourceFrameIndex < $1.sourceFrameIndex }
+        for frame in sorted {
+            if let existing = seen[frame.sourceFrameIndex] {
+                if existing != frame {
+                    throw StableSwingROIError.duplicateFrameConflict(frame.sourceFrameIndex)
+                }
+                continue
+            }
+            seen[frame.sourceFrameIndex] = frame
+            sortedFrames.append(frame)
         }
-        let sorted = unique.values.sorted { $0.sourceFrameIndex < $1.sourceFrameIndex }
 
         // 2. Validate monotonic time
-        for i in 1..<sorted.count {
-            guard sorted[i].sourceTime > sorted[i - 1].sourceTime else {
+        for i in 1..<sortedFrames.count {
+            guard sortedFrames[i].sourceTime > sortedFrames[i - 1].sourceTime else {
                 throw StableSwingROIError.nonMonotonicTime
             }
         }
 
-        // 3. Validate identity confidence
-        let avgConfidence = sorted.map(\.identityConfidence).reduce(0, +) / Double(sorted.count)
-        guard avgConfidence >= Self.minIdentityConfidence else {
-            throw StableSwingROIError.identityUnstable
+        // 3. Validate identity confidence: any frame below threshold fails
+        for frame in sortedFrames {
+            guard frame.identityConfidence >= Self.minIdentityConfidence else {
+                throw StableSwingROIError.identityUnstable
+            }
         }
 
-        // 4. Estimate frame duration from actual timestamps
+        // 4. Estimate nominal frame duration from robust median of time deltas
+        var durations: [Double] = []
+        for i in 1..<sortedFrames.count {
+            let dt = sortedFrames[i].sourceTime - sortedFrames[i - 1].sourceTime
+            let di = sortedFrames[i].sourceFrameIndex - sortedFrames[i - 1].sourceFrameIndex
+            if di > 0 {
+                durations.append(dt / Double(di))
+            }
+        }
+        durations.sort()
         let estimatedFrameDuration: Double
-        if sorted.count >= 2 {
-            let totalTime = sorted.last!.sourceTime - sorted.first!.sourceTime
-            estimatedFrameDuration = totalTime / Double(sorted.count - 1)
+        if durations.count >= 2 {
+            let mid = durations.count / 2
+            estimatedFrameDuration = durations[mid]
+        } else if !durations.isEmpty {
+            estimatedFrameDuration = durations[0]
         } else {
             estimatedFrameDuration = 1.0 / 30.0
         }
 
-        // 5. Interpolate gaps
-        var interpolatedFrames = sorted
-        var idx = 0
-        while idx < interpolatedFrames.count - 1 {
-            let gapDuration = interpolatedFrames[idx + 1].sourceTime - interpolatedFrames[idx].sourceTime
-            let prevFrame = interpolatedFrames[idx]
-            let nextFrame = interpolatedFrames[idx + 1]
-            let prevIndex = prevFrame.sourceFrameIndex
-            let nextIndex = nextFrame.sourceFrameIndex
-            let missingCount = nextIndex - prevIndex - 1
+        // 5. Interpolate gaps by iterating sorted originals sequentially
+        var interpolatedFrames: [GolfPoseTrackFrame] = []
+        for i in 0..<sortedFrames.count {
+            if i > 0 {
+                let prev = sortedFrames[i - 1]
+                let curr = sortedFrames[i]
+                let prevIndex = prev.sourceFrameIndex
+                let currIndex = curr.sourceFrameIndex
+                let missingCount = currIndex - prevIndex - 1
 
-            if missingCount > 0 {
-                let missingDuration = gapDuration - estimatedFrameDuration
-                if missingDuration > Self.maxInterpolationGapSeconds {
-                    throw StableSwingROIError.poseGapTooLong
+                if missingCount > 0 {
+                    let gapDuration = curr.sourceTime - prev.sourceTime
+                    let missingDuration = gapDuration - estimatedFrameDuration
+                    if missingDuration > Self.maxInterpolationGapSeconds {
+                        throw StableSwingROIError.poseGapTooLong
+                    }
+                    for m in 1...missingCount {
+                        let t = Double(m) / Double(missingCount + 1)
+                        let interpFrame = GolfPoseTrackFrame(
+                            sourceFrameIndex: prevIndex + m,
+                            sourceTime: prev.sourceTime + t * (curr.sourceTime - prev.sourceTime),
+                            bodyCenter: GolfNormalizedPoint(
+                                x: prev.bodyCenter.x + t * (curr.bodyCenter.x - prev.bodyCenter.x),
+                                y: prev.bodyCenter.y + t * (curr.bodyCenter.y - prev.bodyCenter.y)
+                            ),
+                            bodyBounds: GolfAxisAlignedRect(
+                                x: prev.bodyBounds.x + t * (curr.bodyBounds.x - prev.bodyBounds.x),
+                                y: prev.bodyBounds.y + t * (curr.bodyBounds.y - prev.bodyBounds.y),
+                                width: prev.bodyBounds.width + t * (curr.bodyBounds.width - prev.bodyBounds.width),
+                                height: prev.bodyBounds.height + t * (curr.bodyBounds.height - prev.bodyBounds.height)
+                            ),
+                            handCenter: interpolatePoint(prev.handCenter, curr.handCenter, t: t),
+                            identityConfidence: prev.identityConfidence + t * (curr.identityConfidence - prev.identityConfidence)
+                        )
+                        interpolatedFrames.append(interpFrame)
+                    }
                 }
-                for m in 1...missingCount {
-                    let t = Double(m) / Double(missingCount + 1)
-                    let interpFrame = GolfPoseTrackFrame(
-                        sourceFrameIndex: prevIndex + m,
-                        sourceTime: prevFrame.sourceTime + t * (nextFrame.sourceTime - prevFrame.sourceTime),
-                        bodyCenter: GolfNormalizedPoint(
-                            x: prevFrame.bodyCenter.x + t * (nextFrame.bodyCenter.x - prevFrame.bodyCenter.x),
-                            y: prevFrame.bodyCenter.y + t * (nextFrame.bodyCenter.y - prevFrame.bodyCenter.y)
-                        ),
-                        bodyBounds: GolfAxisAlignedRect(
-                            x: prevFrame.bodyBounds.x + t * (nextFrame.bodyBounds.x - prevFrame.bodyBounds.x),
-                            y: prevFrame.bodyBounds.y + t * (nextFrame.bodyBounds.y - prevFrame.bodyBounds.y),
-                            width: prevFrame.bodyBounds.width + t * (nextFrame.bodyBounds.width - prevFrame.bodyBounds.width),
-                            height: prevFrame.bodyBounds.height + t * (nextFrame.bodyBounds.height - prevFrame.bodyBounds.height)
-                        ),
-                        handCenter: interpolatePoint(prevFrame.handCenter, nextFrame.handCenter, t: t),
-                        identityConfidence: prevFrame.identityConfidence + t * (nextFrame.identityConfidence - prevFrame.identityConfidence)
-                    )
-                    interpolatedFrames.insert(interpFrame, at: prevIndex + m)
-                }
-                idx += missingCount + 1
-            } else {
-                idx += 1
             }
+            interpolatedFrames.append(sortedFrames[i])
         }
 
-        // 6. Compute clip anchor from motion envelope (bounds are in source pixels)
+        // 6. Compute clip anchor from motion envelope
         let allBounds = interpolatedFrames.map(\.bodyBounds)
         let minX = allBounds.map(\.x).min()!
         let minY = allBounds.map(\.y).min()!
@@ -103,7 +122,6 @@ public enum StableSwingROIBuilder {
         let envelopeW = maxX - minX
         let envelopeH = maxY - minY
 
-        // Anchor center from robust percentiles (normalized)
         let centers = interpolatedFrames.map(\.bodyCenter)
         let sortedX = centers.map(\.x).sorted()
         let sortedY = centers.map(\.y).sorted()
@@ -112,53 +130,100 @@ public enum StableSwingROIBuilder {
         let anchorCenterX = (sortedX[p10] + sortedX[p90]) / 2.0
         let anchorCenterY = (sortedY[p10] + sortedY[p90]) / 2.0
 
-        // Anchor scale from envelope + safety margins (source pixels)
         let safetyMargin = configuration.clubBallSafetyMarginFraction + configuration.framePaddingFraction
-        let anchorSide = max(envelopeW, envelopeH) * (1.0 + safetyMargin)
+        let envelopeSide = max(envelopeW, envelopeH)
+        let anchorToEdge = envelopeSide / 2.0
+        let cropSideHalf = anchorToEdge * (1.0 + safetyMargin)
+        let cropSide = cropSideHalf * 2.0
 
-        guard anchorSide > 0 else {
+        guard cropSide > 0 else {
             throw StableSwingROIError.coverageFailed
         }
 
-        // Square crop in source pixels
-        let cropSide = anchorSide
-        guard cropSide > 0, cropSide < frameW * 2 else {
-            throw StableSwingROIError.coverageFailed
+        let cropOriginX = anchorCenterX * frameW - cropSide / 2.0
+        let cropOriginY = anchorCenterY * frameH - cropSide / 2.0
+
+        // 7. Verify all body bounds corners and hand centers map into ROI
+        for frame in interpolatedFrames {
+            let corners = [
+                GolfNormalizedPoint(x: frame.bodyBounds.x / frameW, y: frame.bodyBounds.y / frameH),
+                GolfNormalizedPoint(x: (frame.bodyBounds.x + frame.bodyBounds.width) / frameW, y: frame.bodyBounds.y / frameH),
+                GolfNormalizedPoint(x: frame.bodyBounds.x / frameW, y: (frame.bodyBounds.y + frame.bodyBounds.height) / frameH),
+                GolfNormalizedPoint(x: (frame.bodyBounds.x + frame.bodyBounds.width) / frameW, y: (frame.bodyBounds.y + frame.bodyBounds.height) / frameH),
+            ]
+            for corner in corners {
+                let roiX = (corner.x * frameW - cropOriginX) / cropSide
+                let roiY = (corner.y * frameH - cropOriginY) / cropSide
+                guard roiX >= -0.01 && roiX <= 1.01 && roiY >= -0.01 && roiY <= 1.01 else {
+                    throw StableSwingROIError.coverageFailed
+                }
+            }
+            if let hand = frame.handCenter {
+                let roiHX = (hand.x * frameW - cropOriginX) / cropSide
+                let roiHY = (hand.y * frameH - cropOriginY) / cropSide
+                guard roiHX >= -0.01 && roiHX <= 1.01 && roiHY >= -0.01 && roiHY <= 1.01 else {
+                    throw StableSwingROIError.coverageFailed
+                }
+            }
         }
 
-        // 7. Compute per-frame raw crop centers (anchor-based, not per-frame tracking)
-        let rawCropCenters = interpolatedFrames.map { frame -> (Double, Double) in
-            let cx = anchorCenterX * frameW
-            let cy = anchorCenterY * frameH
-            return (cx, cy)
-        }
-
-        // 8. Bidirectional smoothing with limited correction
+        // 8. Per-frame correction (only when envelope approaches edge)
         let maxCorrection = cropSide * configuration.maxBidirectionalCorrectionFraction
-        let smoothedCenters = bidirectionalSmooth(
-            rawCropCenters,
-            maxCorrection: maxCorrection
-        )
+        var rawCenters = interpolatedFrames.map { _ -> (Double, Double) in
+            (anchorCenterX * frameW, anchorCenterY * frameH)
+        }
 
-        // 9. Build ROI frames
+        // Compute raw crop origins and check if any approach edge
+        for i in 0..<interpolatedFrames.count {
+            let cx = rawCenters[i].0
+            let cy = rawCenters[i].1
+            let ox = cx - cropSide / 2.0
+            let oy = cy - cropSide / 2.0
+            let distToLeft = ox
+            let distToTop = oy
+            let distToRight = frameW - (ox + cropSide)
+            let distToBottom = frameH - (oy + cropSide)
+            let minDist = min(distToLeft, distToTop, distToRight, distToBottom)
+
+            if minDist < maxCorrection * 2.0 {
+                // Envelope approaches edge: compute minimal correction
+                let clampOx = max(0, min(ox, frameW - cropSide))
+                let clampOy = max(0, min(oy, frameH - cropSide))
+                let correctedCx = clampOx + cropSide / 2.0
+                let correctedCy = clampOy + cropSide / 2.0
+                let dcx = correctedCx - cx
+                let dcy = correctedCy - cy
+                let dist = hypot(dcx, dcy)
+                if dist > maxCorrection {
+                    let scale = maxCorrection / dist
+                    rawCenters[i] = (cx + dcx * scale, cy + dcy * scale)
+                } else {
+                    rawCenters[i] = (correctedCx, correctedCy)
+                }
+            }
+        }
+
+        // 9. Bidirectional smoothing
+        let smoothedCenters = bidirectionalSmooth(rawCenters, maxCorrection: maxCorrection)
+
+        // 10. Build ROI frames
         var roiFrames: [StableSwingROIFrame] = []
+
         for (i, frame) in interpolatedFrames.enumerated() {
             let cx = smoothedCenters[i].0
             let cy = smoothedCenters[i].1
             var cropX = cx - cropSide / 2.0
             var cropY = cy - cropSide / 2.0
 
-            let paddingApplied = cropX < 0 || cropY < 0 ||
-                cropX + cropSide > frameW || cropY + cropSide > frameH
+            let padLeft = max(0, -cropX)
+            let padTop = max(0, -cropY)
+            let padRight = max(0, cropX + cropSide - frameW)
+            let padBottom = max(0, cropY + cropSide - frameH)
+
             cropX = max(0, min(cropX, frameW - cropSide))
             cropY = max(0, min(cropY, frameH - cropSide))
 
-            let touchesEdge = cropX <= 0 || cropY <= 0 ||
-                cropX + cropSide >= frameW - 1 || cropY + cropSide >= frameH - 1
-
             // Normalized transform: source normalized [0,1] -> ROI normalized [0,1]
-            // roiX = (srcX * frameW - cropX) / cropSide
-            // roiY = (srcY * frameH - cropY) / cropSide
             let a = frameW / cropSide
             let b = 0.0
             let c = 0.0
@@ -166,7 +231,6 @@ public enum StableSwingROIBuilder {
             let tx = -cropX / cropSide
             let ty = -cropY / cropSide
 
-            // Inverse: srcX = (roiX * cropSide + cropX) / frameW
             let invA = cropSide / frameW
             let invB = 0.0
             let invC = 0.0
@@ -179,22 +243,25 @@ public enum StableSwingROIBuilder {
                 invA: invA, invB: invB, invC: invC, invD: invD, invTx: invTx, invTy: invTy
             )
 
+            let isInterpolated = !seen.keys.contains(frame.sourceFrameIndex)
+
             roiFrames.append(StableSwingROIFrame(
                 sourceFrameIndex: frame.sourceFrameIndex,
                 sourceTime: frame.sourceTime,
                 transform: transform,
                 cropRect: GolfAxisAlignedRect(x: cropX, y: cropY, width: cropSide, height: cropSide),
-                paddingApplied: paddingApplied,
-                touchesEdge: touchesEdge,
+                paddingLeft: padLeft,
+                paddingTop: padTop,
+                paddingRight: padRight,
+                paddingBottom: padBottom,
                 configurationVersion: configuration.version,
-                interpolated: frame.sourceFrameIndex != poseFrames.first(where: { $0.sourceFrameIndex == frame.sourceFrameIndex })?.sourceFrameIndex
-                    && !unique.keys.contains(frame.sourceFrameIndex),
+                interpolated: isInterpolated,
                 coverageOK: true,
                 qualityScore: frame.identityConfidence
             ))
         }
 
-        // 10. Compute P95 center movement in target pixels
+        // 11. Compute P95 center movement in target pixels
         var movements: [Double] = []
         for i in 1..<smoothedCenters.count {
             let dx = smoothedCenters[i].0 - smoothedCenters[i - 1].0
@@ -220,7 +287,6 @@ public enum StableSwingROIBuilder {
 
         var smoothed = centers
 
-        // Forward pass: limit frame-to-frame change
         for i in 1..<smoothed.count {
             let dx = smoothed[i].0 - smoothed[i - 1].0
             let dy = smoothed[i].1 - smoothed[i - 1].1
@@ -234,7 +300,6 @@ public enum StableSwingROIBuilder {
             }
         }
 
-        // Backward pass
         for i in stride(from: smoothed.count - 2, through: 0, by: -1) {
             let dx = smoothed[i].0 - smoothed[i + 1].0
             let dy = smoothed[i].1 - smoothed[i + 1].1

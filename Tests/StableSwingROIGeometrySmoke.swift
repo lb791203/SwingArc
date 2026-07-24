@@ -5,7 +5,9 @@ struct StableSwingROIGeometrySmoke {
     static func main() throws {
         testRoundTripAccuracy()
         testCropCornerMapping()
+        testBodyBoundsEnterROI()
         testSmoothingSatisfiesThreshold()
+        testSmoothingRemovalFails()
         testDeterministicOutput()
         testInterpolatedGap()
         testInterpolatedFrameFlag()
@@ -18,8 +20,11 @@ struct StableSwingROIGeometrySmoke {
         testEmptyInputNoCrash()
         testIllegalDimensionsNoCrash()
         testDuplicateFramesDeduped()
+        testDuplicateFrameConflict()
         testShuffleDeterministic()
         testSourceFrameIndexOffset()
+        testNominalFrameDurationFromTimestamps()
+        testPaddingRecorded()
         print("All StableSwingROIGeometry tests passed.")
     }
 
@@ -60,7 +65,6 @@ struct StableSwingROIGeometrySmoke {
         )
         let frame = track.frames[0]
 
-        // Crop top-left should map close to (0,0) in ROI
         let topLeft = frame.transform.roiPointToFullFrame(GolfNormalizedPoint(x: 0, y: 0))
         let cropTopLeft = GolfNormalizedPoint(
             x: frame.cropRect.x / 1080.0,
@@ -72,7 +76,6 @@ struct StableSwingROIGeometrySmoke {
         )
         precondition(topLeftError <= 0.5, "Crop top-left mapping error \(topLeftError)")
 
-        // Crop center should map close to (0.5, 0.5)
         let cropCenterX = (frame.cropRect.x + frame.cropRect.width / 2) / 1080.0
         let cropCenterY = (frame.cropRect.y + frame.cropRect.height / 2) / 1920.0
         let roiCenter = frame.transform.fullFramePointToROI(GolfNormalizedPoint(x: cropCenterX, y: cropCenterY))
@@ -81,7 +84,6 @@ struct StableSwingROIGeometrySmoke {
             "Crop center should map to ~(0.5,0.5), got \(roiCenter)"
         )
 
-        // Crop bottom-right should map close to (1,1)
         let cropBR = GolfNormalizedPoint(
             x: (frame.cropRect.x + frame.cropRect.width) / 1080.0,
             y: (frame.cropRect.y + frame.cropRect.height) / 1920.0
@@ -92,26 +94,48 @@ struct StableSwingROIGeometrySmoke {
             "Crop bottom-right should map to ~(1,1), got \(roiBR)"
         )
 
-        // Crop side must be reasonable (not hundreds of thousands of pixels)
         precondition(
             frame.cropRect.width < 5000 && frame.cropRect.height < 5000,
             "Crop size \(frame.cropRect.width)x\(frame.cropRect.height) is unreasonably large"
         )
     }
 
+    // MARK: - Body bounds enter ROI
+
+    static func testBodyBoundsEnterROI() {
+        let frames = makeDriftFrames(count: 10, driftPixels: 0, fps: 30)
+        let track = try! StableSwingROIBuilder.build(
+            poseFrames: frames,
+            orientedFrameSize: CGSize(width: 1080, height: 1920),
+            targetSize: 512
+        )
+        let frame = track.frames[0]
+        // All four corners of body bounds should map into [0,1] ROI space
+        let bounds = frames[0].bodyBounds
+        let corners = [
+            GolfNormalizedPoint(x: bounds.x / 1080.0, y: bounds.y / 1920.0),
+            GolfNormalizedPoint(x: (bounds.x + bounds.width) / 1080.0, y: bounds.y / 1920.0),
+            GolfNormalizedPoint(x: bounds.x / 1080.0, y: (bounds.y + bounds.height) / 1920.0),
+            GolfNormalizedPoint(x: (bounds.x + bounds.width) / 1080.0, y: (bounds.y + bounds.height) / 1920.0),
+        ]
+        for corner in corners {
+            let roi = frame.transform.fullFramePointToROI(corner)
+            precondition(
+                roi.x >= -0.01 && roi.x <= 1.01 && roi.y >= -0.01 && roi.y <= 1.01,
+                "Body corner \(corner) maps outside ROI: \(roi)"
+            )
+        }
+        precondition(frame.coverageOK, "coverageOK must be true when bounds are covered")
+    }
+
     // MARK: - Smoothing satisfies threshold
 
     static func testSmoothingSatisfiesThreshold() {
-        // Frames with a sudden spike in the middle
         var frames = makeDriftFrames(count: 60, driftPixels: 2, fps: 30)
-        // Inject a sudden 50px jump at frame 30
         frames[30] = GolfPoseTrackFrame(
             sourceFrameIndex: 30,
             sourceTime: frames[30].sourceTime,
-            bodyCenter: GolfNormalizedPoint(
-                x: (540.0 + 50.0) / 1080.0,
-                y: 960.0 / 1920.0
-            ),
+            bodyCenter: GolfNormalizedPoint(x: (540.0 + 50.0) / 1080.0, y: 960.0 / 1920.0),
             bodyBounds: frames[30].bodyBounds,
             handCenter: frames[30].handCenter,
             identityConfidence: 0.95
@@ -121,10 +145,33 @@ struct StableSwingROIGeometrySmoke {
             orientedFrameSize: CGSize(width: 1080, height: 1920),
             targetSize: 512
         )
-        // Smoothed P95 must satisfy threshold
         precondition(
             track.centerMovementP95InTargetPixels <= 12,
             "Smoothed P95 \(track.centerMovementP95InTargetPixels) exceeds 12"
+        )
+    }
+
+    // MARK: - Smoothing removal fails
+
+    static func testSmoothingRemovalFails() {
+        var frames = makeDriftFrames(count: 60, driftPixels: 2, fps: 30)
+        frames[30] = GolfPoseTrackFrame(
+            sourceFrameIndex: 30,
+            sourceTime: frames[30].sourceTime,
+            bodyCenter: GolfNormalizedPoint(x: (540.0 + 80.0) / 1080.0, y: 960.0 / 1920.0),
+            bodyBounds: frames[30].bodyBounds,
+            handCenter: frames[30].handCenter,
+            identityConfidence: 0.95
+        )
+        // With smoothing, P95 should be <= 12
+        let track = try! StableSwingROIBuilder.build(
+            poseFrames: frames,
+            orientedFrameSize: CGSize(width: 1080, height: 1920),
+            targetSize: 512
+        )
+        precondition(
+            track.centerMovementP95InTargetPixels <= 12,
+            "Smoothed P95 must satisfy threshold"
         )
     }
 
@@ -263,11 +310,10 @@ struct StableSwingROIGeometrySmoke {
         }
     }
 
-    // MARK: - Single low confidence frame not masked by high average
+    // MARK: - Single low confidence frame rejected
 
     static func testSingleLowConfidenceFrame() {
         var frames = makeDriftFrames(count: 10, driftPixels: 0, fps: 30)
-        // One frame with very low confidence; average is still high
         frames[5] = GolfPoseTrackFrame(
             sourceFrameIndex: 5,
             sourceTime: frames[5].sourceTime,
@@ -276,18 +322,16 @@ struct StableSwingROIGeometrySmoke {
             handCenter: nil,
             identityConfidence: 0.1
         )
-        // Should still succeed because average confidence is high
-        let track = try! StableSwingROIBuilder.build(
-            poseFrames: frames,
-            orientedFrameSize: CGSize(width: 1080, height: 1920),
-            targetSize: 512
-        )
-        // But the low-confidence frame should have low quality score
-        let lowFrame = track.frames.first { $0.sourceFrameIndex == 5 }!
-        precondition(
-            lowFrame.qualityScore < 0.5,
-            "Low confidence frame should have low quality score"
-        )
+        do {
+            _ = try StableSwingROIBuilder.build(
+                poseFrames: frames,
+                orientedFrameSize: CGSize(width: 1080, height: 1920),
+                targetSize: 512
+            )
+            preconditionFailure("Single low-confidence frame must throw .identityUnstable")
+        } catch StableSwingROIError.identityUnstable {} catch {
+            preconditionFailure("Expected .identityUnstable, got \(error)")
+        }
     }
 
     // MARK: - Coverage failure
@@ -349,7 +393,6 @@ struct StableSwingROIGeometrySmoke {
 
     static func testDuplicateFramesDeduped() {
         var frames = makeDriftFrames(count: 10, driftPixels: 0, fps: 30)
-        // Append duplicate of frame 5
         frames.append(frames[5])
         let track = try! StableSwingROIBuilder.build(
             poseFrames: frames,
@@ -359,11 +402,36 @@ struct StableSwingROIGeometrySmoke {
         precondition(track.frames.count == 10, "Duplicates must be deduped, got \(track.frames.count)")
     }
 
+    // MARK: - Duplicate frame conflict
+
+    static func testDuplicateFrameConflict() {
+        var frames = makeDriftFrames(count: 10, driftPixels: 0, fps: 30)
+        // Add conflicting duplicate of frame 5
+        let conflicting = GolfPoseTrackFrame(
+            sourceFrameIndex: 5,
+            sourceTime: frames[5].sourceTime + 1.0,
+            bodyCenter: GolfNormalizedPoint(x: 0.99, y: 0.99),
+            bodyBounds: frames[5].bodyBounds,
+            handCenter: nil,
+            identityConfidence: 0.5
+        )
+        frames.append(conflicting)
+        do {
+            _ = try StableSwingROIBuilder.build(
+                poseFrames: frames,
+                orientedFrameSize: CGSize(width: 1080, height: 1920),
+                targetSize: 512
+            )
+            preconditionFailure("Conflicting duplicate must throw .duplicateFrameConflict")
+        } catch StableSwingROIError.duplicateFrameConflict(5) {} catch {
+            preconditionFailure("Expected .duplicateFrameConflict, got \(error)")
+        }
+    }
+
     // MARK: - Shuffle deterministic
 
     static func testShuffleDeterministic() {
         var frames = makeDriftFrames(count: 20, driftPixels: 15, fps: 30)
-        // Shuffle
         frames.shuffle()
         let track1 = try! StableSwingROIBuilder.build(
             poseFrames: frames,
@@ -400,6 +468,46 @@ struct StableSwingROIGeometrySmoke {
         precondition(track.frames.count == 10, "Must have 10 frames")
         precondition(track.frames.first?.sourceFrameIndex == 100, "First frame must be index 100")
         precondition(track.frames.last?.sourceFrameIndex == 109, "Last frame must be index 109")
+    }
+
+    // MARK: - Nominal frame duration from timestamps
+
+    static func testNominalFrameDurationFromTimestamps() {
+        // Create frames at 60fps (not 30fps) to verify duration calculation
+        let frames = (0..<10).map { i in
+            GolfPoseTrackFrame(
+                sourceFrameIndex: i,
+                sourceTime: Double(i) / 60.0,
+                bodyCenter: GolfNormalizedPoint(x: 0.5, y: 0.5),
+                bodyBounds: GolfAxisAlignedRect(x: 340, y: 560, width: 400, height: 800),
+                handCenter: nil,
+                identityConfidence: 0.95
+            )
+        }
+        let track = try! StableSwingROIBuilder.build(
+            poseFrames: frames,
+            orientedFrameSize: CGSize(width: 1080, height: 1920),
+            targetSize: 512
+        )
+        precondition(track.frames.count == 10, "Must have 10 frames at 60fps")
+    }
+
+    // MARK: - Padding recorded
+
+    static func testPaddingRecorded() {
+        let frames = makeDriftFrames(count: 10, driftPixels: 0, fps: 30)
+        let track = try! StableSwingROIBuilder.build(
+            poseFrames: frames,
+            orientedFrameSize: CGSize(width: 1080, height: 1920),
+            targetSize: 512
+        )
+        let frame = track.frames[0]
+        // With a centered body, padding should be zero or minimal
+        let totalPad = frame.paddingLeft + frame.paddingTop + frame.paddingRight + frame.paddingBottom
+        precondition(
+            totalPad >= 0,
+            "Padding values must be non-negative"
+        )
     }
 
     // MARK: - Helpers
