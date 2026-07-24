@@ -319,6 +319,7 @@ struct ContentView: View {
         activeProject = summary
         projects = LocalProjectStore.projects()
         saveStatus = .saved
+        migrateLegacyAnnotationIfNeeded(for: url)
 
         if didLoad, AutomaticAnalysisPolicy.shouldAnalyze(event: origin) {
             DispatchQueue.main.async {
@@ -354,6 +355,76 @@ struct ContentView: View {
         activeProject = project
         projects = LocalProjectStore.projects()
         saveStatus = saved ? .saved : .failed
+    }
+
+    private func migrateLegacyAnnotationIfNeeded(for videoURL: URL) {
+        Task {
+            do {
+                let mediaSHA256 = try await Task.detached(
+                    priority: .utility
+                ) {
+                    try AnnotationStore.mediaSHA256(url: videoURL)
+                }.value
+                guard currentProjectURL == videoURL,
+                      !LegacyAnnotationMigration.isCompleted(
+                          mediaSHA256: mediaSHA256
+                      ) else {
+                    return
+                }
+
+                let store = AnnotationStore()
+                guard let package = try store.load(
+                    mediaSHA256: mediaSHA256
+                ) else {
+                    LegacyAnnotationMigration.markCompleted(
+                        mediaSHA256: mediaSHA256
+                    )
+                    return
+                }
+
+                let frameSession = ExactVideoFrameSession()
+                let metadata = try await frameSession.open(url: videoURL)
+                guard metadata.timelineSHA256
+                    == package.media.timelineSHA256 else {
+                    throw AnnotationStoreError.mediaIdentityMismatch
+                }
+                var frameTimes: [Int: Double] = [:]
+                for frame in LegacyAnnotationMigration.sourceFrameIndices(
+                    package: package
+                ) {
+                    if let time = await frameSession.presentationTimeSeconds(
+                        at: frame
+                    ) {
+                        frameTimes[frame] = time
+                    }
+                }
+
+                guard currentProjectURL == videoURL else { return }
+                let migrated = LegacyAnnotationMigration.migrate(
+                    package: package,
+                    frameTimes: frameTimes,
+                    existingMarkers: keyframes
+                )
+
+                if migrated.sanitizedPackage != package {
+                    try store.save(
+                        migrated.sanitizedPackage,
+                        expectedMediaSHA256: mediaSHA256
+                    )
+                }
+                if migrated.markers != keyframes {
+                    keyframes = migrated.markers
+                    persistCurrentProject()
+                }
+                guard saveStatus != .failed else { return }
+                LegacyAnnotationMigration.markCompleted(
+                    mediaSHA256: mediaSHA256
+                )
+            } catch {
+                guard currentProjectURL == videoURL else { return }
+                statusMessage = "已有 P 点修正未能迁移，原数据仍保留。"
+            }
+        }
     }
 
     private var projectStatus: LocalProjectStatus {

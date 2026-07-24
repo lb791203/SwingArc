@@ -241,19 +241,19 @@ git commit -m "feat: replace phone annotation with P point correction"
 - Discard: unreviewed frame labels and all A/B workflow state
 - Mark: migration idempotently per media identity
 
-- [ ] **Step 1: Write a fixture matching the phone evidence and verify RED**
+- [x] **Step 1: Write a fixture matching the phone evidence and verify RED**
 
 Use an active `annotator-a` draft containing P1–P8 plus unreviewed club landmarks. Assert migration produces eight manual markers, produces no keypoint/training records, and a second run changes nothing.
 
-- [ ] **Step 2: Implement the one-time migration**
+- [x] **Step 2: Implement the one-time migration**
 
 Resolve the active draft first; if absent, use the latest single submitted pass. Validate ordering and frame bounds. Merge without replacing newer project manual markers. Persist the project first, then record migration completion.
 
-- [ ] **Step 3: Run migration and persistence tests**
+- [x] **Step 3: Run migration and persistence tests**
 
 Verify old projects and drawings round-trip unchanged.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add SwingArc Tests SwingArcProject.xcodeproj/project.pbxproj

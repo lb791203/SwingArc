@@ -14,6 +14,8 @@ struct PPointCorrectionPresentationSmoke {
         for required in [
             "P 点修正",
             "当前视频",
+            ".overlay(alignment: .top)",
+            ".overlay(alignment: .bottom)",
             "−5",
             "−1",
             "+1",
@@ -24,6 +26,7 @@ struct PPointCorrectionPresentationSmoke {
         }
 
         for forbidden in [
+            "ScrollView(.vertical",
             "annotator-a",
             "annotator-b",
             "reviewer",

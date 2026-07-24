@@ -65,6 +65,7 @@
 		A90000000000000000000011 /* AnnotationPredictionAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000012 /* AnnotationPredictionAdapter.swift */; };
 		B00000000000000000000001 /* PPointCorrectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* PPointCorrectionState.swift */; };
 		B00000000000000000000003 /* PPointCorrectionWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000004 /* PPointCorrectionWorkspace.swift */; };
+		B00000000000000000000005 /* LegacyAnnotationMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000006 /* LegacyAnnotationMigration.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -127,6 +128,7 @@
 		A90000000000000000000012 /* AnnotationPredictionAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationPredictionAdapter.swift; sourceTree = "<group>"; };
 		B00000000000000000000002 /* PPointCorrectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PPointCorrectionState.swift; sourceTree = "<group>"; };
 		B00000000000000000000004 /* PPointCorrectionWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PPointCorrectionWorkspace.swift; sourceTree = "<group>"; };
+		B00000000000000000000006 /* LegacyAnnotationMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyAnnotationMigration.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -209,6 +211,7 @@
 				A9000000000000000000000A /* AnnotationStore.swift */,
 				A9000000000000000000000C /* AnnotationExportService.swift */,
 				A90000000000000000000012 /* AnnotationPredictionAdapter.swift */,
+				B00000000000000000000006 /* LegacyAnnotationMigration.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -375,6 +378,7 @@
 				A90000000000000000000011 /* AnnotationPredictionAdapter.swift in Sources */,
 				B00000000000000000000001 /* PPointCorrectionState.swift in Sources */,
 				B00000000000000000000003 /* PPointCorrectionWorkspace.swift in Sources */,
+				B00000000000000000000005 /* LegacyAnnotationMigration.swift in Sources */,
 			);
 		};
 /* End PBXSourcesBuildPhase section */

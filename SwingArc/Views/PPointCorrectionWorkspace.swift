@@ -77,37 +77,52 @@ struct PPointCorrectionWorkspace: View {
     }
 
     private func correctionContent(_ state: PPointCorrectionState) -> some View {
-        VStack(spacing: 0) {
+        ZStack(alignment: .topTrailing) {
+            Color.black
+            if let image = frameController.currentFrame?.image {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ProgressView()
+                    .tint(AnalysisTheme.proTourSignal)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            if frameController.isLoading {
+                ProgressView()
+                    .tint(AnalysisTheme.proTourSignal)
+                    .padding(12)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityLabel("当前 P 点源帧")
+        .overlay(alignment: .top) {
             stageSelector(state)
                 .padding(.vertical, 10)
-
-            ZStack(alignment: .topTrailing) {
-                Color.black
-                if let image = frameController.currentFrame?.image {
-                    Image(decorative: image, scale: 1)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ProgressView()
-                        .tint(AnalysisTheme.proTourSignal)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-
-                if frameController.isLoading {
-                    ProgressView()
-                        .tint(AnalysisTheme.proTourSignal)
-                        .padding(12)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .accessibilityLabel("当前 P 点源帧")
-
+                .background(
+                    LinearGradient(
+                        colors: [.black.opacity(0.78), .black.opacity(0.30), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .padding(.bottom, -24)
+                )
+        }
+        .overlay(alignment: .bottom) {
             correctionControls(state)
                 .padding(.horizontal, 16)
-                .padding(.top, 10)
+                .padding(.top, 12)
                 .padding(.bottom, 14)
-                .background(AnalysisTheme.proTourBackground)
+                .background(
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.64), .black.opacity(0.92)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .padding(.top, -34)
+                )
         }
     }
 
@@ -194,6 +209,11 @@ struct PPointCorrectionWorkspace: View {
             .disabled(frameController.currentFrame == nil)
             .accessibilityLabel("将当前帧设为 \(state.selectedCode.rawValue)")
         }
+        .padding(10)
+        .background(
+            .ultraThinMaterial,
+            in: RoundedRectangle(cornerRadius: 18)
+        )
     }
 
     private func stepButton(_ amount: Int, title: String) -> some View {
