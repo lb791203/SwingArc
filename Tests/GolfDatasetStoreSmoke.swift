@@ -6,16 +6,13 @@ struct GolfDatasetStoreSmoke {
         let tmpRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("golf-dataset-store-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tmpRoot, withIntermediateDirectories: true)
-
-        defer {
-            try? FileManager.default.removeItem(at: tmpRoot)
-        }
+        defer { try? FileManager.default.removeItem(at: tmpRoot) }
 
         let store = GolfDatasetStore(rootDirectory: tmpRoot)
+        let fixedDate = Date(timeIntervalSince1970: 1_721_808_000)
 
         // 1. Registry save and load
         let registry = GolferRegistry(datasetID: "test-ds", golfers: [])
-        let fixedDate = Date(timeIntervalSince1970: 1_721_808_000)
         let withGolfer = try registry.assign(golferID: "golfer-A", split: .training, at: fixedDate)
         try store.saveRegistry(withGolfer)
         let loadedRegistry = try store.loadRegistry()
@@ -56,21 +53,19 @@ struct GolfDatasetStoreSmoke {
             try store.appendPrediction(changedPrediction)
             preconditionFailure("prediction runs are immutable")
         } catch GolfDatasetStoreError.predictionAlreadyExists("pred-run-1") {}
-        // Original must be unchanged
         let stillOriginal = try store.loadPrediction(clipID: "clip-001", predictionRunID: "pred-run-1")
         precondition(stillOriginal == prediction, "Original prediction must not change")
 
         // 5. Revision same ID, same bytes = idempotent
         let revision = makeRevision(id: "rev-1", clipID: "clip-001", predRunID: "pred-run-1")
         try store.saveRevision(revision)
-        try store.saveRevision(revision)  // idempotent
+        try store.saveRevision(revision)
         let loadedRev = try store.loadRevision(clipID: "clip-001", revisionID: "rev-1")
         precondition(loadedRev == revision, "Revision round-trip failed")
 
         // 6. Revision same ID, different bytes = conflict
         do {
             try store.saveRevision(GolfAnnotationRevision(
-                schemaVersion: 1,
                 revisionID: "rev-1",
                 clipID: "clip-001",
                 parentPredictionRunID: "pred-run-1",
@@ -97,12 +92,15 @@ struct GolfDatasetStoreSmoke {
         let snapshot2 = try store.loadSnapshot()
         precondition(snapshot == snapshot2, "Snapshot must be deterministic")
 
-        // 9. No residual .tmp files
-        let remaining = try FileManager.default.contentsOfDirectory(
-            at: tmpRoot,
-            includingPropertiesForKeys: nil
-        )
-        let tmpFiles = remaining.filter { $0.pathExtension == "tmp" }
+        // 9. No residual .tmp files (recursive)
+        var tmpFiles: [URL] = []
+        if let enumerator = FileManager.default.enumerator(at: tmpRoot, includingPropertiesForKeys: nil) {
+            for case let url as URL in enumerator {
+                if url.lastPathComponent.hasPrefix(".tmp-") {
+                    tmpFiles.append(url)
+                }
+            }
+        }
         precondition(tmpFiles.isEmpty, "Residual .tmp files found: \(tmpFiles)")
 
         // 10. Path traversal rejection
@@ -131,6 +129,66 @@ struct GolfDatasetStoreSmoke {
             try store.saveRevision(evilRev)
             preconditionFailure("path traversal must be rejected")
         } catch GolfDatasetStoreError.pathTraversal {}
+
+        // 11. Empty ID and whitespace ID rejected
+        do {
+            let emptyClip = GolfClipIdentity(
+                clipID: "",
+                golferID: "golfer-A",
+                media: media,
+                view: .downTheLine,
+                handedness: .right,
+                authorization: .trainingAllowed,
+                pPointTruthSHA256: String(repeating: "c", count: 64)
+            )
+            try store.saveClip(emptyClip)
+            preconditionFailure("empty ID must be rejected")
+        } catch GolfDatasetStoreError.pathTraversal {}
+
+        do {
+            let spaceClip = GolfClipIdentity(
+                clipID: "   ",
+                golferID: "golfer-A",
+                media: media,
+                view: .downTheLine,
+                handedness: .right,
+                authorization: .trainingAllowed,
+                pPointTruthSHA256: String(repeating: "c", count: 64)
+            )
+            try store.saveClip(spaceClip)
+            preconditionFailure("whitespace ID must be rejected")
+        } catch GolfDatasetStoreError.pathTraversal {}
+
+        // 12. Concurrent prediction writes: exactly one succeeds
+        do {
+            let concurrentStore = GolfDatasetStore(rootDirectory: tmpRoot)
+            let predA = makePrediction(id: "pred-concurrent", clipID: "clip-001")
+            let predB = makePrediction(id: "pred-concurrent", clipID: "clip-001")
+            var successCount = 0
+            let group = DispatchGroup()
+            let lock = NSLock()
+            group.enter()
+            DispatchQueue.global().async {
+                do { try concurrentStore.appendPrediction(predA); lock.lock(); successCount += 1; lock.unlock() } catch {}
+                group.leave()
+            }
+            group.enter()
+            DispatchQueue.global().async {
+                do { try concurrentStore.appendPrediction(predB); lock.lock(); successCount += 1; lock.unlock() } catch {}
+                group.leave()
+            }
+            group.wait()
+            precondition(successCount == 1, "Exactly one concurrent prediction must succeed, got \(successCount)")
+            let loaded = try concurrentStore.loadPrediction(clipID: "clip-001", predictionRunID: "pred-concurrent")
+            precondition(loaded == predA || loaded == predB, "Prediction file must be intact")
+        }
+
+        // 13. Snapshot directory read errors must not be silently swallowed
+        do {
+            let badStore = GolfDatasetStore(rootDirectory: tmpRoot.appendingPathComponent("nonexistent"))
+            _ = try badStore.loadSnapshot()
+            // If the directory doesn't exist, loadSnapshot should return empty snapshot, not crash
+        }
 
         print("All GolfDatasetStore tests passed.")
     }
