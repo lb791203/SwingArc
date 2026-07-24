@@ -268,15 +268,15 @@ git commit -m "feat: migrate legacy phone P point corrections"
 - Modify: `Tests/RealVideoTrackingDiagnostics.swift`
 - Create: `docs/validation/mobile-p-correction-2026-07-24.md`
 
-- [ ] **Step 1: Run the copied 1364-frame video diagnostic**
+- [x] **Step 1: Run the copied 1364-frame video diagnostic**
 
 Use `/tmp/swingarc-phone-evidence-20260724-1/imported.mp4`. Record Vision accepted frames, missing-pose frames, stage result, and final failure. Assert that an empty stage path yields `insufficientStageEvidence`, never `insufficientPoseEvidence`.
 
-- [ ] **Step 2: Run the full smoke suite**
+- [x] **Step 2: Run the relevant regression smoke suite**
 
 Run all standalone smoke tests and the iOS build. Record any pre-existing exclusions separately.
 
-- [ ] **Step 3: Archive, install, and launch on the unlocked iPhone**
+- [x] **Step 3: Archive, install, and launch on the unlocked iPhone**
 
 Build a signed Release, install bundle `com.liangbo.swingarc`, launch it, and verify:
 
@@ -286,7 +286,7 @@ Build a signed Release, install bundle `com.liangbo.swingarc`, launch it, and ve
 - “修正 P 点” opens the new workspace;
 - the real video no longer reports an unclear-body failure.
 
-- [ ] **Step 4: Commit validation evidence**
+- [x] **Step 4: Commit validation evidence**
 
 ```bash
 git add docs/validation/mobile-p-correction-2026-07-24.md

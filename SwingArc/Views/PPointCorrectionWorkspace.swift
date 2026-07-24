@@ -14,36 +14,19 @@ struct PPointCorrectionWorkspace: View {
     @State private var preparationError: String?
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if let state = correctionState {
-                    correctionContent(state)
-                } else {
-                    preparationView
-                }
+        Group {
+            if let state = correctionState {
+                correctionContent(state)
+            } else {
+                preparationView
             }
-            .background(AnalysisTheme.proTourBackground.ignoresSafeArea())
-            .foregroundStyle(AnalysisTheme.proTourPrimaryText)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭", action: onClose)
-                        .accessibilityLabel("关闭 P 点修正")
-                }
-                ToolbarItem(placement: .principal) {
-                    VStack(spacing: 1) {
-                        Text("P 点修正")
-                            .font(.headline)
-                        Text("当前视频")
-                            .font(.caption2)
-                            .foregroundStyle(AnalysisTheme.proTourSecondaryText)
-                    }
-                }
-            }
-            .toolbarBackground(
-                AnalysisTheme.proTourBackground,
-                for: .navigationBar
-            )
-            .toolbarColorScheme(.dark, for: .navigationBar)
+        }
+        .background(AnalysisTheme.proTourBackground.ignoresSafeArea())
+        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+        .ignoresSafeArea()
+        .overlay(alignment: .top) {
+            topChrome
+                .safeAreaPadding(.top, 4)
         }
         .task(id: videoURL) {
             await prepare()
@@ -60,6 +43,51 @@ struct PPointCorrectionWorkspace: View {
             Text(preparationError ?? "")
         }
         .preferredColorScheme(.dark)
+    }
+
+    private var topChrome: some View {
+        VStack(spacing: 2) {
+            HStack {
+                Button("关闭", action: onClose)
+                    .font(.system(size: 15, weight: .semibold))
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 38)
+                    .background(
+                        .black.opacity(0.30),
+                        in: Capsule()
+                    )
+                    .accessibilityLabel("关闭 P 点修正")
+
+                Spacer()
+
+                VStack(spacing: 0) {
+                    Text("P 点修正")
+                        .font(.system(size: 17, weight: .bold))
+                    Text("当前视频")
+                        .font(.caption2)
+                        .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+                }
+
+                Spacer()
+
+                Color.clear
+                    .frame(width: 54, height: 38)
+            }
+            .padding(.horizontal, 12)
+
+            if let state = correctionState {
+                stageSelector(state)
+            }
+        }
+        .padding(.bottom, 8)
+        .background(
+            LinearGradient(
+                colors: [.black.opacity(0.54), .black.opacity(0.18), .clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .padding(.bottom, -18)
+        )
     }
 
     private var preparationView: some View {
@@ -98,31 +126,10 @@ struct PPointCorrectionWorkspace: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityLabel("当前 P 点源帧")
-        .overlay(alignment: .top) {
-            stageSelector(state)
-                .padding(.vertical, 10)
-                .background(
-                    LinearGradient(
-                        colors: [.black.opacity(0.78), .black.opacity(0.30), .clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .padding(.bottom, -24)
-                )
-        }
         .overlay(alignment: .bottom) {
             correctionControls(state)
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 14)
-                .background(
-                    LinearGradient(
-                        colors: [.clear, .black.opacity(0.64), .black.opacity(0.92)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .padding(.top, -34)
-                )
+                .padding(.horizontal, 12)
+                .safeAreaPadding(.bottom, 24)
         }
     }
 
@@ -149,9 +156,13 @@ struct PPointCorrectionWorkspace: View {
                         )
                         .background(
                             state.selectedCode == code
-                                ? AnalysisTheme.proTourSignal
-                                : AnalysisTheme.proTourSurface,
+                                ? AnalysisTheme.proTourSignal.opacity(0.86)
+                                : .black.opacity(0.28),
                             in: RoundedRectangle(cornerRadius: 11)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 11)
+                                .stroke(.white.opacity(0.16), lineWidth: 1)
                         )
                     }
                     .buttonStyle(.plain)
@@ -165,7 +176,7 @@ struct PPointCorrectionWorkspace: View {
     }
 
     private func correctionControls(_ state: PPointCorrectionState) -> some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             HStack {
                 Text(
                     "帧 \(state.currentSourceFrameIndex + 1) / " +
@@ -185,6 +196,7 @@ struct PPointCorrectionWorkspace: View {
                 .foregroundStyle(statusColor(selection.source))
             }
             .font(.caption)
+            .shadow(color: .black.opacity(0.9), radius: 3)
 
             HStack(spacing: 9) {
                 stepButton(-5, title: "−5")
@@ -197,23 +209,20 @@ struct PPointCorrectionWorkspace: View {
                 saveSelectedStage()
             } label: {
                 Text("设为 \(state.selectedCode.rawValue)")
-                    .font(.system(size: 17, weight: .bold))
-                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .font(.system(size: 16, weight: .bold))
+                    .frame(maxWidth: .infinity, minHeight: 46)
                     .foregroundStyle(AnalysisTheme.proTourBackground)
                     .background(
-                        AnalysisTheme.proTourSignal,
-                        in: RoundedRectangle(cornerRadius: 15)
+                        AnalysisTheme.proTourSignal.opacity(0.84),
+                        in: RoundedRectangle(cornerRadius: 13)
                     )
             }
             .buttonStyle(.plain)
             .disabled(frameController.currentFrame == nil)
-            .accessibilityLabel("将当前帧设为 \(state.selectedCode.rawValue)")
+            .accessibilityLabel(
+                "将当前帧设为 \(state.selectedCode.rawValue)"
+            )
         }
-        .padding(10)
-        .background(
-            .ultraThinMaterial,
-            in: RoundedRectangle(cornerRadius: 18)
-        )
     }
 
     private func stepButton(_ amount: Int, title: String) -> some View {
@@ -222,10 +231,14 @@ struct PPointCorrectionWorkspace: View {
         } label: {
             Text(title)
                 .font(.system(size: 18, weight: .bold, design: .monospaced))
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .frame(maxWidth: .infinity, minHeight: 42)
                 .background(
-                    AnalysisTheme.proTourSurface,
+                    .black.opacity(0.28),
                     in: RoundedRectangle(cornerRadius: 12)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(.white.opacity(0.18), lineWidth: 1)
                 )
         }
         .buttonStyle(.plain)

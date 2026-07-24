@@ -14,18 +14,24 @@ struct PPointCorrectionPresentationSmoke {
         for required in [
             "P 点修正",
             "当前视频",
+            ".safeAreaPadding(.top",
             ".overlay(alignment: .top)",
             ".overlay(alignment: .bottom)",
+            ".safeAreaPadding(.bottom, 24)",
             "−5",
             "−1",
             "+1",
             "+5",
+            "minHeight: 42",
+            "minHeight: 46",
             "设为 \\(state.selectedCode.rawValue)"
         ] {
             precondition(source.contains(required), "Missing phone correction control: \(required)")
         }
 
         for forbidden in [
+            "NavigationStack",
+            ".ultraThinMaterial",
             "ScrollView(.vertical",
             "annotator-a",
             "annotator-b",
