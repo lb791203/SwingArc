@@ -15,227 +15,399 @@ public enum GolfDatasetValidationError: Equatable, CustomStringConvertible, Comp
     case duplicateLandmarkDecision(clipID: String, sourceFrameIndex: Int, landmark: GolfLandmark)
     case decisionValidationError(clipID: String, sourceFrameIndex: Int, landmark: GolfLandmark)
     case missingPredictionPoint(clipID: String, sourceFrameIndex: Int, landmark: GolfLandmark)
+    case predictionFrameOutOfRange(clipID: String, sourceFrameIndex: Int)
+    case duplicatePredictionRunID(String)
+    case acceptedPredictionCoordinateMismatch(clipID: String, sourceFrameIndex: Int, landmark: GolfLandmark)
+    case duplicatePredictionFrame(clipID: String, sourceFrameIndex: Int)
+    case predictionClipMismatch(clipID: String, predictionRunID: String)
+    case duplicateRevisionFrame(clipID: String, sourceFrameIndex: Int)
+    case revisionValidationError(String)
 
     public var description: String {
         switch self {
-        case .duplicateClipID(let id): return "Duplicate clip ID: \(id)"
-        case .golferNotInRegistry(let id): return "Golfer '\(id)' not in registry"
-        case .golferSplitConflict(let golferID, let reg, let clip):
-            return "Golfer '\(golferID)' split conflict: registry=\(reg.rawValue) clip=\(clip.rawValue)"
-        case .trainingNotAuthorized(let id): return "Clip '\(id)' requires training-allowed authorization"
-        case .missingClip(let id): return "Missing clip: \(id)"
-        case .missingPredictionRun(let id): return "Missing prediction run: \(id)"
-        case .mediaHashMismatch(let id): return "Media hash mismatch for clip: \(id)"
-        case .timelineHashMismatch(let id): return "Timeline hash mismatch for clip: \(id)"
-        case .revisionNotCompleted(let id): return "Revision not completed: \(id)"
-        case .frameOutOfRange(let clipID, let idx):
-            return "Frame \(idx) out of range in clip \(clipID)"
-        case .incompleteFrameDecisions(let clipID, let idx):
-            return "Incomplete decisions for frame \(idx) in clip \(clipID)"
-        case .duplicateLandmarkDecision(let clipID, let idx, let lm):
-            return "Duplicate \(lm.rawValue) decision at frame \(idx) in clip \(clipID)"
-        case .decisionValidationError(let clipID, let idx, let lm):
-            return "Invalid decision for \(lm.rawValue) at frame \(idx) in clip \(clipID)"
-        case .missingPredictionPoint(let clipID, let idx, let lm):
-            return "Missing prediction point for \(lm.rawValue) at frame \(idx) in clip \(clipID)"
+        case .duplicateClipID(let id):
+            return "Duplicate clip ID: \(id)"
+        case .golferNotInRegistry(let id):
+            return "Golfer '\(id)' not in registry"
+        case .golferSplitConflict(let golferID, let registry, let requested):
+            return "Golfer '\(golferID)' split conflict: registry=\(registry.rawValue) requested=\(requested.rawValue)"
+        case .trainingNotAuthorized(let id):
+            return "Clip '\(id)' requires training-allowed authorization"
+        case .missingClip(let id):
+            return "Missing clip: \(id)"
+        case .missingPredictionRun(let id):
+            return "Missing prediction run: \(id)"
+        case .mediaHashMismatch(let id):
+            return "Media hash mismatch for clip: \(id)"
+        case .timelineHashMismatch(let id):
+            return "Timeline hash mismatch for clip: \(id)"
+        case .revisionNotCompleted(let id):
+            return "Revision not completed: \(id)"
+        case .frameOutOfRange(let clipID, let index):
+            return "Frame \(index) out of range in clip \(clipID)"
+        case .incompleteFrameDecisions(let clipID, let index):
+            return "Incomplete decisions for frame \(index) in clip \(clipID)"
+        case .duplicateLandmarkDecision(let clipID, let index, let landmark):
+            return "Duplicate \(landmark.rawValue) decision at frame \(index) in clip \(clipID)"
+        case .decisionValidationError(let clipID, let index, let landmark):
+            return "Invalid decision for \(landmark.rawValue) at frame \(index) in clip \(clipID)"
+        case .missingPredictionPoint(let clipID, let index, let landmark):
+            return "Missing prediction point for \(landmark.rawValue) at frame \(index) in clip \(clipID)"
+        case .predictionFrameOutOfRange(let clipID, let index):
+            return "Prediction frame \(index) out of range in clip \(clipID)"
+        case .duplicatePredictionRunID(let id):
+            return "Duplicate prediction run ID: \(id)"
+        case .acceptedPredictionCoordinateMismatch(let clipID, let index, let landmark):
+            return "Accepted prediction coordinate mismatch for \(landmark.rawValue) at frame \(index) in clip \(clipID)"
+        case .duplicatePredictionFrame(let clipID, let index):
+            return "Duplicate prediction frame \(index) in clip \(clipID)"
+        case .predictionClipMismatch(let clipID, let predictionRunID):
+            return "Prediction run \(predictionRunID) does not belong to clip \(clipID)"
+        case .duplicateRevisionFrame(let clipID, let index):
+            return "Duplicate revision frame \(index) in clip \(clipID)"
+        case .revisionValidationError(let revisionID):
+            return "Invalid revision metadata: \(revisionID)"
         }
     }
 
-    public static func < (lhs: GolfDatasetValidationError, rhs: GolfDatasetValidationError) -> Bool {
-        let lhsKey = sortKey(lhs)
-        let rhsKey = sortKey(rhs)
-        return lhsKey < rhsKey
+    public static func < (
+        lhs: GolfDatasetValidationError,
+        rhs: GolfDatasetValidationError
+    ) -> Bool {
+        let left = lhs.sortComponents
+        let right = rhs.sortComponents
+        if left.scope != right.scope { return left.scope < right.scope }
+        if left.frameIndex != right.frameIndex { return left.frameIndex < right.frameIndex }
+        if left.enumOrder != right.enumOrder { return left.enumOrder < right.enumOrder }
+        return left.detail < right.detail
     }
 
-    private static func sortKey(_ e: GolfDatasetValidationError) -> (String, Int, Int) {
-        switch e {
-        case .duplicateClipID(let id): return (id, -2, 0)
-        case .golferNotInRegistry(let id): return (id, -1, 0)
-        case .golferSplitConflict(_, _, _): return ("", 0, 0)
-        case .trainingNotAuthorized(let id): return (id, 1, 0)
-        case .missingClip(let id): return (id, 2, 0)
-        case .missingPredictionRun(let id): return (id, 3, 0)
-        case .mediaHashMismatch(let id): return (id, 4, 0)
-        case .timelineHashMismatch(let id): return (id, 5, 0)
-        case .revisionNotCompleted(let id): return (id, 6, 0)
-        case .frameOutOfRange(let clipID, let idx): return (clipID, 10, idx)
-        case .incompleteFrameDecisions(let clipID, let idx): return (clipID, 11, idx)
-        case .duplicateLandmarkDecision(let clipID, let idx, _): return (clipID, 12, idx)
-        case .decisionValidationError(let clipID, let idx, _): return (clipID, 13, idx)
-        case .missingPredictionPoint(let clipID, let idx, _): return (clipID, 14, idx)
+    fileprivate var sortComponents: (
+        scope: String,
+        frameIndex: Int,
+        enumOrder: Int,
+        detail: String
+    ) {
+        let noFrame = Int.min
+        switch self {
+        case .duplicateClipID(let id):
+            return (id, noFrame, 0, description)
+        case .golferNotInRegistry(let id):
+            return (id, noFrame, 1, description)
+        case .golferSplitConflict(let golferID, _, _):
+            return (golferID, noFrame, 2, description)
+        case .trainingNotAuthorized(let id):
+            return (id, noFrame, 3, description)
+        case .missingClip(let id):
+            return (id, noFrame, 4, description)
+        case .missingPredictionRun(let id):
+            return (id, noFrame, 5, description)
+        case .duplicatePredictionRunID(let id):
+            return (id, noFrame, 6, description)
+        case .mediaHashMismatch(let id):
+            return (id, noFrame, 7, description)
+        case .timelineHashMismatch(let id):
+            return (id, noFrame, 8, description)
+        case .revisionNotCompleted(let id):
+            return (id, noFrame, 9, description)
+        case .revisionValidationError(let id):
+            return (id, noFrame, 10, description)
+        case .predictionClipMismatch(let clipID, _):
+            return (clipID, noFrame, 11, description)
+        case .predictionFrameOutOfRange(let clipID, let index):
+            return (clipID, index, 12, description)
+        case .frameOutOfRange(let clipID, let index):
+            return (clipID, index, 13, description)
+        case .duplicatePredictionFrame(let clipID, let index):
+            return (clipID, index, 14, description)
+        case .duplicateRevisionFrame(let clipID, let index):
+            return (clipID, index, 15, description)
+        case .incompleteFrameDecisions(let clipID, let index):
+            return (clipID, index, 16, description)
+        case .duplicateLandmarkDecision(let clipID, let index, _):
+            return (clipID, index, 17, description)
+        case .decisionValidationError(let clipID, let index, _):
+            return (clipID, index, 18, description)
+        case .missingPredictionPoint(let clipID, let index, _):
+            return (clipID, index, 19, description)
+        case .acceptedPredictionCoordinateMismatch(let clipID, let index, _):
+            return (clipID, index, 20, description)
         }
     }
 }
 
 public enum GolfDatasetValidator {
-    public static func validate(snapshot: GolfDatasetSnapshot) -> [GolfDatasetValidationError] {
+    public static func validate(
+        snapshot: GolfDatasetSnapshot
+    ) -> [GolfDatasetValidationError] {
         var errors: [GolfDatasetValidationError] = []
 
-        // 1. Duplicate clip IDs
-        var seenClips: [String: Int] = [:]
-        for clip in snapshot.clips {
-            seenClips[clip.clipID, default: 0] += 1
-        }
-        for (clipID, count) in seenClips where count > 1 {
+        let clipGroups = Dictionary(grouping: snapshot.clips, by: \GolfClipIdentity.clipID)
+        for clipID in clipGroups.keys.sorted() where (clipGroups[clipID]?.count ?? 0) > 1 {
             errors.append(.duplicateClipID(clipID))
         }
 
-        // 2. Golfer in registry
-        for clip in snapshot.clips {
-            if let registry = snapshot.registry {
-                if !registry.golfers.contains(where: { $0.golferID == clip.golferID }) {
-                    errors.append(.golferNotInRegistry(clip.golferID))
+        let registryRecords = snapshot.registry?.golfers ?? []
+        let registryGroups = Dictionary(grouping: registryRecords, by: \GolferRecord.golferID)
+        if snapshot.registry == nil {
+            for golferID in Set(snapshot.clips.map(\GolfClipIdentity.golferID)).sorted() {
+                errors.append(.golferNotInRegistry(golferID))
+            }
+        } else {
+            for golferID in registryGroups.keys.sorted() {
+                let records = registryGroups[golferID] ?? []
+                let splits = GolfDatasetSplit.allCases.filter { split in
+                    records.contains(where: { $0.split == split })
+                }
+                if let locked = splits.first {
+                    for conflicting in splits.dropFirst() {
+                        errors.append(.golferSplitConflict(
+                            golferID: golferID,
+                            registry: locked,
+                            clip: conflicting
+                        ))
+                    }
+                }
+            }
+            for clip in snapshot.clips where registryGroups[clip.golferID] == nil {
+                errors.append(.golferNotInRegistry(clip.golferID))
+            }
+        }
+
+        for clip in snapshot.clips where clip.authorization != .trainingAllowed {
+            errors.append(.trainingNotAuthorized(clip.clipID))
+        }
+
+        var clipsByID: [String: GolfClipIdentity] = [:]
+        for clip in snapshot.clips where clipsByID[clip.clipID] == nil {
+            clipsByID[clip.clipID] = clip
+        }
+
+        let predictionGroups = Dictionary(
+            grouping: snapshot.predictions,
+            by: \GolfPredictionRun.predictionRunID
+        )
+        for predictionRunID in predictionGroups.keys.sorted()
+        where (predictionGroups[predictionRunID]?.count ?? 0) > 1 {
+            errors.append(.duplicatePredictionRunID(predictionRunID))
+        }
+
+        var predictionsByID: [String: GolfPredictionRun] = [:]
+        for prediction in snapshot.predictions
+        where predictionsByID[prediction.predictionRunID] == nil {
+            predictionsByID[prediction.predictionRunID] = prediction
+        }
+
+        for prediction in snapshot.predictions {
+            guard let clip = clipsByID[prediction.clipID] else {
+                errors.append(.missingClip(prediction.clipID))
+                continue
+            }
+            if prediction.mediaSHA256 != clip.media.sha256 {
+                errors.append(.mediaHashMismatch(prediction.clipID))
+            }
+            if prediction.timelineSHA256 != clip.media.timelineSHA256 {
+                errors.append(.timelineHashMismatch(prediction.clipID))
+            }
+
+            let frameGroups = Dictionary(
+                grouping: prediction.frames,
+                by: \GolfPredictionFrame.sourceFrameIndex
+            )
+            for frameIndex in frameGroups.keys.sorted() {
+                if (frameGroups[frameIndex]?.count ?? 0) > 1 {
+                    errors.append(.duplicatePredictionFrame(
+                        clipID: prediction.clipID,
+                        sourceFrameIndex: frameIndex
+                    ))
+                }
+                if frameIndex < 0 || frameIndex >= clip.media.frameCount {
+                    errors.append(.predictionFrameOutOfRange(
+                        clipID: prediction.clipID,
+                        sourceFrameIndex: frameIndex
+                    ))
                 }
             }
         }
 
-        // 3. Golfer split conflicts: all clips for a golfer must agree with registry split
-        if let registry = snapshot.registry {
-            for clip in snapshot.clips {
-                if let regSplit = registry.split(for: clip.golferID) {
-                    // Infer clip split from authorization
-                    let clipSplit: GolfDatasetSplit = clip.authorization == .trainingAllowed ? .training : .validation
-                    if regSplit != clipSplit {
-                        errors.append(.golferSplitConflict(
-                            golferID: clip.golferID,
-                            registry: regSplit,
-                            clip: clipSplit
+        for revision in snapshot.revisions {
+            if revision.completedAt == nil {
+                errors.append(.revisionNotCompleted(revision.revisionID))
+            }
+            if revision.annotatorID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                errors.append(.revisionValidationError(revision.revisionID))
+            }
+
+            let clip = clipsByID[revision.clipID]
+            if clip == nil {
+                errors.append(.missingClip(revision.clipID))
+            }
+
+            let parentPrediction = predictionsByID[revision.parentPredictionRunID]
+            if parentPrediction == nil {
+                errors.append(.missingPredictionRun(revision.parentPredictionRunID))
+            } else if parentPrediction?.clipID != revision.clipID {
+                errors.append(.predictionClipMismatch(
+                    clipID: revision.clipID,
+                    predictionRunID: revision.parentPredictionRunID
+                ))
+            }
+
+            let revisionFrameGroups = Dictionary(
+                grouping: revision.frameRevisions,
+                by: \GolfFrameRevision.sourceFrameIndex
+            )
+            for frameIndex in revisionFrameGroups.keys.sorted()
+            where (revisionFrameGroups[frameIndex]?.count ?? 0) > 1 {
+                errors.append(.duplicateRevisionFrame(
+                    clipID: revision.clipID,
+                    sourceFrameIndex: frameIndex
+                ))
+            }
+
+            for frameRevision in revision.frameRevisions {
+                let frameIndex = frameRevision.sourceFrameIndex
+                if let clip, frameIndex < 0 || frameIndex >= clip.media.frameCount {
+                    errors.append(.frameOutOfRange(
+                        clipID: revision.clipID,
+                        sourceFrameIndex: frameIndex
+                    ))
+                }
+
+                let decisionGroups = Dictionary(
+                    grouping: frameRevision.decisions,
+                    by: \GolfAnnotationDecision.landmark
+                )
+                if GolfLandmark.allCases.contains(where: {
+                    (decisionGroups[$0]?.count ?? 0) == 0
+                }) {
+                    errors.append(.incompleteFrameDecisions(
+                        clipID: revision.clipID,
+                        sourceFrameIndex: frameIndex
+                    ))
+                }
+                for landmark in GolfLandmark.allCases
+                where (decisionGroups[landmark]?.count ?? 0) > 1 {
+                    errors.append(.duplicateLandmarkDecision(
+                        clipID: revision.clipID,
+                        sourceFrameIndex: frameIndex,
+                        landmark: landmark
+                    ))
+                }
+
+                for decision in frameRevision.decisions {
+                    do {
+                        _ = try decision.validated()
+                    } catch {
+                        errors.append(.decisionValidationError(
+                            clipID: revision.clipID,
+                            sourceFrameIndex: frameIndex,
+                            landmark: decision.landmark
+                        ))
+                    }
+
+                    guard decision.kind == .acceptedPrediction,
+                          let parentPrediction,
+                          parentPrediction.clipID == revision.clipID else {
+                        continue
+                    }
+                    let matchingFrames = parentPrediction.frames.filter {
+                        $0.sourceFrameIndex == frameIndex
+                    }
+                    guard matchingFrames.count == 1,
+                          let predictionPoint = matchingFrames[0].points[decision.landmark],
+                          predictionPoint.resolvedFullFramePoint != nil else {
+                        errors.append(.missingPredictionPoint(
+                            clipID: revision.clipID,
+                            sourceFrameIndex: frameIndex,
+                            landmark: decision.landmark
+                        ))
+                        continue
+                    }
+                    do {
+                        _ = try decision.resolvedLandmark(prediction: predictionPoint)
+                    } catch GolfAnnotationContractError.acceptedPredictionCoordinateMismatch {
+                        errors.append(.acceptedPredictionCoordinateMismatch(
+                            clipID: revision.clipID,
+                            sourceFrameIndex: frameIndex,
+                            landmark: decision.landmark
+                        ))
+                    } catch {
+                        errors.append(.decisionValidationError(
+                            clipID: revision.clipID,
+                            sourceFrameIndex: frameIndex,
+                            landmark: decision.landmark
                         ))
                     }
                 }
             }
         }
 
-        // 4. Cross-clip consistency: all clips for same golfer must have same inferred split
-        var golferClipSplits: [String: (split: GolfDatasetSplit, clipID: String)] = [:]
-        for clip in snapshot.clips {
-            let clipSplit: GolfDatasetSplit = clip.authorization == .trainingAllowed ? .training : .validation
-            if let existing = golferClipSplits[clip.golferID] {
-                if existing.split != clipSplit {
-                    errors.append(.golferSplitConflict(
-                        golferID: clip.golferID,
-                        registry: existing.split,
-                        clip: clipSplit
-                    ))
-                }
-            } else {
-                golferClipSplits[clip.golferID] = (clipSplit, clip.clipID)
+        return errors.sorted { lhs, rhs in
+            let leftContext = sortContext(for: lhs, snapshot: snapshot)
+            let rightContext = sortContext(for: rhs, snapshot: snapshot)
+            if leftContext.clipID != rightContext.clipID {
+                return leftContext.clipID < rightContext.clipID
             }
+            if leftContext.frameIndex != rightContext.frameIndex {
+                return leftContext.frameIndex < rightContext.frameIndex
+            }
+            if lhs.sortComponents.enumOrder != rhs.sortComponents.enumOrder {
+                return lhs.sortComponents.enumOrder < rhs.sortComponents.enumOrder
+            }
+            return lhs.sortComponents.detail < rhs.sortComponents.detail
         }
-
-        // 5. Authorization check
-        for clip in snapshot.clips {
-            if clip.authorization != .trainingAllowed {
-                errors.append(.trainingNotAuthorized(clip.clipID))
-            }
-        }
-
-        // Build lookups
-        var clipDict: [String: GolfClipIdentity] = [:]
-        for clip in snapshot.clips {
-            clipDict[clip.clipID] = clip
-        }
-        let predDict = Dictionary(uniqueKeysWithValues: snapshot.predictions.map { ($0.predictionRunID, $0) })
-
-        // 6-8. Prediction checks
-        for pred in snapshot.predictions {
-            guard let clip = clipDict[pred.clipID] else {
-                errors.append(.missingClip(pred.clipID))
-                continue
-            }
-            if pred.mediaSHA256 != clip.media.sha256 {
-                errors.append(.mediaHashMismatch(pred.clipID))
-            }
-            if pred.timelineSHA256 != clip.media.timelineSHA256 {
-                errors.append(.timelineHashMismatch(pred.clipID))
-            }
-        }
-
-        // 9-15. Revision checks
-        for rev in snapshot.revisions {
-            guard let clip = clipDict[rev.clipID] else {
-                errors.append(.missingClip(rev.clipID))
-                continue
-            }
-
-            guard rev.completedAt != nil else {
-                errors.append(.revisionNotCompleted(rev.revisionID))
-                continue
-            }
-
-            guard predDict[rev.parentPredictionRunID] != nil else {
-                errors.append(.missingPredictionRun(rev.parentPredictionRunID))
-                continue
-            }
-
-            if let pred = predDict[rev.parentPredictionRunID], pred.clipID != rev.clipID {
-                errors.append(.missingClip(rev.clipID))
-            }
-
-            for frameRev in rev.frameRevisions {
-                let idx = frameRev.sourceFrameIndex
-
-                guard idx >= 0 && idx < clip.media.frameCount else {
-                    errors.append(.frameOutOfRange(clipID: rev.clipID, sourceFrameIndex: idx))
-                    continue
-                }
-
-                var seenLandmarks: [GolfLandmark: Int] = [:]
-                for decision in frameRev.decisions {
-                    seenLandmarks[decision.landmark, default: 0] += 1
-                }
-                for lm in GolfLandmark.allCases {
-                    let count = seenLandmarks[lm] ?? 0
-                    if count == 0 {
-                        errors.append(.incompleteFrameDecisions(clipID: rev.clipID, sourceFrameIndex: idx))
-                    } else if count > 1 {
-                        errors.append(.duplicateLandmarkDecision(clipID: rev.clipID, sourceFrameIndex: idx, landmark: lm))
-                    }
-                }
-
-                for decision in frameRev.decisions {
-                    if let err = validateDecision(decision, clipID: rev.clipID, frameIndex: idx) {
-                        errors.append(err)
-                    }
-                }
-
-                if let pred = predDict[rev.parentPredictionRunID] {
-                    let predFrame = pred.frames.first { $0.sourceFrameIndex == idx }
-                    for decision in frameRev.decisions where decision.kind == .acceptedPrediction {
-                        if predFrame == nil || predFrame!.points[decision.landmark] == nil {
-                            errors.append(.missingPredictionPoint(clipID: rev.clipID, sourceFrameIndex: idx, landmark: decision.landmark))
-                        }
-                    }
-                }
-            }
-        }
-
-        return errors.sorted()
     }
 
-    private static func validateDecision(
-        _ decision: GolfAnnotationDecision,
-        clipID: String,
-        frameIndex: Int
-    ) -> GolfDatasetValidationError? {
-        switch decision.kind {
-        case .acceptedPrediction, .correctedPoint:
-            guard let point = decision.fullFramePoint,
-                  point.x.isFinite, point.y.isFinite,
-                  (0...1).contains(point.x), (0...1).contains(point.y) else {
-                return .decisionValidationError(clipID: clipID, sourceFrameIndex: frameIndex, landmark: decision.landmark)
-            }
-            guard !decision.annotatorID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return .decisionValidationError(clipID: clipID, sourceFrameIndex: frameIndex, landmark: decision.landmark)
-            }
-        case .occluded, .outOfFrame, .unresolved:
-            if decision.fullFramePoint != nil {
-                return .decisionValidationError(clipID: clipID, sourceFrameIndex: frameIndex, landmark: decision.landmark)
-            }
-            guard !decision.annotatorID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return .decisionValidationError(clipID: clipID, sourceFrameIndex: frameIndex, landmark: decision.landmark)
-            }
+    private static func sortContext(
+        for error: GolfDatasetValidationError,
+        snapshot: GolfDatasetSnapshot
+    ) -> (clipID: String, frameIndex: Int) {
+        let noFrame = Int.min
+        switch error {
+        case .duplicateClipID(let clipID),
+             .trainingNotAuthorized(let clipID),
+             .missingClip(let clipID),
+             .mediaHashMismatch(let clipID),
+             .timelineHashMismatch(let clipID):
+            return (clipID, noFrame)
+        case .golferNotInRegistry(let golferID),
+             .golferSplitConflict(let golferID, _, _):
+            let clipID = snapshot.clips
+                .filter { $0.golferID == golferID }
+                .map(\GolfClipIdentity.clipID)
+                .min() ?? golferID
+            return (clipID, noFrame)
+        case .missingPredictionRun(let predictionRunID),
+             .duplicatePredictionRunID(let predictionRunID):
+            let revisionClip = snapshot.revisions
+                .filter { $0.parentPredictionRunID == predictionRunID }
+                .map(\GolfAnnotationRevision.clipID)
+                .min()
+            let predictionClip = snapshot.predictions
+                .filter { $0.predictionRunID == predictionRunID }
+                .map(\GolfPredictionRun.clipID)
+                .min()
+            return (revisionClip ?? predictionClip ?? predictionRunID, noFrame)
+        case .revisionNotCompleted(let revisionID),
+             .revisionValidationError(let revisionID):
+            let clipID = snapshot.revisions
+                .first(where: { $0.revisionID == revisionID })?.clipID
+                ?? revisionID
+            return (clipID, noFrame)
+        case .predictionClipMismatch(let clipID, _):
+            return (clipID, noFrame)
+        case .frameOutOfRange(let clipID, let index),
+             .incompleteFrameDecisions(let clipID, let index),
+             .predictionFrameOutOfRange(let clipID, let index),
+             .duplicatePredictionFrame(let clipID, let index),
+             .duplicateRevisionFrame(let clipID, let index):
+            return (clipID, index)
+        case .duplicateLandmarkDecision(let clipID, let index, _),
+             .decisionValidationError(let clipID, let index, _),
+             .missingPredictionPoint(let clipID, let index, _),
+             .acceptedPredictionCoordinateMismatch(let clipID, let index, _):
+            return (clipID, index)
         }
-        return nil
     }
 }

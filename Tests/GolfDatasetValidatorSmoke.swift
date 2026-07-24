@@ -31,20 +31,32 @@ struct GolfDatasetValidatorSmoke {
             "Must detect duplicate clip ID, got \(dupErrors)"
         )
 
-        // 3. Golfer split conflict: clip says trainingAllowed but registry says validation
+        // 3. Golfer split conflict: registry says validation, clip says internalReview
+        // Split is golfer-level (owned by registry), authorization is independent.
+        // The validator checks that each clip's golfer is in the registry with a consistent split.
+        // Here we verify that a clip with authorization=internalReview triggers trainingNotAuthorized.
         let registryVal = GolferRegistry(datasetID: "test-ds", golfers: [
             GolferRecord(golferID: "golfer-A", split: .validation, splitLockedAt: Date(timeIntervalSince1970: 1_721_808_000))
         ])
+        let validationInternalReviewClip = GolfClipIdentity(
+            clipID: "clip-noauth-2",
+            golferID: "golfer-A",
+            media: makeMedia(),
+            view: .downTheLine,
+            handedness: .right,
+            authorization: .internalReview,
+            pPointTruthSHA256: String(repeating: "c", count: 64)
+        )
         let splitSnap = GolfDatasetSnapshot(
             registry: registryVal,
-            clips: [clip],
+            clips: [validationInternalReviewClip],
             predictions: [],
             revisions: []
         )
         let splitErrors = GolfDatasetValidator.validate(snapshot: splitSnap)
         precondition(
-            splitErrors.contains(.golferSplitConflict(golferID: "golfer-A", registry: .validation, clip: .training)),
-            "Must detect split conflict, got \(splitErrors)"
+            splitErrors.contains(.trainingNotAuthorized("clip-noauth-2")),
+            "Must detect unauthorized clip, got \(splitErrors)"
         )
 
         // 4. Training not authorized
@@ -391,6 +403,374 @@ struct GolfDatasetValidatorSmoke {
         precondition(
             orphanErrors.contains(.golferNotInRegistry("golfer-NONE")),
             "Must detect golfer not in registry, got \(orphanErrors)"
+        )
+
+        // 17. Duplicate prediction run ID
+        let dupPredSnap = GolfDatasetSnapshot(
+            registry: registry,
+            clips: [clip],
+            predictions: [prediction, prediction],
+            revisions: []
+        )
+        let dupPredErrors = GolfDatasetValidator.validate(snapshot: dupPredSnap)
+        precondition(
+            dupPredErrors.contains(.duplicatePredictionRunID("pred-1")),
+            "Must detect duplicate prediction run ID, got \(dupPredErrors)"
+        )
+
+        // 18. Prediction frame out of range
+        let oorPred = GolfPredictionRun(
+            predictionRunID: "pred-oor",
+            clipID: "clip-001",
+            mediaSHA256: String(repeating: "a", count: 64),
+            timelineSHA256: String(repeating: "b", count: 64),
+            visionFrameworkVersion: "1.0",
+            visionRequestVersion: "v1",
+            roiAlgorithmVersion: "roi-v1",
+            roiConfigSHA256: String(repeating: "r", count: 64),
+            modelSHA256: String(repeating: "m", count: 64),
+            decoderVersion: "dec-v1",
+            trackerVersion: "trk-v1",
+            createdAt: Date(timeIntervalSince1970: 1000),
+            frames: [
+                GolfPredictionFrame(
+                    sourceFrameIndex: 999,
+                    sourceTime: 33.3,
+                    roiTransform: GolfROIAffineTransform(
+                        a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0,
+                        invA: 1, invB: 0, invC: 0, invD: 1, invTx: 0, invTy: 0
+                    ),
+                    points: [:]
+                )
+            ],
+            provenanceHash: String(repeating: "p", count: 64)
+        )
+        let oorPredSnap = GolfDatasetSnapshot(
+            registry: registry,
+            clips: [clip],
+            predictions: [oorPred],
+            revisions: []
+        )
+        let oorPredErrors = GolfDatasetValidator.validate(snapshot: oorPredSnap)
+        precondition(
+            oorPredErrors.contains(.predictionFrameOutOfRange(clipID: "clip-001", sourceFrameIndex: 999)),
+            "Must detect prediction frame out of range, got \(oorPredErrors)"
+        )
+
+        // 19. acceptedPrediction coordinate mismatch
+        // Decision says (0.1, 0.1) but prediction resolves to (0.5, 0.5)
+        let mismatchPred = GolfPredictionRun(
+            predictionRunID: "pred-mismatch",
+            clipID: "clip-001",
+            mediaSHA256: String(repeating: "a", count: 64),
+            timelineSHA256: String(repeating: "b", count: 64),
+            visionFrameworkVersion: "1.0",
+            visionRequestVersion: "v1",
+            roiAlgorithmVersion: "roi-v1",
+            roiConfigSHA256: String(repeating: "r", count: 64),
+            modelSHA256: String(repeating: "m", count: 64),
+            decoderVersion: "dec-v1",
+            trackerVersion: "trk-v1",
+            createdAt: Date(timeIntervalSince1970: 1000),
+            frames: [
+                GolfPredictionFrame(
+                    sourceFrameIndex: 10,
+                    sourceTime: 0.333,
+                    roiTransform: GolfROIAffineTransform(
+                        a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0,
+                        invA: 1, invB: 0, invC: 0, invD: 1, invTx: 0, invTy: 0
+                    ),
+                    points: [
+                        .grip: GolfPredictionPoint(
+                            roiX: 0.5, roiY: 0.5,
+                            heatmapConfidence: 0.9, heatmapDispersion: 0.04,
+                            visibilityProbabilities: [0.9, 0.08, 0.02],
+                            preTrackingFullFramePoint: GolfNormalizedPoint(x: 0.5, y: 0.5)
+                        ),
+                        .shaftStart: GolfPredictionPoint(roiX: 0.5, roiY: 0.55, heatmapConfidence: 0.85, heatmapDispersion: 0.05, visibilityProbabilities: [0.85, 0.1, 0.05]),
+                        .shaftEnd: GolfPredictionPoint(roiX: 0.5, roiY: 0.45, heatmapConfidence: 0.8, heatmapDispersion: 0.06, visibilityProbabilities: [0.8, 0.15, 0.05]),
+                        .clubhead: GolfPredictionPoint(roiX: 0.5, roiY: 0.4, heatmapConfidence: 0.95, heatmapDispersion: 0.02, visibilityProbabilities: [0.95, 0.03, 0.02]),
+                        .ball: GolfPredictionPoint(roiX: 0.52, roiY: 0.7, heatmapConfidence: 0.92, heatmapDispersion: 0.03, visibilityProbabilities: [0.92, 0.05, 0.03]),
+                    ]
+                )
+            ],
+            provenanceHash: String(repeating: "p", count: 64)
+        )
+        let mismatchRev = GolfAnnotationRevision(
+            revisionID: "rev-mismatch",
+            clipID: "clip-001",
+            parentPredictionRunID: "pred-mismatch",
+            annotatorID: "reviewer-1",
+            createdAt: Date(timeIntervalSince1970: 1100),
+            completedAt: Date(timeIntervalSince1970: 1200),
+            frameRevisions: [
+                GolfFrameRevision(sourceFrameIndex: 10, decisions: [
+                    // Decision coordinate (0.1, 0.1) does not match prediction resolved point (0.5, 0.5)
+                    GolfAnnotationDecision(landmark: .grip, kind: .acceptedPrediction, fullFramePoint: GolfNormalizedPoint(x: 0.1, y: 0.1), annotatorID: "reviewer-1", decidedAt: Date()),
+                    makeDecision(landmark: .shaftStart, kind: .correctedPoint),
+                    makeDecision(landmark: .shaftEnd, kind: .correctedPoint),
+                    makeDecision(landmark: .clubhead, kind: .correctedPoint),
+                    makeDecision(landmark: .ball, kind: .correctedPoint),
+                ])
+            ],
+            notes: nil
+        )
+        let mismatchSnap = GolfDatasetSnapshot(
+            registry: registry,
+            clips: [clip],
+            predictions: [mismatchPred],
+            revisions: [mismatchRev]
+        )
+        let mismatchErrors = GolfDatasetValidator.validate(snapshot: mismatchSnap)
+        precondition(
+            mismatchErrors.contains(.acceptedPredictionCoordinateMismatch(clipID: "clip-001", sourceFrameIndex: 10, landmark: .grip)),
+            "Must detect acceptedPrediction coordinate mismatch, got \(mismatchErrors)"
+        )
+
+        // 20. Missing decisions produce one frame-level error, not one per landmark
+        let missingBallRevision = GolfAnnotationRevision(
+            revisionID: "rev-missing-ball",
+            clipID: "clip-001",
+            parentPredictionRunID: "pred-1",
+            annotatorID: "reviewer-1",
+            createdAt: Date(timeIntervalSince1970: 1100),
+            completedAt: Date(timeIntervalSince1970: 1200),
+            frameRevisions: [
+                GolfFrameRevision(sourceFrameIndex: 542, decisions: [
+                    makeDecision(landmark: .grip, kind: .correctedPoint),
+                    makeDecision(landmark: .shaftStart, kind: .correctedPoint),
+                    makeDecision(landmark: .shaftEnd, kind: .correctedPoint),
+                    makeDecision(landmark: .clubhead, kind: .correctedPoint),
+                ])
+            ],
+            notes: nil
+        )
+        let missingBallErrors = GolfDatasetValidator.validate(snapshot: GolfDatasetSnapshot(
+            registry: registry,
+            clips: [clip],
+            predictions: [prediction],
+            revisions: [missingBallRevision]
+        ))
+        precondition(
+            missingBallErrors.filter {
+                $0 == .incompleteFrameDecisions(clipID: "clip-001", sourceFrameIndex: 542)
+            }.count == 1,
+            "A frame with missing decisions must produce exactly one incomplete-frame error: \(missingBallErrors)"
+        )
+
+        // 21. Public ordering is clipID, frame index, then enum order
+        let ordered = [
+            GolfDatasetValidationError.frameOutOfRange(clipID: "clip-001", sourceFrameIndex: 20),
+            GolfDatasetValidationError.incompleteFrameDecisions(clipID: "clip-001", sourceFrameIndex: 10),
+        ].sorted()
+        precondition(
+            ordered.first == .incompleteFrameDecisions(clipID: "clip-001", sourceFrameIndex: 10),
+            "Frame index must sort before enum order: \(ordered)"
+        )
+
+        // 22. A missing registry never silently validates clips
+        let missingRegistryErrors = GolfDatasetValidator.validate(snapshot: GolfDatasetSnapshot(
+            registry: nil,
+            clips: [clip],
+            predictions: [],
+            revisions: []
+        ))
+        precondition(
+            missingRegistryErrors.contains(.golferNotInRegistry("golfer-A")),
+            "A clip without a golfer registry must fail: \(missingRegistryErrors)"
+        )
+
+        // 23. One golfer recorded in two splits is rejected
+        let conflictingRegistry = GolferRegistry(datasetID: "test-ds", golfers: [
+            GolferRecord(golferID: "golfer-A", split: .training, splitLockedAt: Date(timeIntervalSince1970: 1)),
+            GolferRecord(golferID: "golfer-A", split: .validation, splitLockedAt: Date(timeIntervalSince1970: 2)),
+        ])
+        let registryConflictErrors = GolfDatasetValidator.validate(snapshot: GolfDatasetSnapshot(
+            registry: conflictingRegistry,
+            clips: [clip],
+            predictions: [],
+            revisions: []
+        ))
+        precondition(
+            registryConflictErrors.contains(.golferSplitConflict(
+                golferID: "golfer-A",
+                registry: .training,
+                clip: .validation
+            )),
+            "Conflicting golfer-level splits must fail: \(registryConflictErrors)"
+        )
+
+        // 24. An accepted prediction without a resolved full-frame point is missing evidence
+        let unresolvedPredictionRevision = GolfAnnotationRevision(
+            revisionID: "rev-unresolved-prediction",
+            clipID: "clip-001",
+            parentPredictionRunID: "pred-1",
+            annotatorID: "reviewer-1",
+            createdAt: Date(timeIntervalSince1970: 1100),
+            completedAt: Date(timeIntervalSince1970: 1200),
+            frameRevisions: [
+                GolfFrameRevision(sourceFrameIndex: 10, decisions: [
+                    makeDecision(landmark: .grip, kind: .acceptedPrediction),
+                    makeDecision(landmark: .shaftStart, kind: .correctedPoint),
+                    makeDecision(landmark: .shaftEnd, kind: .correctedPoint),
+                    makeDecision(landmark: .clubhead, kind: .correctedPoint),
+                    makeDecision(landmark: .ball, kind: .correctedPoint),
+                ])
+            ],
+            notes: nil
+        )
+        let unresolvedPredictionErrors = GolfDatasetValidator.validate(snapshot: GolfDatasetSnapshot(
+            registry: registry,
+            clips: [clip],
+            predictions: [prediction],
+            revisions: [unresolvedPredictionRevision]
+        ))
+        precondition(
+            unresolvedPredictionErrors.contains(.missingPredictionPoint(
+                clipID: "clip-001",
+                sourceFrameIndex: 10,
+                landmark: .grip
+            )),
+            "Accepted predictions need resolved full-frame coordinates: \(unresolvedPredictionErrors)"
+        )
+
+        // 25. Duplicate prediction frames never get silently selected with first(where:)
+        let duplicateFramePrediction = GolfPredictionRun(
+            predictionRunID: "pred-duplicate-frame",
+            clipID: "clip-001",
+            mediaSHA256: String(repeating: "a", count: 64),
+            timelineSHA256: String(repeating: "b", count: 64),
+            visionFrameworkVersion: "1.0",
+            visionRequestVersion: "v1",
+            roiAlgorithmVersion: "roi-v1",
+            roiConfigSHA256: String(repeating: "r", count: 64),
+            modelSHA256: String(repeating: "m", count: 64),
+            decoderVersion: "dec-v1",
+            trackerVersion: "trk-v1",
+            createdAt: Date(timeIntervalSince1970: 1000),
+            frames: [prediction.frames[0], prediction.frames[0]],
+            provenanceHash: String(repeating: "p", count: 64)
+        )
+        let duplicatePredictionFrameErrors = GolfDatasetValidator.validate(snapshot: GolfDatasetSnapshot(
+            registry: registry,
+            clips: [clip],
+            predictions: [duplicateFramePrediction],
+            revisions: []
+        ))
+        precondition(
+            duplicatePredictionFrameErrors.contains(.duplicatePredictionFrame(
+                clipID: "clip-001",
+                sourceFrameIndex: 10
+            )),
+            "Duplicate prediction frames must fail: \(duplicatePredictionFrameErrors)"
+        )
+
+        // 26. A revision cannot use a prediction run owned by a different clip
+        let otherClipPrediction = makePrediction(id: "pred-other-clip", clipID: "clip-other")
+        let mismatchedParentRevision = makeRevision(
+            id: "rev-wrong-parent-clip",
+            clipID: "clip-001",
+            predRunID: "pred-other-clip"
+        )
+        let predictionClipMismatchErrors = GolfDatasetValidator.validate(snapshot: GolfDatasetSnapshot(
+            registry: registry,
+            clips: [clip],
+            predictions: [otherClipPrediction],
+            revisions: [mismatchedParentRevision]
+        ))
+        precondition(
+            predictionClipMismatchErrors.contains(.predictionClipMismatch(
+                clipID: "clip-001",
+                predictionRunID: "pred-other-clip"
+            )),
+            "Revision/prediction clip linkage must fail: \(predictionClipMismatchErrors)"
+        )
+
+        // 27. A reviewed source frame appears only once in a revision
+        let duplicateRevisionFrame = GolfAnnotationRevision(
+            revisionID: "rev-duplicate-frame",
+            clipID: "clip-001",
+            parentPredictionRunID: "pred-1",
+            annotatorID: "reviewer-1",
+            createdAt: Date(timeIntervalSince1970: 1100),
+            completedAt: Date(timeIntervalSince1970: 1200),
+            frameRevisions: [
+                makeRevision(id: "unused-a", clipID: "clip-001", predRunID: "pred-1").frameRevisions[0],
+                makeRevision(id: "unused-b", clipID: "clip-001", predRunID: "pred-1").frameRevisions[0],
+            ],
+            notes: nil
+        )
+        let duplicateRevisionFrameErrors = GolfDatasetValidator.validate(snapshot: GolfDatasetSnapshot(
+            registry: registry,
+            clips: [clip],
+            predictions: [prediction],
+            revisions: [duplicateRevisionFrame]
+        ))
+        precondition(
+            duplicateRevisionFrameErrors.contains(.duplicateRevisionFrame(
+                clipID: "clip-001",
+                sourceFrameIndex: 10
+            )),
+            "Duplicate revision frames must fail: \(duplicateRevisionFrameErrors)"
+        )
+
+        // 28. Completed revisions still require valid top-level provenance
+        let invalidRevisionMetadata = GolfAnnotationRevision(
+            revisionID: "rev-invalid-metadata",
+            clipID: "clip-001",
+            parentPredictionRunID: "pred-1",
+            annotatorID: "   ",
+            createdAt: Date(timeIntervalSince1970: 1100),
+            completedAt: Date(timeIntervalSince1970: 1200),
+            frameRevisions: [],
+            notes: nil
+        )
+        let invalidRevisionMetadataErrors = GolfDatasetValidator.validate(snapshot: GolfDatasetSnapshot(
+            registry: registry,
+            clips: [clip],
+            predictions: [prediction],
+            revisions: [invalidRevisionMetadata]
+        ))
+        precondition(
+            invalidRevisionMetadataErrors.contains(.revisionValidationError("rev-invalid-metadata")),
+            "Invalid revision provenance must fail: \(invalidRevisionMetadataErrors)"
+        )
+
+        // 29. Validator ordering uses owning clipID even when the public error stores another ID
+        let clipA = makeClip(clipID: "clip-a", golferID: "golfer-A", auth: .trainingAllowed)
+        let clipB = makeClip(clipID: "clip-b", golferID: "golfer-A", auth: .trainingAllowed)
+        let missingForA = GolfAnnotationRevision(
+            revisionID: "rev-a",
+            clipID: "clip-a",
+            parentPredictionRunID: "z-prediction",
+            annotatorID: "reviewer-1",
+            createdAt: Date(timeIntervalSince1970: 1100),
+            completedAt: Date(timeIntervalSince1970: 1200),
+            frameRevisions: [],
+            notes: nil
+        )
+        let missingForB = GolfAnnotationRevision(
+            revisionID: "rev-b",
+            clipID: "clip-b",
+            parentPredictionRunID: "a-prediction",
+            annotatorID: "reviewer-1",
+            createdAt: Date(timeIntervalSince1970: 1100),
+            completedAt: Date(timeIntervalSince1970: 1200),
+            frameRevisions: [],
+            notes: nil
+        )
+        let owningClipOrder = GolfDatasetValidator.validate(snapshot: GolfDatasetSnapshot(
+            registry: registry,
+            clips: [clipB, clipA],
+            predictions: [],
+            revisions: [missingForB, missingForA]
+        ))
+        precondition(
+            owningClipOrder == [
+                .missingPredictionRun("z-prediction"),
+                .missingPredictionRun("a-prediction"),
+            ],
+            "Owning clipID must sort before referenced prediction ID: \(owningClipOrder)"
         )
 
         print("All GolfDatasetValidator tests passed.")
