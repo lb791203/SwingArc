@@ -559,6 +559,8 @@ struct AnalysisWorkspaceView: View {
             return "视频读取失败，请重新导入"
         case .insufficientPoseEvidence:
             return "未识别到清晰的人体姿势"
+        case .insufficientStageEvidence:
+            return "人体已识别，但未能自动确定完整 P1–P8。你可以手动设置 P 点。"
         case .noStableGolfer:
             return "无法持续锁定主球员"
         case .noSwingMotion:

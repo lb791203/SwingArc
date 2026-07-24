@@ -2868,6 +2868,7 @@ enum AnalysisFailure: Equatable {
     case noVideo
     case invalidDuration
     case insufficientPoseEvidence
+    case insufficientStageEvidence
     case noStableGolfer
     case noSwingMotion
     case ambiguousSwingWindows

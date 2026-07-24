@@ -110,6 +110,8 @@ struct AnalysisFailurePresentation: Equatable {
             return "视频读取失败，请重新导入。"
         case .insufficientPoseEvidence:
             return "未检测到清晰人体。请选择全身入镜、光线充足的视频；手工标注不会被清除。"
+        case .insufficientStageEvidence:
+            return "人体已识别，但未能自动确定完整 P1–P8。你可以手动设置 P 点。"
         case .noStableGolfer:
             return "无法持续锁定主球员。请使用固定机位、全身入镜且避免多人遮挡的视频。"
         case .noSwingMotion:

@@ -1374,7 +1374,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         )
         guard gate.isActive(runID) else { return .cancelled }
         guard !result.detectedMarkers.isEmpty else {
-            return activeFailure(.insufficientPoseEvidence, runID: runID, gate: gate)
+            return activeFailure(.insufficientStageEvidence, runID: runID, gate: gate)
         }
         publish(.solving, progress: 1, runID: runID, gate: gate, handler: progress)
         guard gate.isActive(runID) else { return .cancelled }

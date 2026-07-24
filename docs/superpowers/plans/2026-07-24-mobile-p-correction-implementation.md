@@ -35,7 +35,7 @@
 - Preserve: `AnalysisFailure.insufficientPoseEvidence` only for actual pose scarcity
 - Present: `人体已识别，但未能自动确定完整 P1–P8。你可以手动设置 P 点。`
 
-- [ ] **Step 1: Extend the presentation test and verify RED**
+- [x] **Step 1: Extend the presentation test and verify RED**
 
 Add an `insufficientStageEvidence` row to `Tests/TwoStageAnalysisPolicySmoke.swift` and assert the exact message above. Add state coverage to `Tests/AnalysisSessionStateSmoke.swift`.
 
@@ -52,20 +52,20 @@ xcrun swiftc -parse-as-library \
 
 Expected: FAIL because the new failure case does not exist.
 
-- [ ] **Step 2: Add the failure case and correct the solver mapping**
+- [x] **Step 2: Add the failure case and correct the solver mapping**
 
 Add `.insufficientStageEvidence` to `AnalysisFailure`. In `VisionPoseDetector`, return this case when `ConstrainedSwingPathSolver` produces no markers after Vision and the evidence timeline have already been built. Keep the existing pose-coverage guards mapped to pose/stable-golfer failures.
 
-- [ ] **Step 3: Update every exhaustive switch**
+- [x] **Step 3: Update every exhaustive switch**
 
 Update analysis-state, diagnostics, mobile status, and presentation switches so compilation remains exhaustive and the user-facing message describes stage evidence rather than body visibility.
 
-- [ ] **Step 4: Run focused tests and commit**
+- [x] **Step 4: Run focused tests and commit**
 
 Run the two smoke tests plus:
 
 ```bash
-xcodebuild -project SwingArcProject.xcodeproj -scheme SwingArc \
+xcodebuild -project SwingArcProject.xcodeproj -scheme SwingArcProject \
   -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
 ```
 
@@ -171,7 +171,7 @@ Add accessibility labels for each P stage, step control, close, and set-stage ac
 xcrun swiftc -parse-as-library Tests/PPointCorrectionPresentationSmoke.swift \
   -o /tmp/p-point-correction-presentation-smoke
 /tmp/p-point-correction-presentation-smoke
-xcodebuild -project SwingArcProject.xcodeproj -scheme SwingArc \
+xcodebuild -project SwingArcProject.xcodeproj -scheme SwingArcProject \
   -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
 git add SwingArc/Views SwingArcProject.xcodeproj Tests
 git commit -m "feat: add precise P point correction workspace"
@@ -292,4 +292,3 @@ Build a signed Release, install bundle `com.liangbo.swingarc`, launch it, and ve
 git add docs/validation/mobile-p-correction-2026-07-24.md
 git commit -m "test: verify mobile P point correction on device"
 ```
-
