@@ -132,6 +132,7 @@ struct ContentView: View {
         .onChange(of: showHeadStability) { _, _ in persistCurrentProject() }
         .onChange(of: showSpineAngle) { _, _ in persistCurrentProject() }
         .onChange(of: showGrid) { _, _ in persistCurrentProject() }
+        .onChange(of: practiceCameraView) { _, _ in persistCurrentProject() }
         .fullScreenCover(item: $selectedPracticeView) { practiceView in
             PracticeSessionView(
                 view: practiceView,
@@ -454,6 +455,11 @@ struct ContentView: View {
         playbackManager.pause()
         playbackManager.analyzeSwing { result in
             keyframes = StageMarkerMerger.merge(existing: keyframes, automatic: result.detectedMarkers)
+            guard let currentProjectURL else { return }
+            playbackManager.refineManualPPoints(
+                videoURL: currentProjectURL,
+                manualMarkers: keyframes
+            )
         }
     }
 
@@ -476,7 +482,8 @@ struct ContentView: View {
     private func savePPointCorrection(
         code: PPointCode,
         sourceFrameIndex: Int,
-        time: Double
+        time: Double,
+        image: CGImage
     ) {
         guard SwingStage.pStages.indices.contains(code.ordinal) else { return }
         let stage = SwingStage.pStages[code.ordinal]
@@ -486,6 +493,11 @@ struct ContentView: View {
             sourceFrameIndex: sourceFrameIndex
         )
         playbackManager.seek(to: time)
+        playbackManager.refineManualPPoint(
+            image: image,
+            sourceFrameIndex: sourceFrameIndex,
+            time: time
+        )
     }
 
     private func saveManualStage(
@@ -496,7 +508,8 @@ struct ContentView: View {
         let marker = KeyframeMarker(
             time: time,
             stage: stage,
-            source: .manual
+            source: .manual,
+            sourceFrameIndex: sourceFrameIndex
         )
         keyframes.removeAll { $0.stage == stage.rawValue }
         keyframes.append(marker)

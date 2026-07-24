@@ -24,6 +24,7 @@ struct PPointCorrectionPresentationSmoke {
             "+5",
             "minHeight: 42",
             "minHeight: 46",
+            "marker.sourceFrameIndex",
             "设为 \\(state.selectedCode.rawValue)"
         ] {
             precondition(source.contains(required), "Missing phone correction control: \(required)")
@@ -43,5 +44,21 @@ struct PPointCorrectionPresentationSmoke {
         ] {
             precondition(!source.contains(forbidden), "Phone correction leaked training UI: \(forbidden)")
         }
+
+        guard let saveStart = source.range(
+            of: "private func saveSelectedStage()"
+        ), let statusStart = source.range(
+            of: "private func statusColor",
+            range: saveStart.upperBound..<source.endIndex
+        ) else {
+            preconditionFailure("Missing saveSelectedStage implementation")
+        }
+        let saveImplementation = source[
+            saveStart.lowerBound..<statusStart.lowerBound
+        ]
+        precondition(
+            !saveImplementation.contains("onClose()"),
+            "Saving one P point must keep the correction workspace open"
+        )
     }
 }

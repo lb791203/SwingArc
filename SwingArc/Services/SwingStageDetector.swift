@@ -3221,10 +3221,9 @@ enum SwingStageDetector {
         )
     }
 
-    /// Compatibility adapter retained only for standalone legacy smoke fixtures.
-    /// Production video analysis must call `detect(frames:)` or the shared engine.
-    @available(iOS, unavailable, message: "Legacy smoke-test adapter; use detect(frames:) in production")
-    static func detectLegacySamplesForSmokeTests(
+    /// Returns conservative body-only candidates when the strict body + club
+    /// solver cannot complete. Club-defined P6/P8 deliberately stay unresolved.
+    static func detectPoseOnlyCandidates(
         _ rawSamples: [SwingPoseSample]
     ) -> SwingAnalysisResult {
         let samples = rawSamples
@@ -3253,10 +3252,12 @@ enum SwingStageDetector {
             let p2 = samples[p2Index]
             let p3 = samples[p3Index]
             let p4 = samples[p4Index]
+            // Slow-motion Vision tracks commonly contain short reversals or
+            // repeated frames. Preserve ordered correction candidates when
+            // the full address-to-top movement is clear instead of requiring
+            // every interpolated third to be strictly monotonic.
             if p1Index < p2Index, p2Index < p3Index, p3Index < p4Index,
-               p1.wristY > p2.wristY,
-               p2.wristY > p3.wristY,
-               p3.wristY > p4.wristY {
+               p1.wristY > p4.wristY + directionChangeThreshold {
                 resolved[.address] = p1
                 resolved[.takeaway] = p2
                 resolved[.leadArmParallelBackswing] = p3
@@ -3286,7 +3287,7 @@ enum SwingStageDetector {
             let status: SwingStageDetectionStatus
             if confidence >= 0.75 {
                 status = .confirmed
-            } else if confidence >= 0.45 {
+            } else if confidence >= 0.35 {
                 status = .lowConfidence
             } else {
                 status = .unresolved
@@ -3294,6 +3295,7 @@ enum SwingStageDetector {
             return SwingStageDetection(
                 stage: stage,
                 time: status == .unresolved ? nil : sample.time,
+                sourceFrameIndex: status == .unresolved ? nil : sample.sourceFrameIndex,
                 confidence: confidence,
                 status: status
             )
@@ -3301,6 +3303,14 @@ enum SwingStageDetector {
         let markers = detections.compactMap(\.marker)
         let unresolved = Set(detections.filter { $0.status == .unresolved }.map(\.stage))
         return SwingAnalysisResult(detectedMarkers: markers, unresolvedStages: unresolved, detections: detections)
+    }
+
+    /// Compatibility adapter retained only for standalone legacy smoke fixtures.
+    @available(iOS, unavailable, message: "Legacy smoke-test adapter; use detect(frames:) in production")
+    static func detectLegacySamplesForSmokeTests(
+        _ rawSamples: [SwingPoseSample]
+    ) -> SwingAnalysisResult {
+        detectPoseOnlyCandidates(rawSamples)
     }
 
     private static func unresolvedResult() -> SwingAnalysisResult {
@@ -3408,22 +3418,134 @@ enum SwingStageDetector {
     /// finish position when the hands finish higher than the backswing top.
     private static func backswingTopIndex(in samples: [SwingPoseSample]) -> Int? {
         guard samples.count >= 5 else { return nil }
-
-        let candidates = (2..<(samples.count - 2)).compactMap { index -> (index: Int, score: CGFloat)? in
-            let candidateY = samples[index].wristY
-            let priorHigh = samples[..<index].map(\.wristY).max() ?? candidateY
-            let followingRange = (index + 1)...min(samples.count - 1, index + 3)
-            let followingLowHand = samples[followingRange].map(\.wristY).max() ?? candidateY
-            guard priorHigh > candidateY + directionChangeThreshold,
-                  followingLowHand > candidateY + directionChangeThreshold else {
+        let torsoScales = samples.compactMap { sample -> CGFloat? in
+            guard let shoulder = center(sample.leftShoulder, sample.rightShoulder),
+                  let hip = center(sample.leftHip, sample.rightHip) else {
                 return nil
             }
-            return (index, (priorHigh - candidateY) + (followingLowHand - candidateY))
-        }
+            return hypot(shoulder.x - hip.x, shoulder.y - hip.y)
+        }.sorted()
+        let torsoScale = torsoScales.isEmpty
+            ? 0.20
+            : torsoScales[torsoScales.count / 2]
+        let minimumRise = max(0.05, min(0.14, torsoScale * 0.35))
 
-        return candidates.max { lhs, rhs in
-            lhs.score == rhs.score ? lhs.index > rhs.index : lhs.score < rhs.score
-        }?.index
+        var addressBaseline = samples[0].wristY
+        var apexIndex: Int?
+        var apexY = CGFloat.greatestFiniteMagnitude
+        for index in 1..<samples.count {
+            let wristY = samples[index].wristY
+            guard wristY.isFinite else { continue }
+
+            if apexIndex == nil {
+                addressBaseline = max(addressBaseline, wristY)
+                guard addressBaseline - wristY >= minimumRise else { continue }
+                apexIndex = index
+                apexY = wristY
+                continue
+            }
+
+            if wristY < apexY {
+                apexIndex = index
+                apexY = wristY
+                continue
+            }
+
+            let completedRise = addressBaseline - apexY
+            let downswingRetrace = wristY - apexY
+            let requiredRetrace = max(
+                directionChangeThreshold * 2,
+                completedRise * 0.45
+            )
+            if downswingRetrace >= requiredRetrace {
+                return apexIndex
+            }
+        }
+        return nil
+    }
+}
+
+enum ProductAnalysisFallback {
+    static func resolve(
+        strictResult: SwingAnalysisResult,
+        poseSamples: [SwingPoseSample],
+        supplementalPoseSamples: [SwingPoseSample] = []
+    ) -> SwingAnalysisResult {
+        guard strictResult.detectedMarkers.isEmpty else { return strictResult }
+        let poseOnly = SwingStageDetector.detectPoseOnlyCandidates(
+            mergedPoseSamples(
+                primary: poseSamples,
+                supplemental: supplementalPoseSamples
+            )
+        )
+        let detections = poseOnly.detections.map { detection -> SwingStageDetection in
+            guard detection.status != .unresolved else { return detection }
+            return SwingStageDetection(
+                stage: detection.stage,
+                time: detection.time,
+                sourceFrameIndex: detection.sourceFrameIndex,
+                confidence: min(0.69, detection.confidence),
+                status: .lowConfidence,
+                evidence: detection.evidence
+            )
+        }
+        return SwingAnalysisResult(
+            detectedMarkers: detections.compactMap(\.marker),
+            unresolvedStages: Set(
+                detections.filter { $0.status == .unresolved }.map(\.stage)
+            ),
+            detections: detections
+        )
+    }
+
+    static func mergedPoseSamples(
+        primary: [SwingPoseSample],
+        supplemental: [SwingPoseSample]
+    ) -> [SwingPoseSample] {
+        let ordered = (supplemental + primary).sorted {
+            if abs($0.time - $1.time) > 0.000_001 {
+                return $0.time < $1.time
+            }
+            return $0.aggregateConfidence > $1.aggregateConfidence
+        }
+        var retained: [SwingPoseSample] = []
+        var retainedSourceFrames = Set<Int>()
+        for sample in ordered {
+            if let sourceFrameIndex = sample.sourceFrameIndex {
+                guard retainedSourceFrames.insert(sourceFrameIndex).inserted else {
+                    continue
+                }
+            } else if let prior = retained.last,
+                      abs(prior.time - sample.time) <= 0.000_001 {
+                continue
+            }
+            retained.append(sample)
+        }
+        return retained
+    }
+}
+
+enum CandidateAttemptAcceptancePolicy {
+    static func hasUsableStages(_ result: SwingAnalysisResult) -> Bool {
+        result.detections.contains(where: {
+            $0.status != .unresolved && $0.sourceFrameIndex != nil
+        })
+    }
+}
+
+enum CoarseFallbackSelectionPolicy {
+    static func samples(
+        all samples: [CoarseSwingSample],
+        preferredAttempt: SwingAttempt?,
+        requiresFullSequence: Bool
+    ) -> [CoarseSwingSample] {
+        guard !requiresFullSequence, let preferredAttempt else {
+            return samples
+        }
+        return samples.filter {
+            $0.time >= preferredAttempt.startTime
+                && $0.time <= preferredAttempt.endTime
+        }
     }
 }
 
@@ -3609,7 +3731,9 @@ enum SwingWindowLocationResult: Equatable {
 
 enum SwingCoreLocator {
     static let samplesPerSecond = 8.0
-    private static let bridgeGapDuration = 0.5
+    /// A brief real-time top pause becomes close to a second in a 240 fps
+    /// slow-motion export. Keep the backswing and downswing in one motion core.
+    private static let bridgeGapDuration = 1.5
     private static let featureSmoothingRadius = 2
 
     static func sampleTimes(duration: Double) -> [Double] {
@@ -3665,9 +3789,43 @@ enum SwingCoreLocator {
 
         let nonZero = energies.filter { $0 > 0.000_1 }.sorted()
         guard !nonZero.isEmpty else { return .failed(.noSwingMotion) }
+        let observedHands = smoothedHands.compactMap { $0 }
+        guard let minimumX = observedHands.map(\.x).min(),
+              let maximumX = observedHands.map(\.x).max(),
+              let minimumY = observedHands.map(\.y).min(),
+              let maximumY = observedHands.map(\.y).max() else {
+            return .failed(.noSwingMotion)
+        }
+        let handExcursion = hypot(
+            Double(maximumX - minimumX),
+            Double(maximumY - minimumY)
+        )
+        let torsoScales = samples.compactMap { sample -> Double? in
+            guard let pose = sample.pose,
+                  let shoulder = SwingGeometry.center(
+                    pose.leftShoulder,
+                    pose.rightShoulder
+                  ),
+                  let hip = SwingGeometry.center(pose.leftHip, pose.rightHip) else {
+                return nil
+            }
+            return SwingGeometry.distance(shoulder, hip)
+        }.sorted()
+        let referenceScale = max(
+            0.08,
+            torsoScales.isEmpty
+                ? 0.20
+                : torsoScales[torsoScales.count / 2]
+        )
+        guard handExcursion / referenceScale >= 0.35 else {
+            return .failed(.noSwingMotion)
+        }
         let median = nonZero[nonZero.count / 2]
         let peak = nonZero.last ?? 0
-        let threshold = max(0.30, min(peak * 0.45, median * 2.2))
+        // Playback speed changes velocity, not the actual swing arc. Use a
+        // relative energy threshold after validating a real torso-scaled hand
+        // excursion so iPhone slow-motion exports are not classified as still.
+        let threshold = max(0.005, min(peak * 0.45, median * 2.2))
         let activeIndices = energies.indices.filter { energies[$0] >= threshold }
         guard !activeIndices.isEmpty else { return .failed(.noSwingMotion) }
 
@@ -3960,7 +4118,10 @@ struct FineFrameReference: Equatable {
 }
 
 enum FineSwingSamplingPlan {
-    static let maximumSamplesPerSecond = 120.0
+    /// Boundary/P-stage discovery is intentionally bounded. A slow-motion
+    /// eight-second window therefore uses at most about 96 Vision frames;
+    /// exact source-frame stepping remains available for manual correction.
+    static let maximumSamplesPerSecond = 12.0
 
     static func frames(
         window: SwingWindow,
@@ -3978,31 +4139,35 @@ enum FineSwingSamplingPlan {
               firstFrame <= lastFrame else { return [] }
 
         let minimumInterval = 1.0 / maximumSamplesPerSecond
+        let firstSlot = Int(ceil((window.startTime - 0.000_000_001) / minimumInterval))
+        let lastSlot = Int(floor((window.endTime + 0.000_000_001) / minimumInterval))
         var references: [FineFrameReference] = []
-        var sourceFrameIndex = firstFrame
-        while sourceFrameIndex <= lastFrame {
-            guard let time = sourceFrameTimeline.presentationTime(
-                sourceFrameIndex: sourceFrameIndex
-            )?.seconds else { break }
-            references.append(FineFrameReference(
-                sourceFrameIndex: sourceFrameIndex,
-                time: time
-            ))
-            let candidate = sourceFrameTimeline.firstSourceFrameIndex(
-                atOrAfter: time + minimumInterval
-            )
-            sourceFrameIndex = max(sourceFrameIndex + 1, candidate)
+        var retainedSourceFrames: Set<Int> = []
+        if firstSlot <= lastSlot {
+            for slot in firstSlot...lastSlot {
+                let targetTime = Double(slot) * minimumInterval
+                let sourceFrameIndex = sourceFrameTimeline.firstSourceFrameIndex(
+                    atOrAfter: targetTime
+                )
+                guard sourceFrameIndex >= firstFrame,
+                      sourceFrameIndex <= lastFrame,
+                      retainedSourceFrames.insert(sourceFrameIndex).inserted,
+                      let time = sourceFrameTimeline.presentationTime(
+                        sourceFrameIndex: sourceFrameIndex
+                      )?.seconds else { continue }
+                references.append(FineFrameReference(
+                    sourceFrameIndex: sourceFrameIndex,
+                    time: time
+                ))
+            }
         }
-
-        if references.last?.sourceFrameIndex != lastFrame,
-           let previousTime = references.last?.time,
-           let lastTime = sourceFrameTimeline.presentationTime(
-               sourceFrameIndex: lastFrame
-           )?.seconds,
-           lastTime - previousTime >= minimumInterval {
+        if references.isEmpty,
+           let time = sourceFrameTimeline.presentationTime(
+            sourceFrameIndex: firstFrame
+           )?.seconds {
             references.append(FineFrameReference(
-                sourceFrameIndex: lastFrame,
-                time: lastTime
+                sourceFrameIndex: firstFrame,
+                time: time
             ))
         }
         return references
@@ -4035,14 +4200,16 @@ enum FineSwingSamplingPlan {
         guard firstFrame <= lastFrame else { return [] }
 
         let frameStride = max(1, Int(ceil(sourceFrameRate / maximumSamplesPerSecond)))
-        var references = stride(from: firstFrame, through: lastFrame, by: frameStride).map {
+        let firstAlignedFrame = ((firstFrame + frameStride - 1) / frameStride) * frameStride
+        guard firstAlignedFrame <= lastFrame else {
+            return [FineFrameReference(
+                sourceFrameIndex: firstFrame,
+                time: Double(firstFrame) / sourceFrameRate
+            )]
+        }
+        return stride(from: firstAlignedFrame, through: lastFrame, by: frameStride).map {
             FineFrameReference(sourceFrameIndex: $0, time: Double($0) / sourceFrameRate)
         }
-        if references.last?.sourceFrameIndex != lastFrame,
-           Double(lastFrame - (references.last?.sourceFrameIndex ?? firstFrame)) / sourceFrameRate >= 1.0 / maximumSamplesPerSecond {
-            references.append(FineFrameReference(sourceFrameIndex: lastFrame, time: Double(lastFrame) / sourceFrameRate))
-        }
-        return references
     }
 }
 

@@ -4,6 +4,16 @@ import Foundation
 @main
 struct FineSwingSamplingPlanSmoke {
     static func main() {
+        precondition(SourceFrameTimelineLoadingPolicy.canUseConstantTimeline(
+            metadataFrameRate: 30
+        ))
+        precondition(SourceFrameTimelineLoadingPolicy.canUseConstantTimeline(
+            metadataFrameRate: 60
+        ))
+        precondition(!SourceFrameTimelineLoadingPolicy.canUseConstantTimeline(
+            metadataFrameRate: 240
+        ))
+
         let window = SwingWindow(startTime: 3.2, endTime: 4.2)
         let frames = FineSwingSamplingPlan.frames(
             window: window,
@@ -26,15 +36,27 @@ struct FineSwingSamplingPlanSmoke {
             $1.sourceFrameIndex - $0.sourceFrameIndex >= 2
         })
 
+        let longSlowMotion = FineSwingSamplingPlan.frames(
+            window: SwingWindow(startTime: 10, endTime: 18),
+            sourceFrameRate: 240,
+            duration: 30
+        )
+        precondition(
+            longSlowMotion.count <= 97,
+            "An eight-second slow-motion window must have a bounded Vision frame budget"
+        )
+        precondition(longSlowMotion.first?.sourceFrameIndex == 2_400)
+        precondition((longSlowMotion.last?.sourceFrameIndex ?? .max) <= 4_320)
+
         let lowRate = FineSwingSamplingPlan.frames(
             window: SwingWindow(startTime: 0, endTime: 1),
             sourceFrameRate: 30,
             duration: 1
         )
-        precondition(lowRate.count == 30)
-        precondition(lowRate.last?.sourceFrameIndex == 29)
+        precondition(lowRate.count == 10)
+        precondition(lowRate.last?.sourceFrameIndex == 27)
         precondition(zip(lowRate, lowRate.dropFirst()).allSatisfy {
-            $1.sourceFrameIndex - $0.sourceFrameIndex == 1
+            $1.sourceFrameIndex - $0.sourceFrameIndex == 3
         })
 
         let explicitBound = FineSwingSamplingPlan.frames(
@@ -43,7 +65,7 @@ struct FineSwingSamplingPlanSmoke {
             duration: 1,
             maximumSourceFrameIndex: 28
         )
-        precondition(explicitBound.last?.sourceFrameIndex == 28)
+        precondition(explicitBound.last?.sourceFrameIndex == 27)
         precondition(explicitBound.allSatisfy { $0.sourceFrameIndex <= 28 })
 
         precondition(
@@ -63,7 +85,7 @@ struct FineSwingSamplingPlanSmoke {
         )
         precondition(!variableFrames.isEmpty)
         precondition(variableFrames.first?.sourceFrameIndex == 0)
-        precondition(variableFrames.last?.sourceFrameIndex == 3)
+        precondition(variableFrames.last?.sourceFrameIndex == 0)
         precondition(variableFrames.allSatisfy {
             variableTimeline.presentationTime(
                 sourceFrameIndex: $0.sourceFrameIndex
@@ -72,5 +94,26 @@ struct FineSwingSamplingPlanSmoke {
         precondition(zip(variableFrames, variableFrames.dropFirst()).allSatisfy {
             $0.sourceFrameIndex < $1.sourceFrameIndex
         })
+
+        let expandingTimeline = SourceFrameTimeline(presentationTimes: (0..<360).map {
+            CMTime(
+                seconds: Double($0) / 60 + ($0.isMultiple(of: 7) ? 0.000_2 : 0),
+                preferredTimescale: 60_000
+            )
+        })!
+        let innerVariableFrames = FineSwingSamplingPlan.frames(
+            window: SwingWindow(startTime: 1.03, endTime: 3.47),
+            sourceFrameTimeline: expandingTimeline
+        )
+        let expandedVariableFrames = FineSwingSamplingPlan.frames(
+            window: SwingWindow(startTime: 0.53, endTime: 3.97),
+            sourceFrameTimeline: expandingTimeline
+        )
+        precondition(
+            Set(innerVariableFrames.map(\.sourceFrameIndex)).isSubset(
+                of: Set(expandedVariableFrames.map(\.sourceFrameIndex))
+            ),
+            "Adaptive expansion must use one global sampling grid without re-entry"
+        )
     }
 }

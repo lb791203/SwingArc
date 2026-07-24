@@ -111,7 +111,8 @@ enum ManualStageDetectionPolicy {
         let availableFrames = Set(availablePoseSamples.compactMap(\.sourceFrameIndex))
         return automatic.map { detection in
             guard let marker = manualByStage[detection.stage] else { return detection }
-            let frame = Int((marker.time * sourceFrameRate).rounded())
+            let frame = marker.sourceFrameIndex
+                ?? Int((marker.time * sourceFrameRate).rounded())
             return SwingStageDetection(
                 stage: detection.stage,
                 time: marker.time,

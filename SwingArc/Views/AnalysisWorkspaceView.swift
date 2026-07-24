@@ -117,6 +117,38 @@ struct AnalysisWorkspaceView: View {
                             onSelectStage: selectStage,
                             onAdjustStage: openAdjustment
                         )
+                    } else if practiceCameraView == nil,
+                              playbackManager.analysisOutput != nil {
+                        VStack(spacing: 18) {
+                            Spacer()
+
+                            Image(systemName: "camera.viewfinder")
+                                .font(.system(size: 34, weight: .semibold))
+                                .foregroundStyle(AnalysisTheme.proTourSignal)
+
+                            Text("选择拍摄视角")
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+
+                            Text("用于正确解释动作，不会重新分析视频")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+
+                            HStack(spacing: 12) {
+                                cameraViewButton(
+                                    title: "正后方 DTL",
+                                    view: .downTheLine
+                                )
+                                cameraViewButton(
+                                    title: "正面 Face-on",
+                                    view: .faceOn
+                                )
+                            }
+                            .padding(.horizontal, 20)
+
+                            Spacer()
+                        }
+                        .background(AnalysisTheme.proTourBackground)
                     } else {
                         ContentUnavailableView(
                             "暂无动作反馈",
@@ -600,6 +632,31 @@ struct AnalysisWorkspaceView: View {
         } else if let time = presentation.detection(for: stage)?.time {
             playbackManager.seek(to: time)
         }
+    }
+
+    private func cameraViewButton(
+        title: String,
+        view: PracticeCameraView
+    ) -> some View {
+        Button {
+            practiceCameraView = view
+        } label: {
+            Text(title)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(
+                    view == .faceOn
+                        ? Color.black
+                        : AnalysisTheme.proTourPrimaryText
+                )
+                .frame(maxWidth: .infinity, minHeight: 54)
+                .background(
+                    view == .faceOn
+                        ? AnalysisTheme.proTourSignal
+                        : AnalysisTheme.proTourSurface,
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private func toggleDrawingMode() {

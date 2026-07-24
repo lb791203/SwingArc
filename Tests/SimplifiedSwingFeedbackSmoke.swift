@@ -7,6 +7,7 @@ struct SimplifiedSwingFeedbackSmoke {
         testEstimatedSharedEvidenceDegradesOnlyConsumers()
         testMissingImpactEvidenceDegradesOnlyImpactCard()
         testAttentionSummaryUsesEvidenceBackedFinding()
+        testDTLAcceptsMeasuredVisibleSideEvidence()
     }
 
     private static func testExactFiveCardContract() {
@@ -115,6 +116,44 @@ struct SimplifiedSwingFeedbackSmoke {
         precondition(feedback.summary.stages == finding.evidence.stages)
     }
 
+    private static func testDTLAcceptsMeasuredVisibleSideEvidence() {
+        let dtlArtifact = occludedFarSideArtifact(
+            view: .downTheLine
+        )
+        let dtlFeedback = SwingFeedbackAssembler.make(
+            artifact: dtlArtifact,
+            detections: fixtureDetections(
+                includeImpactEvidence: true
+            ),
+            findings: []
+        )
+        precondition(
+            dtlFeedback.card(for: .setup)?.status == .good,
+            "DTL setup must accept one directly measured body side"
+        )
+        precondition(
+            dtlFeedback.card(for: .bodyStability)?.status == .good,
+            "DTL body evidence must not require the occluded far side"
+        )
+        precondition(
+            dtlFeedback.card(for: .handPath)?.status == .good,
+            "A direct 0.60 hand measurement must support hand-path review"
+        )
+
+        let faceOnFeedback = SwingFeedbackAssembler.make(
+            artifact: occludedFarSideArtifact(view: .faceOn),
+            detections: fixtureDetections(
+                includeImpactEvidence: true
+            ),
+            findings: []
+        )
+        precondition(
+            faceOnFeedback.card(for: .setup)?.status
+                == .insufficientEvidence,
+            "Face-on setup must retain bilateral evidence requirements"
+        )
+    }
+
     private static func fixtureArtifact(
         estimatedHandAtP3: Bool,
         includeImpactObjects: Bool
@@ -179,6 +218,45 @@ struct SimplifiedSwingFeedbackSmoke {
                     && includeImpactEvidence
             )
         }
+    }
+
+    private static func occludedFarSideArtifact(
+        view: PracticeCameraView
+    ) -> SwingAnalysisArtifact {
+        let base = fixtureArtifact(
+            estimatedHandAtP3: false,
+            includeImpactObjects: true
+        )
+        let frames = base.frames.map { frame in
+            var landmarks = frame.landmarks
+            landmarks.removeValue(forKey: .leftShoulder)
+            landmarks.removeValue(forKey: .leftHip)
+            landmarks.removeValue(forKey: .leftKnee)
+            landmarks.removeValue(forKey: .leftAnkle)
+            if let hand = landmarks[.handCenter] {
+                landmarks[.handCenter] = TrackedSwingPoint(
+                    point: hand.point,
+                    confidence: 0.60,
+                    state: .detected,
+                    source: .visionPose
+                )
+            }
+            return SwingFrameObservation(
+                sourceFrameIndex: frame.sourceFrameIndex,
+                time: frame.time,
+                landmarks: landmarks
+            )
+        }
+        return SwingAnalysisArtifact(
+            schemaVersion: base.schemaVersion,
+            modelVersion: base.modelVersion,
+            view: view.rawValue,
+            sourceFrameRate: base.sourceFrameRate,
+            qualityIssues: base.qualityIssues,
+            frames: frames,
+            stages: base.stages,
+            metrics: base.metrics
+        )
     }
 
     private static func fixtureFrame(

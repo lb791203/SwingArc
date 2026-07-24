@@ -15,7 +15,8 @@ struct SwingFeedbackPipelineSmoke {
         let manualTop = KeyframeMarker(
             time: 4.0 / 60.0,
             stage: .top,
-            source: .manual
+            source: .manual,
+            sourceFrameIndex: 6
         )
         guard let result = SwingFeedbackPipeline.make(
             output: output,
@@ -28,7 +29,7 @@ struct SwingFeedbackPipelineSmoke {
         precondition(result.feedback.cards.count == 5)
         precondition(
             result.detections.first(where: { $0.stage == .top })?
-                .sourceFrameIndex == 4
+                .sourceFrameIndex == 6
         )
         precondition(
             result.artifact.stages.first(where: { $0.code == "P4" })?

@@ -23,9 +23,14 @@ struct AnalysisFailureSourceContractSmoke {
 
         precondition(detector.contains("case insufficientStageEvidence"))
         precondition(
-            analyzer.contains(
+            !analyzer.contains(
                 "activeFailure(.insufficientStageEvidence, runID: runID, gate: gate)"
-            )
+            ),
+            "Missing strict stage evidence must not discard a usable Vision pose result"
+        )
+        precondition(
+            analyzer.contains("return activeCompletedAnalysis("),
+            "Stage validation failures must degrade to an editable completed result"
         )
         precondition(
             presentation.contains(

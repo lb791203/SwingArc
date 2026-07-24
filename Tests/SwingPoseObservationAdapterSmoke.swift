@@ -36,6 +36,30 @@ struct SwingPoseObservationAdapterSmoke {
         precondition(poseSample?.rightShoulder == CGPoint(x: 0.7, y: 0.3))
         precondition(poseSample?.head == CGPoint(x: 0.5, y: 0.1))
 
+        var overlappingHands = PoseEstimationResult()
+        overlappingHands.keypoints["leftWrist"] = JointKeypoint(
+            name: "leftWrist",
+            position: CGPoint(x: 0.48, y: 0.52),
+            confidence: 0.35
+        )
+        overlappingHands.keypoints["rightWrist"] = JointKeypoint(
+            name: "rightWrist",
+            position: CGPoint(x: 0.50, y: 0.51),
+            confidence: 0.60
+        )
+        let overlappingFrame = SwingPoseObservationAdapter.frame(
+            pose: overlappingHands,
+            sourceFrameIndex: 14,
+            time: 0.467
+        )
+        precondition(
+            abs(
+                (overlappingFrame.landmarks[.handCenter]?.confidence ?? 0)
+                    - 0.60
+            ) < 0.000_001,
+            "A directly measured visible wrist must support the DTL hand center"
+        )
+
         let absent = SwingPoseObservationAdapter.frame(
             pose: nil,
             sourceFrameIndex: 13,

@@ -7,7 +7,7 @@ struct PPointCorrectionWorkspace: View {
     let manualMarkers: [KeyframeMarker]
     let initialTime: Double
     let onClose: () -> Void
-    let onSave: (PPointCode, Int, Double) -> Void
+    let onSave: (PPointCode, Int, Double, CGImage) -> Void
 
     @StateObject private var frameController = AnnotationFrameController()
     @State private var correctionState: PPointCorrectionState?
@@ -273,12 +273,19 @@ struct PPointCorrectionWorkspace: View {
         )
         var manual: [PPointCode: Int] = [:]
         for marker in manualMarkers where marker.source == .manual {
-            guard let code = Self.code(for: marker.stage),
-                  let frame = await frameController.nearestSourceFrameIndex(
-                      at: marker.time
-                  ) else {
+            guard let code = Self.code(for: marker.stage) else {
                 continue
             }
+            let frame: Int?
+            if let exactFrame = marker.sourceFrameIndex,
+               (0..<frameController.frameCount).contains(exactFrame) {
+                frame = exactFrame
+            } else {
+                frame = await frameController.nearestSourceFrameIndex(
+                    at: marker.time
+                )
+            }
+            guard let frame else { continue }
             manual[code] = frame
         }
 
@@ -339,9 +346,9 @@ struct PPointCorrectionWorkspace: View {
         onSave(
             state.selectedCode,
             state.currentSourceFrameIndex,
-            frame.presentationTime.seconds
+            frame.presentationTime.seconds,
+            frame.image
         )
-        onClose()
     }
 
     private func statusColor(

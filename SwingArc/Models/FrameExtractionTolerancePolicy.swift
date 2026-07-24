@@ -2,6 +2,17 @@ import Foundation
 import CoreMedia
 import CryptoKit
 
+enum SourceFrameTimelineLoadingPolicy {
+    private static let maximumTrustedConstantFrameRate = 120.0
+
+    static func canUseConstantTimeline(metadataFrameRate: Double) -> Bool {
+        metadataFrameRate.isFinite
+            && metadataFrameRate > 0
+            && metadataFrameRate == metadataFrameRate.rounded()
+            && metadataFrameRate <= maximumTrustedConstantFrameRate
+    }
+}
+
 struct SourceFrameTimeline: Equatable {
     private let presentationTimes: [CMTime]
     private let seconds: [Double]

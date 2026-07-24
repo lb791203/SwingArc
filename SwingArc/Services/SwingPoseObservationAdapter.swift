@@ -64,7 +64,7 @@ enum SwingPoseObservationAdapter {
             }
             tracked[.handCenter] = TrackedSwingPoint(
                 point: NormalizedPoint(x: center.x / count, y: center.y / count),
-                confidence: wrists.map(\.confidence).reduce(0, +) / count,
+                confidence: wrists.map(\.confidence).max() ?? 0,
                 state: .detected,
                 source: .visionPose
             )
@@ -139,5 +139,56 @@ enum SwingPoseObservationAdapter {
         frame.landmarks[landmark]?.point.map {
             CGPoint(x: $0.x, y: $0.y)
         }
+    }
+}
+
+/// Merges a manually selected exact-frame Vision result into the completed
+/// analysis without rescanning the video. Existing golf-object evidence on the
+/// same frame is preserved while measured body landmarks replace predictions.
+enum ManualPPointAnalysisRefiner {
+    static func merging(
+        exactBodyFrame: SwingFrameObservation,
+        intoFrames frames: [SwingFrameObservation],
+        poseSamples: [SwingPoseSample]
+    ) -> (
+        frames: [SwingFrameObservation],
+        poseSamples: [SwingPoseSample]
+    ) {
+        let existing = frames.first {
+            $0.sourceFrameIndex == exactBodyFrame.sourceFrameIndex
+        }
+        var rawLandmarks = existing?.rawLandmarks ?? [:]
+        exactBodyFrame.rawLandmarks.forEach {
+            rawLandmarks[$0.key] = $0.value
+        }
+        var landmarks = existing?.landmarks ?? [:]
+        exactBodyFrame.landmarks.forEach {
+            landmarks[$0.key] = $0.value
+        }
+        let mergedFrame = SwingFrameObservation(
+            sourceFrameIndex: exactBodyFrame.sourceFrameIndex,
+            time: exactBodyFrame.time,
+            landmarks: landmarks,
+            rawLandmarks: rawLandmarks
+        )
+
+        var mergedFrames = frames.filter {
+            $0.sourceFrameIndex != exactBodyFrame.sourceFrameIndex
+        }
+        mergedFrames.append(mergedFrame)
+        mergedFrames.sort { $0.sourceFrameIndex < $1.sourceFrameIndex }
+
+        var mergedPoseSamples = poseSamples.filter {
+            $0.sourceFrameIndex != exactBodyFrame.sourceFrameIndex
+        }
+        if let exactPose = SwingPoseObservationAdapter.poseSample(
+            from: mergedFrame
+        ) {
+            mergedPoseSamples.append(exactPose)
+        }
+        mergedPoseSamples.sort {
+            ($0.sourceFrameIndex ?? .max) < ($1.sourceFrameIndex ?? .max)
+        }
+        return (mergedFrames, mergedPoseSamples)
     }
 }

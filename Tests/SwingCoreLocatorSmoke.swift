@@ -72,6 +72,76 @@ struct SwingCoreLocatorSmoke {
         case let .failed(reason):
             preconditionFailure("Expected swing core before walking, got \(reason)")
         }
+
+        let slowMotionSwing = stride(from: 0.0, through: 21.0, by: 0.125).map { time in
+            let inSwing = time <= 7.0
+            let phase = inSwing ? time / 7.0 : 1
+            let wristY: CGFloat
+            if !inSwing {
+                wristY = 0.78
+            } else if phase <= 0.5 {
+                wristY = 0.78 - CGFloat(phase) * 1.0
+            } else {
+                wristY = 0.28 + CGFloat(phase - 0.5) * 1.0
+            }
+            return CoarseSwingSample(
+                time: time,
+                pose: pose(
+                    time: time,
+                    wristY: wristY,
+                    shoulderTurn: inSwing
+                        ? CGFloat(sin(phase * .pi) * 0.08)
+                        : 0
+                )
+            )
+        }
+        switch SwingCoreLocator.locate(samples: slowMotionSwing) {
+        case let .located(core):
+            precondition(core.startTime <= 0.5)
+            precondition(core.endTime >= 6.5)
+        case let .failed(reason):
+            preconditionFailure(
+                "A large seven-second slow-motion swing must not be rejected as static: \(reason)"
+            )
+        }
+
+        let slowMotionTopPause = stride(from: 0.0, through: 21.0, by: 0.125).map { time in
+            let wristY: CGFloat
+            let shoulderTurn: CGFloat
+            switch time {
+            case ..<3.0:
+                let phase = time / 3.0
+                wristY = 0.78 - CGFloat(phase) * 0.50
+                shoulderTurn = CGFloat(phase * 0.08)
+            case 3.0..<4.0:
+                wristY = 0.28
+                shoulderTurn = 0.08
+            case 4.0...7.0:
+                let phase = (time - 4.0) / 3.0
+                wristY = 0.28 + CGFloat(phase) * 0.50
+                shoulderTurn = CGFloat((1 - phase) * 0.08)
+            default:
+                wristY = 0.78
+                shoulderTurn = 0
+            }
+            return CoarseSwingSample(
+                time: time,
+                pose: pose(
+                    time: time,
+                    wristY: wristY,
+                    shoulderTurn: shoulderTurn
+                )
+            )
+        }
+        switch SwingCoreLocator.locate(samples: slowMotionTopPause) {
+        case let .located(core):
+            precondition(core.startTime <= 0.5)
+            precondition(core.endTime >= 6.5)
+        case let .failed(reason):
+            preconditionFailure(
+                "A slow-motion top pause must remain one swing window: \(reason)"
+            )
+        }
     }
 
     private static func coarseFixture(bursts: [Double]) -> [CoarseSwingSample] {

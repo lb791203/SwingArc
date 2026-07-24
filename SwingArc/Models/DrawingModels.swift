@@ -125,17 +125,31 @@ struct KeyframeMarker: Identifiable, Codable, Equatable {
     let time: Double // 视频时间（秒）
     let stage: String // SwingStage rawValue
     let source: KeyframeSource
+    let sourceFrameIndex: Int?
     
-    init(id: UUID = UUID(), time: Double, stage: SwingStage, source: KeyframeSource = .automatic) {
+    init(
+        id: UUID = UUID(),
+        time: Double,
+        stage: SwingStage,
+        source: KeyframeSource = .automatic,
+        sourceFrameIndex: Int? = nil
+    ) {
         self.id = id
         self.time = time
         self.stage = stage.rawValue
         self.source = source
+        self.sourceFrameIndex = sourceFrameIndex
     }
 
     var isLocked: Bool { source == .manual }
 
-    private enum CodingKeys: String, CodingKey { case id, time, stage, source }
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case time
+        case stage
+        case source
+        case sourceFrameIndex
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -143,6 +157,10 @@ struct KeyframeMarker: Identifiable, Codable, Equatable {
         time = try container.decode(Double.self, forKey: .time)
         stage = try container.decode(String.self, forKey: .stage)
         source = try container.decodeIfPresent(KeyframeSource.self, forKey: .source) ?? .automatic
+        sourceFrameIndex = try container.decodeIfPresent(
+            Int.self,
+            forKey: .sourceFrameIndex
+        )
     }
 
     func encode(to encoder: Encoder) throws {
@@ -151,6 +169,10 @@ struct KeyframeMarker: Identifiable, Codable, Equatable {
         try container.encode(time, forKey: .time)
         try container.encode(stage, forKey: .stage)
         try container.encode(source, forKey: .source)
+        try container.encodeIfPresent(
+            sourceFrameIndex,
+            forKey: .sourceFrameIndex
+        )
     }
 }
 

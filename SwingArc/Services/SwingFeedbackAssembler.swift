@@ -1,7 +1,9 @@
 import Foundation
 
 enum SwingFeedbackAssembler {
-    static let minimumMeasuredConfidence = 0.65
+    static let minimumConfirmedStageConfidence = 0.65
+    static let minimumMeasuredPoseConfidence = 0.55
+    static let minimumMeasuredObjectConfidence = 0.65
 
     static func make(
         artifact: SwingAnalysisArtifact,
@@ -35,13 +37,14 @@ enum SwingFeedbackAssembler {
         }
         var confidences: [Double] = []
         var sawEstimated = false
+        let view = PracticeCameraView(rawValue: artifact.view)
 
         for stage in category.stages {
             guard let detection = detections.first(where: {
                 $0.stage == stage
             }),
             detection.status == .confirmed,
-            detection.confidence >= minimumMeasuredConfidence,
+            detection.confidence >= minimumConfirmedStageConfidence,
             let frameIndex = detection.sourceFrameIndex,
             let frame = framesByIndex[frameIndex] else {
                 return insufficientCard(
@@ -51,22 +54,28 @@ enum SwingFeedbackAssembler {
             }
             confidences.append(detection.confidence)
 
-            for landmark in requiredLandmarks(
+            for alternatives in requiredLandmarkGroups(
                 for: category,
-                stage: stage
+                stage: stage,
+                view: view
             ) {
-                let point = frame.landmarks[landmark]
-                if point?.isEstimated == true {
+                let points = alternatives.compactMap {
+                    frame.landmarks[$0]
+                }
+                if let measured = points
+                    .filter(isConclusionGrade)
+                    .max(by: { $0.confidence < $1.confidence }) {
+                    confidences.append(measured.confidence)
+                    continue
+                }
+                if points.contains(where: \.isEstimated) {
                     sawEstimated = true
                     continue
                 }
-                guard isConclusionGrade(point) else {
-                    return insufficientCard(
-                        category: category,
-                        state: .unavailable
-                    )
-                }
-                confidences.append(point?.confidence ?? 0)
+                return insufficientCard(
+                    category: category,
+                    state: .unavailable
+                )
             }
 
             if category == .impactAndRelease,
@@ -139,48 +148,66 @@ enum SwingFeedbackAssembler {
         )
     }
 
-    private static func requiredLandmarks(
+    private static func requiredLandmarkGroups(
         for category: SwingFeedbackCategory,
-        stage: SwingStage
-    ) -> [SwingLandmark] {
+        stage: SwingStage,
+        view: PracticeCameraView?
+    ) -> [[SwingLandmark]] {
         switch category {
         case .setup:
+            if view == .downTheLine {
+                return [
+                    [.head],
+                    [.leftShoulder, .rightShoulder],
+                    [.leftHip, .rightHip],
+                    [.leftKnee, .rightKnee],
+                    [.leftAnkle, .rightAnkle],
+                    [.handCenter]
+                ]
+            }
             return [
-                .head,
-                .leftShoulder,
-                .rightShoulder,
-                .leftHip,
-                .rightHip,
-                .leftKnee,
-                .rightKnee,
-                .leftAnkle,
-                .rightAnkle,
-                .handCenter
+                [.head],
+                [.leftShoulder],
+                [.rightShoulder],
+                [.leftHip],
+                [.rightHip],
+                [.leftKnee],
+                [.rightKnee],
+                [.leftAnkle],
+                [.rightAnkle],
+                [.handCenter]
             ]
         case .bodyStability:
+            if view == .downTheLine {
+                return [
+                    [.head],
+                    [.leftShoulder, .rightShoulder],
+                    [.leftHip, .rightHip]
+                ]
+            }
             return [
-                .head,
-                .leftShoulder,
-                .rightShoulder,
-                .leftHip,
-                .rightHip
+                [.head],
+                [.leftShoulder],
+                [.rightShoulder],
+                [.leftHip],
+                [.rightHip]
             ]
         case .handPath:
-            return [.handCenter]
+            return [[.handCenter]]
         case .swingPlane:
             if [
                 SwingStage.takeaway,
                 .shaftParallelDownswing,
                 .followThrough
             ].contains(stage) {
-                return [.handCenter, .shaftStart, .shaftEnd]
+                return [[.handCenter], [.shaftStart], [.shaftEnd]]
             }
-            return [.handCenter]
+            return [[.handCenter]]
         case .impactAndRelease:
             if stage == .impact {
-                return [.handCenter]
+                return [[.handCenter]]
             }
-            return [.handCenter, .shaftStart, .shaftEnd]
+            return [[.handCenter], [.shaftStart], [.shaftEnd]]
         }
     }
 
@@ -188,9 +215,16 @@ enum SwingFeedbackAssembler {
         _ point: TrackedSwingPoint?
     ) -> Bool {
         guard let point else { return false }
+        let minimumConfidence: Double
+        switch point.source {
+        case .visionPose, .manual:
+            minimumConfidence = minimumMeasuredPoseConfidence
+        case .contour, .coreMLGolf, .temporalPrediction:
+            minimumConfidence = minimumMeasuredObjectConfidence
+        }
         return point.isMeasured
             && point.confidence.isFinite
-            && point.confidence >= minimumMeasuredConfidence
+            && point.confidence >= minimumConfidence
     }
 
     private static func hasImpactEvidence(
