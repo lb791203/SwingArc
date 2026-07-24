@@ -192,7 +192,10 @@ public enum GolfAnnotationFrameQueueBuilder {
         of item: GolfAnnotationQueueItem,
         from queue: [GolfAnnotationQueueItem]
     ) -> [GolfAnnotationQueueItem]? {
-        guard !item.isProtected else { return nil }
+        guard let authoritative = queue.first(where: { $0.sourceFrameIndex == item.sourceFrameIndex }) else {
+            return nil
+        }
+        guard !authoritative.isProtected else { return nil }
         return queue.filter { $0.sourceFrameIndex != item.sourceFrameIndex }
     }
 }

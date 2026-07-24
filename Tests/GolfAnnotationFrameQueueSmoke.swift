@@ -21,6 +21,8 @@ private func runTests() {
     testProtectedFrameDeleteRejected()
     testUnprotectedFrameDeleteAllowed()
     testPolicyDrivesConstants()
+    testProtectedDeletionBypassRejected()
+    testDeletionOfNonexistentFrameRejected()
     print("All GolfAnnotationFrameQueue tests passed.")
 }
 
@@ -598,6 +600,62 @@ private func testUnprotectedFrameDeleteAllowed() {
     precondition(!neg.isProtected, "10 must be unprotected")
     let deletion3 = GolfAnnotationFrameQueueBuilder.requestDeletion(of: neg, from: result)
     precondition(deletion3 != nil, "Unprotected negative frame deletion must succeed")
+}
+
+// MARK: - Protected deletion bypass rejected
+
+private func testProtectedDeletionBypassRejected() {
+    let input = GolfAnnotationQueueInput(
+        split: .training,
+        p1: 100,
+        p5: 200,
+        p6: 220,
+        p8: 260,
+        totalFrames: 400,
+        anomalyFrames: [],
+        preSwingNegativeSamples: [],
+        postSwingNegativeSamples: []
+    )
+    let result = GolfAnnotationFrameQueueBuilder.build(input: input)
+
+    // Build a forged item: same sourceFrameIndex as P1 (100) but isProtected=false
+    let forgedItem = GolfAnnotationQueueItem(
+        sourceFrameIndex: 100,
+        reasons: [.sparseP1P5],
+        isProtected: false
+    )
+    let deletion = GolfAnnotationFrameQueueBuilder.requestDeletion(of: forgedItem, from: result)
+    precondition(deletion == nil, "Forged unprotected item for protected frame must be rejected")
+    // Authoritative P1 must still be in the queue
+    precondition(
+        result.contains { $0.sourceFrameIndex == 100 && $0.isProtected },
+        "Authoritative protected P1 frame must remain after forged deletion attempt"
+    )
+}
+
+// MARK: - Deletion of nonexistent frame rejected
+
+private func testDeletionOfNonexistentFrameRejected() {
+    let input = GolfAnnotationQueueInput(
+        split: .training,
+        p1: 100,
+        p5: 200,
+        p6: 220,
+        p8: 260,
+        totalFrames: 400,
+        anomalyFrames: [],
+        preSwingNegativeSamples: [],
+        postSwingNegativeSamples: []
+    )
+    let result = GolfAnnotationFrameQueueBuilder.build(input: input)
+
+    let ghost = GolfAnnotationQueueItem(
+        sourceFrameIndex: 999,
+        reasons: [.anomaly],
+        isProtected: false
+    )
+    let deletion = GolfAnnotationFrameQueueBuilder.requestDeletion(of: ghost, from: result)
+    precondition(deletion == nil, "Deletion of nonexistent frame must be rejected")
 }
 
 // MARK: - Policy drives constants
