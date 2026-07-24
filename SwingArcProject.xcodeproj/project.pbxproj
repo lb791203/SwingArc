@@ -63,6 +63,7 @@
 		A9000000000000000000000D /* AnnotationFrameCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9000000000000000000000E /* AnnotationFrameCanvas.swift */; };
 		A9000000000000000000000F /* AnnotationWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000010 /* AnnotationWorkspaceView.swift */; };
 		A90000000000000000000011 /* AnnotationPredictionAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000012 /* AnnotationPredictionAdapter.swift */; };
+		B00000000000000000000001 /* PPointCorrectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* PPointCorrectionState.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -123,6 +124,7 @@
 		A9000000000000000000000E /* AnnotationFrameCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationFrameCanvas.swift; sourceTree = "<group>"; };
 		A90000000000000000000010 /* AnnotationWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationWorkspaceView.swift; sourceTree = "<group>"; };
 		A90000000000000000000012 /* AnnotationPredictionAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationPredictionAdapter.swift; sourceTree = "<group>"; };
+		B00000000000000000000002 /* PPointCorrectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PPointCorrectionState.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -172,6 +174,7 @@
 				F80000000000000000000012 /* SimplifiedSwingFeedbackModels.swift */,
 				A90000000000000000000002 /* AnnotationModels.swift */,
 				A90000000000000000000004 /* AnnotationWorkspaceState.swift */,
+				B00000000000000000000002 /* PPointCorrectionState.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -367,6 +370,7 @@
 				A9000000000000000000000D /* AnnotationFrameCanvas.swift in Sources */,
 				A9000000000000000000000F /* AnnotationWorkspaceView.swift in Sources */,
 				A90000000000000000000011 /* AnnotationPredictionAdapter.swift in Sources */,
+				B00000000000000000000001 /* PPointCorrectionState.swift in Sources */,
 			);
 		};
 /* End PBXSourcesBuildPhase section */

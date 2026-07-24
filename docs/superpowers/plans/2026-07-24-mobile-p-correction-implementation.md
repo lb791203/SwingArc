@@ -91,7 +91,7 @@ git commit -m "fix: distinguish stage evidence from pose failure"
 - Produce: `PPointCorrectionReducer`
 - Consume: automatic `AnnotationStageSelection` candidates and existing manual `KeyframeMarker` values
 
-- [ ] **Step 1: Write the failing reducer test**
+- [x] **Step 1: Write the failing reducer test**
 
 Cover these behaviors:
 
@@ -114,15 +114,15 @@ xcrun swiftc -parse-as-library \
 
 Expected: FAIL because `PPointCorrectionState.swift` does not exist.
 
-- [ ] **Step 2: Implement the pure correction model**
+- [x] **Step 2: Implement the pure correction model**
 
 The model stores selected stage, current source frame, frame count, prediction rows, and manual stage rows. It exposes an ordered P1–P8 result and never stores body/golf keypoints, annotator IDs, reviewer fields, or training metadata.
 
-- [ ] **Step 3: Verify GREEN and project membership**
+- [x] **Step 3: Verify GREEN and project membership**
 
 Run the focused test and ensure the new source is part of the iOS target.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add SwingArc/Models/PPointCorrectionState.swift \
