@@ -11,6 +11,16 @@ private func runTests() {
     testDeterministicOrdering()
     testMissingPPointFailure()
     testNegativeSamplesCapped()
+    testDuplicateAnomalyNoDuplicateReason()
+    testDuplicateNegativeSamplesDedupedBeforeCap()
+    testReasonsUniqueAndSorted()
+    testTotalFramesZeroNoCrash()
+    testTotalFramesNegativeNoCrash()
+    testPPointOutOfOrderRejects()
+    testPPointOutOfBoundsRejects()
+    testProtectedFrameDeleteRejected()
+    testUnprotectedFrameDeleteAllowed()
+    testPolicyDrivesConstants()
     print("All GolfAnnotationFrameQueue tests passed.")
 }
 
@@ -290,6 +300,314 @@ private func testNegativeSamplesCapped() {
         postCount <= 10,
         "Post-swing negatives must be capped at 10, got \(postCount)"
     )
+}
+
+// MARK: - Duplicate anomaly no duplicate reason
+
+private func testDuplicateAnomalyNoDuplicateReason() {
+    let input = GolfAnnotationQueueInput(
+        split: .training,
+        p1: 100,
+        p5: 200,
+        p6: 220,
+        p8: 260,
+        totalFrames: 400,
+        anomalyFrames: [50, 50, 50, 220],
+        preSwingNegativeSamples: [],
+        postSwingNegativeSamples: []
+    )
+    let result = GolfAnnotationFrameQueueBuilder.build(input: input)
+    let item50 = result.first { $0.sourceFrameIndex == 50 }!
+    let anomalyCount = item50.reasons.filter { $0 == .anomaly }.count
+    precondition(anomalyCount == 1, "Duplicate anomaly must not produce duplicate reason, got \(anomalyCount)")
+    // Frame 220 also has p6Dense
+    let item220 = result.first { $0.sourceFrameIndex == 220 }!
+    let anomalyCount220 = item220.reasons.filter { $0 == .anomaly }.count
+    precondition(anomalyCount220 == 1, "Frame 220 anomaly reason must appear once, got \(anomalyCount220)")
+}
+
+// MARK: - Duplicate negative samples deduped before cap
+
+private func testDuplicateNegativeSamplesDedupedBeforeCap() {
+    let preSwing = [10, 10, 10, 20, 20, 30, 40, 50, 60, 70, 80, 90]
+    let input = GolfAnnotationQueueInput(
+        split: .training,
+        p1: 100,
+        p5: 200,
+        p6: 220,
+        p8: 260,
+        totalFrames: 400,
+        anomalyFrames: [],
+        preSwingNegativeSamples: preSwing,
+        postSwingNegativeSamples: []
+    )
+    let result = GolfAnnotationFrameQueueBuilder.build(input: input)
+    let preCount = result.filter { $0.reasons.contains(.preSwingNegative) }.count
+    // Unique frames: 10,20,30,40,50,60,70,80,90 = 9, all fit within 10 cap
+    precondition(preCount == 9, "Deduped pre-swing unique frames should be 9, got \(preCount)")
+
+    // Now test with more than 10 unique
+    let preSwingOverflow = Array(stride(from: 0, through: 100, by: 4))
+    let input2 = GolfAnnotationQueueInput(
+        split: .training,
+        p1: 200,
+        p5: 300,
+        p6: 310,
+        p8: 350,
+        totalFrames: 400,
+        anomalyFrames: [],
+        preSwingNegativeSamples: preSwingOverflow,
+        postSwingNegativeSamples: []
+    )
+    let result2 = GolfAnnotationFrameQueueBuilder.build(input: input2)
+    let preCount2 = result2.filter { $0.reasons.contains(.preSwingNegative) }.count
+    precondition(preCount2 == 10, "Pre-swing negatives must be capped at 10 after dedup, got \(preCount2)")
+}
+
+// MARK: - Reasons unique and sorted
+
+private func testReasonsUniqueAndSorted() {
+    let input = GolfAnnotationQueueInput(
+        split: .validation,
+        p1: 100,
+        p5: 200,
+        p6: 220,
+        p8: 260,
+        totalFrames: 400,
+        anomalyFrames: [210],
+        preSwingNegativeSamples: [],
+        postSwingNegativeSamples: []
+    )
+    let result = GolfAnnotationFrameQueueBuilder.build(input: input)
+    for item in result {
+        // Reasons must be unique within each item
+        let uniqueReasons = Set(item.reasons)
+        precondition(
+            uniqueReasons.count == item.reasons.count,
+            "Frame \(item.sourceFrameIndex) has duplicate reasons: \(item.reasons)"
+        )
+        // Reasons must be sorted
+        precondition(
+            item.reasons == item.reasons.sorted(),
+            "Frame \(item.sourceFrameIndex) reasons not sorted: \(item.reasons)"
+        )
+    }
+}
+
+// MARK: - totalFrames zero no crash
+
+private func testTotalFramesZeroNoCrash() {
+    let input = GolfAnnotationQueueInput(
+        split: .training,
+        p1: 0,
+        p5: 0,
+        p6: 0,
+        p8: 0,
+        totalFrames: 0,
+        anomalyFrames: [],
+        preSwingNegativeSamples: [],
+        postSwingNegativeSamples: []
+    )
+    let result = GolfAnnotationFrameQueueBuilder.build(input: input)
+    precondition(result.isEmpty, "totalFrames=0 must yield empty queue")
+}
+
+// MARK: - totalFrames negative no crash
+
+private func testTotalFramesNegativeNoCrash() {
+    let input = GolfAnnotationQueueInput(
+        split: .training,
+        p1: 0,
+        p5: 5,
+        p6: 6,
+        p8: 10,
+        totalFrames: -5,
+        anomalyFrames: [],
+        preSwingNegativeSamples: [],
+        postSwingNegativeSamples: []
+    )
+    let result = GolfAnnotationFrameQueueBuilder.build(input: input)
+    precondition(result.isEmpty, "Negative totalFrames must yield empty queue")
+}
+
+// MARK: - P-point out of order rejects
+
+private func testPPointOutOfOrderRejects() {
+    // P5 before P1
+    let input1 = GolfAnnotationQueueInput(
+        split: .training,
+        p1: 200,
+        p5: 100,
+        p6: 220,
+        p8: 260,
+        totalFrames: 400,
+        anomalyFrames: [],
+        preSwingNegativeSamples: [],
+        postSwingNegativeSamples: []
+    )
+    let result1 = GolfAnnotationFrameQueueBuilder.build(input: input1)
+    precondition(result1.isEmpty, "P5 < P1 must yield empty queue")
+
+    // P6 before P5
+    let input2 = GolfAnnotationQueueInput(
+        split: .training,
+        p1: 100,
+        p5: 200,
+        p6: 150,
+        p8: 260,
+        totalFrames: 400,
+        anomalyFrames: [],
+        preSwingNegativeSamples: [],
+        postSwingNegativeSamples: []
+    )
+    let result2 = GolfAnnotationFrameQueueBuilder.build(input: input2)
+    precondition(result2.isEmpty, "P6 < P5 must yield empty queue")
+
+    // P8 before P6
+    let input3 = GolfAnnotationQueueInput(
+        split: .training,
+        p1: 100,
+        p5: 200,
+        p6: 260,
+        p8: 220,
+        totalFrames: 400,
+        anomalyFrames: [],
+        preSwingNegativeSamples: [],
+        postSwingNegativeSamples: []
+    )
+    let result3 = GolfAnnotationFrameQueueBuilder.build(input: input3)
+    precondition(result3.isEmpty, "P8 < P6 must yield empty queue")
+}
+
+// MARK: - P-point out of bounds rejects
+
+private func testPPointOutOfBoundsRejects() {
+    // P1 negative
+    let input1 = GolfAnnotationQueueInput(
+        split: .training,
+        p1: -5,
+        p5: 200,
+        p6: 220,
+        p8: 260,
+        totalFrames: 400,
+        anomalyFrames: [],
+        preSwingNegativeSamples: [],
+        postSwingNegativeSamples: []
+    )
+    let result1 = GolfAnnotationFrameQueueBuilder.build(input: input1)
+    precondition(result1.isEmpty, "Negative P1 must yield empty queue")
+
+    // P8 >= totalFrames
+    let input2 = GolfAnnotationQueueInput(
+        split: .training,
+        p1: 100,
+        p5: 200,
+        p6: 220,
+        p8: 400,
+        totalFrames: 400,
+        anomalyFrames: [],
+        preSwingNegativeSamples: [],
+        postSwingNegativeSamples: []
+    )
+    let result2 = GolfAnnotationFrameQueueBuilder.build(input: input2)
+    precondition(result2.isEmpty, "P8 >= totalFrames must yield empty queue")
+
+    // P6 > P8 range
+    let input3 = GolfAnnotationQueueInput(
+        split: .training,
+        p1: 100,
+        p5: 200,
+        p6: 300,
+        p8: 260,
+        totalFrames: 400,
+        anomalyFrames: [],
+        preSwingNegativeSamples: [],
+        postSwingNegativeSamples: []
+    )
+    let result3 = GolfAnnotationFrameQueueBuilder.build(input: input3)
+    precondition(result3.isEmpty, "P6 > P8 must yield empty queue")
+}
+
+// MARK: - Protected frame delete rejected
+
+private func testProtectedFrameDeleteRejected() {
+    let input = GolfAnnotationQueueInput(
+        split: .training,
+        p1: 100,
+        p5: 200,
+        p6: 220,
+        p8: 260,
+        totalFrames: 400,
+        anomalyFrames: [],
+        preSwingNegativeSamples: [],
+        postSwingNegativeSamples: []
+    )
+    let result = GolfAnnotationFrameQueueBuilder.build(input: input)
+
+    // P-stage frames
+    for frame in [100, 200, 220, 260] {
+        let item = result.first { $0.sourceFrameIndex == frame }!
+        precondition(item.isProtected, "Frame \(frame) must be protected")
+        let deletion = GolfAnnotationFrameQueueBuilder.requestDeletion(of: item, from: result)
+        precondition(deletion == nil, "Protected frame \(frame) deletion must be rejected")
+    }
+
+    // Dense window frames
+    for frame in [208, 215, 232, 248, 260, 272] {
+        let item = result.first { $0.sourceFrameIndex == frame }!
+        guard item.isProtected else { continue }
+        let deletion = GolfAnnotationFrameQueueBuilder.requestDeletion(of: item, from: result)
+        precondition(deletion == nil, "Protected dense frame \(frame) deletion must be rejected")
+    }
+}
+
+// MARK: - Unprotected frame delete allowed
+
+private func testUnprotectedFrameDeleteAllowed() {
+    let input = GolfAnnotationQueueInput(
+        split: .training,
+        p1: 100,
+        p5: 200,
+        p6: 220,
+        p8: 260,
+        totalFrames: 400,
+        anomalyFrames: [50],
+        preSwingNegativeSamples: [10],
+        postSwingNegativeSamples: [350]
+    )
+    let result = GolfAnnotationFrameQueueBuilder.build(input: input)
+
+    // Sparse stride frame
+    let sparse = result.first { $0.sourceFrameIndex == 104 }!
+    precondition(!sparse.isProtected, "104 must be unprotected")
+    let deletion1 = GolfAnnotationFrameQueueBuilder.requestDeletion(of: sparse, from: result)
+    precondition(deletion1 != nil, "Unprotected sparse frame deletion must succeed")
+    precondition(
+        !deletion1!.contains { $0.sourceFrameIndex == 104 },
+        "Deleted frame must be removed from result"
+    )
+
+    // Anomaly frame
+    let anom = result.first { $0.sourceFrameIndex == 50 }!
+    precondition(!anom.isProtected, "50 must be unprotected")
+    let deletion2 = GolfAnnotationFrameQueueBuilder.requestDeletion(of: anom, from: result)
+    precondition(deletion2 != nil, "Unprotected anomaly frame deletion must succeed")
+
+    // Negative sample
+    let neg = result.first { $0.sourceFrameIndex == 10 }!
+    precondition(!neg.isProtected, "10 must be unprotected")
+    let deletion3 = GolfAnnotationFrameQueueBuilder.requestDeletion(of: neg, from: result)
+    precondition(deletion3 != nil, "Unprotected negative frame deletion must succeed")
+}
+
+// MARK: - Policy drives constants
+
+private func testPolicyDrivesConstants() {
+    let policy = GolfAnnotationQueuePolicy.v1
+    precondition(policy.sparseP1P5Stride == 4, "Policy stride P1-P5 must be 4")
+    precondition(policy.sparseP5P8Stride == 2, "Policy stride P5-P8 must be 2")
+    precondition(policy.denseWindowRadius == 12, "Policy dense radius must be 12")
+    precondition(policy.maxNegativeSamples == 10, "Policy negative limit must be 10")
 }
 
 @main

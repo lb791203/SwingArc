@@ -1,5 +1,19 @@
 import Foundation
 
+public struct GolfAnnotationQueuePolicy: Sendable {
+    public let sparseP1P5Stride: Int
+    public let sparseP5P8Stride: Int
+    public let denseWindowRadius: Int
+    public let maxNegativeSamples: Int
+
+    public static let v1 = GolfAnnotationQueuePolicy(
+        sparseP1P5Stride: 4,
+        sparseP5P8Stride: 2,
+        denseWindowRadius: 12,
+        maxNegativeSamples: 10
+    )
+}
+
 public enum GolfAnnotationQueueReason: String, Codable, Comparable, Sendable {
     case sparseP1P5 = "sparse-p1-p5"
     case sparseP5P8 = "sparse-p5-p8"
@@ -62,20 +76,28 @@ public struct GolfAnnotationQueueInput: Sendable {
 }
 
 public enum GolfAnnotationFrameQueueBuilder {
-    private static let maxNegativeSamples = 10
-    private static let denseWindowRadius = 12
-
-    public static func build(input: GolfAnnotationQueueInput) -> [GolfAnnotationQueueItem] {
+    public static func build(
+        input: GolfAnnotationQueueInput,
+        policy: GolfAnnotationQueuePolicy = .v1
+    ) -> [GolfAnnotationQueueItem] {
         guard let p1 = input.p1, let p5 = input.p5, let p6 = input.p6, let p8 = input.p8 else {
             return []
         }
 
-        var frameReasons: [Int: [GolfAnnotationQueueReason]] = [:]
+        guard input.totalFrames > 0 else { return [] }
+        guard p1 >= 0, p5 >= 0, p6 >= 0, p8 >= 0,
+              p1 < input.totalFrames, p5 < input.totalFrames,
+              p6 < input.totalFrames, p8 < input.totalFrames else {
+            return []
+        }
+        guard p1 <= p5, p5 <= p6, p6 <= p8 else { return [] }
+
+        var frameReasons: [Int: Set<GolfAnnotationQueueReason>] = [:]
         var protectedFrames: Set<Int> = []
 
         func addFrame(_ frame: Int, reason: GolfAnnotationQueueReason, protected: Bool) {
             guard frame >= 0, frame < input.totalFrames else { return }
-            frameReasons[frame, default: []].append(reason)
+            frameReasons[frame, default: []].insert(reason)
             if protected {
                 protectedFrames.insert(frame)
             }
@@ -89,13 +111,13 @@ public enum GolfAnnotationFrameQueueBuilder {
             addFrame(frame, reason: reason, protected: false)
         }
 
-        // P1–P5 stride 4
-        for frame in stride(from: p1, through: p5, by: 4) {
+        // P1–P5 stride
+        for frame in stride(from: p1, through: p5, by: policy.sparseP1P5Stride) {
             addUnprotectedFrame(frame, reason: .sparseP1P5)
         }
 
-        // P5–P8 stride 2
-        for frame in stride(from: p5, through: p8, by: 2) {
+        // P5–P8 stride
+        for frame in stride(from: p5, through: p8, by: policy.sparseP5P8Stride) {
             addUnprotectedFrame(frame, reason: .sparseP5P8)
         }
 
@@ -104,48 +126,51 @@ public enum GolfAnnotationFrameQueueBuilder {
             protectedFrames.insert(frame)
         }
 
-        // P6 ±12 dense (protected)
-        let p6Start = max(0, p6 - denseWindowRadius)
-        let p6End = min(input.totalFrames - 1, p6 + denseWindowRadius)
+        // P6 ±radius dense (protected)
+        let p6Start = max(0, p6 - policy.denseWindowRadius)
+        let p6End = min(input.totalFrames - 1, p6 + policy.denseWindowRadius)
         for frame in p6Start...p6End {
             addProtectedFrame(frame, reason: .p6Dense)
         }
 
-        // P8 ±12 dense (protected)
-        let p8Start = max(0, p8 - denseWindowRadius)
-        let p8End = min(input.totalFrames - 1, p8 + denseWindowRadius)
+        // P8 ±radius dense (protected)
+        let p8Start = max(0, p8 - policy.denseWindowRadius)
+        let p8End = min(input.totalFrames - 1, p8 + policy.denseWindowRadius)
         for frame in p8Start...p8End {
             addProtectedFrame(frame, reason: .p8Dense)
         }
 
-        // Validation/held-out: P5-12 to P8+12 all dense (protected)
+        // Validation/held-out: P5-radius to P8+radius all dense (protected)
         if input.split == .validation || input.split == .heldOut {
-            let denseStart = max(0, p5 - denseWindowRadius)
-            let denseEnd = min(input.totalFrames - 1, p8 + denseWindowRadius)
+            let denseStart = max(0, p5 - policy.denseWindowRadius)
+            let denseEnd = min(input.totalFrames - 1, p8 + policy.denseWindowRadius)
             for frame in denseStart...denseEnd {
                 addProtectedFrame(frame, reason: .validationDense)
             }
         }
 
-        // Anomaly frames (unprotected)
-        for frame in input.anomalyFrames {
+        // Anomaly frames (unprotected, deduplicated by frame)
+        let uniqueAnomalies = Set(input.anomalyFrames)
+        for frame in uniqueAnomalies {
             addUnprotectedFrame(frame, reason: .anomaly)
         }
 
-        // Pre-swing negative samples (unprotected, capped)
-        let preSwing = input.preSwingNegativeSamples
+        // Pre-swing negative samples (dedup, filter range, sort, cap)
+        let uniquePreSwing = Set(input.preSwingNegativeSamples)
+        let preSwing = uniquePreSwing
             .filter { $0 >= 0 && $0 < input.totalFrames }
             .sorted()
-            .prefix(Self.maxNegativeSamples)
+            .prefix(policy.maxNegativeSamples)
         for frame in preSwing {
             addUnprotectedFrame(frame, reason: .preSwingNegative)
         }
 
-        // Post-swing negative samples (unprotected, capped)
-        let postSwing = input.postSwingNegativeSamples
+        // Post-swing negative samples (dedup, filter range, sort, cap)
+        let uniquePostSwing = Set(input.postSwingNegativeSamples)
+        let postSwing = uniquePostSwing
             .filter { $0 >= 0 && $0 < input.totalFrames }
             .sorted()
-            .prefix(Self.maxNegativeSamples)
+            .prefix(policy.maxNegativeSamples)
         for frame in postSwing {
             addUnprotectedFrame(frame, reason: .postSwingNegative)
         }
@@ -161,5 +186,13 @@ public enum GolfAnnotationFrameQueueBuilder {
                 isProtected: isProtected
             )
         }
+    }
+
+    public static func requestDeletion(
+        of item: GolfAnnotationQueueItem,
+        from queue: [GolfAnnotationQueueItem]
+    ) -> [GolfAnnotationQueueItem]? {
+        guard !item.isProtected else { return nil }
+        return queue.filter { $0.sourceFrameIndex != item.sourceFrameIndex }
     }
 }
