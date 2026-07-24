@@ -146,7 +146,7 @@ git commit -m "feat: add single-user P point correction state"
 - Output: one corrected `SwingStage` and exact source-frame index at a time
 - Reuse: `ExactVideoFrameProvider`
 
-- [ ] **Step 1: Write the failing presentation contract**
+- [x] **Step 1: Write the failing presentation contract**
 
 Assert the production source contains:
 
@@ -157,15 +157,15 @@ Assert the production source contains:
 - action `设为 Pn`;
 - no `annotator-a`, `annotator-b`, `reviewer`, `裁定`, `人体`, `球杆` training controls.
 
-- [ ] **Step 2: Implement the workspace**
+- [x] **Step 2: Implement the workspace**
 
 Render the exact source frame with aspect fit, stage selector, current frame/total frame display, candidate/manual status, step controls, and save button. Pause playback while open. The initial selected frame is manual if present, otherwise the automatic or suggested frame.
 
-- [ ] **Step 3: Verify interaction and accessibility**
+- [x] **Step 3: Verify interaction and accessibility**
 
 Add accessibility labels for each P stage, step control, close, and set-stage action. Verify compact iPhone portrait layout without requiring vertical scrolling for the primary controls.
 
-- [ ] **Step 4: Run tests, build, and commit**
+- [x] **Step 4: Run tests, build, and commit**
 
 ```bash
 xcrun swiftc -parse-as-library Tests/PPointCorrectionPresentationSmoke.swift \

@@ -149,4 +149,8 @@ actor ExactVideoFrameSession {
         }
         return try provider.frame(at: sourceFrameIndex)
     }
+
+    func nearestSourceFrameIndex(at time: Double) -> Int? {
+        provider?.timeline.nearestSourceFrameIndex(at: time)
+    }
 }
