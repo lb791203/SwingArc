@@ -44,16 +44,16 @@ public struct GolfROIAffineTransform: Codable, Equatable, Sendable, Hashable {
         self.invTy = invTy
     }
 
-    public func fullFramePointToROI(_ point: NormalizedPoint) -> NormalizedPoint {
+    public func fullFramePointToROI(_ point: GolfNormalizedPoint) -> GolfNormalizedPoint {
         let x = a * point.x + c * point.y + tx
         let y = b * point.x + d * point.y + ty
-        return NormalizedPoint(x: x, y: y)
+        return GolfNormalizedPoint(x: x, y: y)
     }
 
-    public func roiPointToFullFrame(_ point: NormalizedPoint) -> NormalizedPoint {
+    public func roiPointToFullFrame(_ point: GolfNormalizedPoint) -> GolfNormalizedPoint {
         let x = invA * point.x + invC * point.y + invTx
         let y = invB * point.x + invD * point.y + invTy
-        return NormalizedPoint(x: x, y: y)
+        return GolfNormalizedPoint(x: x, y: y)
     }
 }
 
@@ -63,16 +63,16 @@ public struct GolfPredictionPoint: Codable, Equatable, Sendable, Hashable {
     public let heatmapConfidence: Double
     public let heatmapDispersion: Double
     public let visibilityProbabilities: [Double]
-    public let preTrackingFullFramePoint: NormalizedPoint?
-    public let postTrackingFullFramePoint: NormalizedPoint?
+    public let preTrackingFullFramePoint: GolfNormalizedPoint?
+    public let postTrackingFullFramePoint: GolfNormalizedPoint?
     public let trackingStatus: String?
     public let anomalyReason: String?
 
-    public var resolvedFullFramePoint: NormalizedPoint? {
+    public var resolvedFullFramePoint: GolfNormalizedPoint? {
         postTrackingFullFramePoint ?? preTrackingFullFramePoint
     }
 
-    public var fullFramePoint: NormalizedPoint? {
+    public var fullFramePoint: GolfNormalizedPoint? {
         resolvedFullFramePoint
     }
 
@@ -82,8 +82,8 @@ public struct GolfPredictionPoint: Codable, Equatable, Sendable, Hashable {
         heatmapConfidence: Double,
         heatmapDispersion: Double,
         visibilityProbabilities: [Double],
-        preTrackingFullFramePoint: NormalizedPoint? = nil,
-        postTrackingFullFramePoint: NormalizedPoint? = nil,
+        preTrackingFullFramePoint: GolfNormalizedPoint? = nil,
+        postTrackingFullFramePoint: GolfNormalizedPoint? = nil,
         trackingStatus: String? = nil,
         anomalyReason: String? = nil
     ) {

@@ -1,6 +1,6 @@
 import Foundation
 
-public struct NormalizedPoint: Codable, Equatable, Sendable, Hashable {
+public struct GolfNormalizedPoint: Codable, Equatable, Sendable, Hashable {
     public let x: Double
     public let y: Double
 
@@ -70,13 +70,13 @@ public enum GolfAnnotationContractError: Error, Equatable, CustomStringConvertib
 public struct GolfResolvedLandmark: Codable, Equatable, Sendable, Hashable {
     public let landmark: GolfLandmark
     public let visibility: GolfVisibilityClass
-    public let point: NormalizedPoint?
+    public let point: GolfNormalizedPoint?
     public let source: GolfAnnotationDecisionKind
 
     public init(
         landmark: GolfLandmark,
         visibility: GolfVisibilityClass,
-        point: NormalizedPoint?,
+        point: GolfNormalizedPoint?,
         source: GolfAnnotationDecisionKind
     ) {
         self.landmark = landmark
@@ -89,14 +89,14 @@ public struct GolfResolvedLandmark: Codable, Equatable, Sendable, Hashable {
 public struct GolfAnnotationDecision: Codable, Equatable, Sendable, Hashable {
     public let landmark: GolfLandmark
     public let kind: GolfAnnotationDecisionKind
-    public let fullFramePoint: NormalizedPoint?
+    public let fullFramePoint: GolfNormalizedPoint?
     public let annotatorID: String
     public let decidedAt: Date
 
     public init(
         landmark: GolfLandmark,
         kind: GolfAnnotationDecisionKind,
-        fullFramePoint: NormalizedPoint?,
+        fullFramePoint: GolfNormalizedPoint?,
         annotatorID: String,
         decidedAt: Date
     ) {

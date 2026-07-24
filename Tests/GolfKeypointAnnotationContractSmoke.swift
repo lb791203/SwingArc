@@ -13,8 +13,8 @@ struct GolfKeypointAnnotationContractSmoke {
             heatmapConfidence: 0.91,
             heatmapDispersion: 0.04,
             visibilityProbabilities: [0.9, 0.08, 0.02],
-            preTrackingFullFramePoint: NormalizedPoint(x: 0.4, y: 0.6),
-            postTrackingFullFramePoint: NormalizedPoint(x: 0.401, y: 0.601),
+            preTrackingFullFramePoint: GolfNormalizedPoint(x: 0.4, y: 0.6),
+            postTrackingFullFramePoint: GolfNormalizedPoint(x: 0.401, y: 0.601),
             trackingStatus: "tracked",
             anomalyReason: nil
         )
@@ -33,7 +33,7 @@ struct GolfKeypointAnnotationContractSmoke {
         let accepted = GolfAnnotationDecision(
             landmark: .clubhead,
             kind: .acceptedPrediction,
-            fullFramePoint: NormalizedPoint(x: 0.401, y: 0.601),
+            fullFramePoint: GolfNormalizedPoint(x: 0.401, y: 0.601),
             annotatorID: "reviewer-1",
             decidedAt: Date(timeIntervalSince1970: 10)
         )
@@ -43,7 +43,7 @@ struct GolfKeypointAnnotationContractSmoke {
         let resolvedAccepted = try validatedAccepted.resolvedLandmark(prediction: predictedWithPoint)
         precondition(resolvedAccepted?.visibility == .visible)
         precondition(resolvedAccepted?.source == .acceptedPrediction)
-        precondition(resolvedAccepted?.point == NormalizedPoint(x: 0.401, y: 0.601))
+        precondition(resolvedAccepted?.point == GolfNormalizedPoint(x: 0.401, y: 0.601))
 
         // 2b. Accepted prediction with nil prediction must fail
         do {
@@ -61,7 +61,7 @@ struct GolfKeypointAnnotationContractSmoke {
         let mismatchedAccepted = GolfAnnotationDecision(
             landmark: .clubhead,
             kind: .acceptedPrediction,
-            fullFramePoint: NormalizedPoint(x: 0.99, y: 0.99),
+            fullFramePoint: GolfNormalizedPoint(x: 0.99, y: 0.99),
             annotatorID: "reviewer-1",
             decidedAt: Date(timeIntervalSince1970: 10)
         )
@@ -74,7 +74,7 @@ struct GolfKeypointAnnotationContractSmoke {
         let corrected = GolfAnnotationDecision(
             landmark: .grip,
             kind: .correctedPoint,
-            fullFramePoint: NormalizedPoint(x: 0.45, y: 0.55),
+            fullFramePoint: GolfNormalizedPoint(x: 0.45, y: 0.55),
             annotatorID: "reviewer-1",
             decidedAt: Date(timeIntervalSince1970: 10)
         )
@@ -82,7 +82,7 @@ struct GolfKeypointAnnotationContractSmoke {
         let resolvedCorrected = try validatedCorrected.resolvedLandmark(prediction: predictedWithoutPoint)
         precondition(resolvedCorrected?.visibility == .visible)
         precondition(resolvedCorrected?.source == .correctedPoint)
-        precondition(resolvedCorrected?.point == NormalizedPoint(x: 0.45, y: 0.55))
+        precondition(resolvedCorrected?.point == GolfNormalizedPoint(x: 0.45, y: 0.55))
 
         // 4. Occluded point
         let occluded = GolfAnnotationDecision(
@@ -142,7 +142,7 @@ struct GolfKeypointAnnotationContractSmoke {
             _ = try GolfAnnotationDecision(
                 landmark: .ball,
                 kind: .outOfFrame,
-                fullFramePoint: NormalizedPoint(x: 0.5, y: 0.5),
+                fullFramePoint: GolfNormalizedPoint(x: 0.5, y: 0.5),
                 annotatorID: "reviewer-1",
                 decidedAt: Date()
             ).validated()
@@ -154,7 +154,7 @@ struct GolfKeypointAnnotationContractSmoke {
             _ = try GolfAnnotationDecision(
                 landmark: .grip,
                 kind: .correctedPoint,
-                fullFramePoint: NormalizedPoint(x: 1.5, y: 0.5),
+                fullFramePoint: GolfNormalizedPoint(x: 1.5, y: 0.5),
                 annotatorID: "reviewer-1",
                 decidedAt: Date()
             ).validated()
@@ -166,7 +166,7 @@ struct GolfKeypointAnnotationContractSmoke {
             _ = try GolfAnnotationDecision(
                 landmark: .grip,
                 kind: .correctedPoint,
-                fullFramePoint: NormalizedPoint(x: Double.nan, y: 0.5),
+                fullFramePoint: GolfNormalizedPoint(x: Double.nan, y: 0.5),
                 annotatorID: "reviewer-1",
                 decidedAt: Date()
             ).validated()
@@ -178,7 +178,7 @@ struct GolfKeypointAnnotationContractSmoke {
             _ = try GolfAnnotationDecision(
                 landmark: .grip,
                 kind: .correctedPoint,
-                fullFramePoint: NormalizedPoint(x: 0.5, y: 0.5),
+                fullFramePoint: GolfNormalizedPoint(x: 0.5, y: 0.5),
                 annotatorID: "   ",
                 decidedAt: Date()
             ).validated()
@@ -259,8 +259,8 @@ struct GolfKeypointAnnotationContractSmoke {
         precondition(decodedRun.visionFrameworkVersion == "1.0.0")
         precondition(decodedRun.visionRequestVersion == "VNDetectHumanBodyPoseRequest-v1")
         precondition(decodedRun.frames[0].anomalyReason == "motion-blur")
-        precondition(decodedRun.frames[0].points[.clubhead]?.preTrackingFullFramePoint == NormalizedPoint(x: 0.4, y: 0.6))
-        precondition(decodedRun.frames[0].points[.clubhead]?.postTrackingFullFramePoint == NormalizedPoint(x: 0.401, y: 0.601))
+        precondition(decodedRun.frames[0].points[.clubhead]?.preTrackingFullFramePoint == GolfNormalizedPoint(x: 0.4, y: 0.6))
+        precondition(decodedRun.frames[0].points[.clubhead]?.postTrackingFullFramePoint == GolfNormalizedPoint(x: 0.401, y: 0.601))
         precondition(decodedRun.frames[0].points[.clubhead]?.trackingStatus == "tracked")
         precondition(decodedRun.frames[0].points[.ball]?.anomalyReason == "low-confidence")
 
