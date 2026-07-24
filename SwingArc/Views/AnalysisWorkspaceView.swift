@@ -19,7 +19,7 @@ struct AnalysisWorkspaceView: View {
     let onAnalyze: () -> Void
     let onCancelAnalysis: () -> Void
     let onSetManualStage: (SwingStage) -> Void
-    let onAnnotate: () -> Void
+    let onCorrectPPoints: () -> Void
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var interactionMode: WorkspaceInteractionMode = .idle
@@ -187,7 +187,7 @@ struct AnalysisWorkspaceView: View {
                 onToggleProjectSidebar: { showsProjectSidebar.toggle() },
                 onToggleInspector: { showsInspector.toggle() },
                 onShowResults: showResults(isRegularLayout: isRegularLayout),
-                onAnnotate: onAnnotate,
+                onCorrectPPoints: onCorrectPPoints,
                 onExport: onExport
             )
 
@@ -354,13 +354,13 @@ struct AnalysisWorkspaceView: View {
 
             Spacer(minLength: 0)
 
-            Button(action: onAnnotate) {
-                Text("标注")
+            Button(action: onCorrectPPoints) {
+                Text("修正 P 点")
                     .font(.system(size: 14, weight: .semibold))
-                    .frame(minWidth: 44, minHeight: 42)
+                    .frame(minWidth: 72, minHeight: 42)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("打开精确标注")
+            .accessibilityLabel("修正 P 点")
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 16)
@@ -503,7 +503,7 @@ struct AnalysisWorkspaceView: View {
             Button(action: toggleDrawingMode) {
                 HStack(spacing: 7) {
                     Image(systemName: "pencil.tip")
-                    Text("标注")
+                    Text("画线")
                 }
                 .font(.system(size: 15, weight: .bold))
                 .padding(.horizontal, 20)
@@ -525,7 +525,7 @@ struct AnalysisWorkspaceView: View {
                 )
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(interactionMode == .drawing ? "结束标注" : "开始标注")
+            .accessibilityLabel(interactionMode == .drawing ? "结束画线" : "开始画线")
 
             Spacer(minLength: 20)
 

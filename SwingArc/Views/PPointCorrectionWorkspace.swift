@@ -5,6 +5,7 @@ struct PPointCorrectionWorkspace: View {
     let videoURL: URL
     let prediction: AnnotationPredictionSnapshot
     let manualMarkers: [KeyframeMarker]
+    let initialTime: Double
     let onClose: () -> Void
     let onSave: (PPointCode, Int, Double) -> Void
 
@@ -248,12 +249,23 @@ struct PPointCorrectionWorkspace: View {
             manual[code] = frame
         }
 
-        let initial = PPointCorrectionState(
+        var initial = PPointCorrectionState(
             frameCount: frameController.frameCount,
             predictedFrames: predicted,
             suggestedFrames: suggested,
             manualFrames: manual
         )
+        if predicted.isEmpty,
+           suggested.isEmpty,
+           manual.isEmpty,
+           let initialFrame = await frameController.nearestSourceFrameIndex(
+               at: initialTime
+           ) {
+            PPointCorrectionReducer.reduce(
+                state: &initial,
+                action: .step(initialFrame)
+            )
+        }
         correctionState = initial
         _ = await frameController.show(
             index: initial.currentSourceFrameIndex

@@ -34,7 +34,7 @@ struct ContentView: View {
     @State private var showProjectLibrary = false
     @State private var showVideoPicker = false
     @State private var showManualCapture = false
-    @State private var showAnnotationWorkspace = false
+    @State private var showPPointCorrection = false
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var showExportActions = false
     @State private var sharePayload: SharePayload?
@@ -80,9 +80,9 @@ struct ContentView: View {
                     onAnalyze: runAISwingAnalysis,
                     onCancelAnalysis: playbackManager.cancelAnalysis,
                     onSetManualStage: saveManualStage,
-                    onAnnotate: {
+                    onCorrectPPoints: {
                         playbackManager.pause()
-                        showAnnotationWorkspace = true
+                        showPPointCorrection = true
                     }
                 )
             } else if showProjectLibrary {
@@ -154,19 +154,18 @@ struct ContentView: View {
                 persistCapturedVideo(temporaryURL)
             }
         }
-        .fullScreenCover(isPresented: $showAnnotationWorkspace) {
+        .fullScreenCover(isPresented: $showPPointCorrection) {
             if let currentProjectURL {
-                AnnotationWorkspaceView(
+                PPointCorrectionWorkspace(
                     videoURL: currentProjectURL,
                     prediction: AnnotationPredictionAdapter.snapshot(
                         detections: playbackManager.analysisOutput?.result.detections ?? [],
                         frames: playbackManager.analysisOutput?.observationFrames ?? []
                     ),
-                    onClose: { showAnnotationWorkspace = false },
-                    onExport: { url in
-                        showAnnotationWorkspace = false
-                        sharePayload = SharePayload(url: url)
-                    }
+                    manualMarkers: keyframes,
+                    initialTime: playbackManager.currentTime,
+                    onClose: { showPPointCorrection = false },
+                    onSave: savePPointCorrection
                 )
             }
         }
@@ -388,21 +387,59 @@ struct ContentView: View {
     }
 
     private func saveManualStage(_ stage: SwingStage) {
-        let marker = KeyframeMarker(time: playbackManager.currentTime, stage: stage, source: .manual)
+        let sourceFrameIndex: Int?
+        if playbackManager.sourceFrameRate > 0 {
+            sourceFrameIndex = Int(
+                (playbackManager.currentTime * playbackManager.sourceFrameRate).rounded()
+            )
+        } else {
+            sourceFrameIndex = nil
+        }
+        saveManualStage(
+            stage,
+            time: playbackManager.currentTime,
+            sourceFrameIndex: sourceFrameIndex
+        )
+    }
+
+    private func savePPointCorrection(
+        code: PPointCode,
+        sourceFrameIndex: Int,
+        time: Double
+    ) {
+        guard SwingStage.pStages.indices.contains(code.ordinal) else { return }
+        let stage = SwingStage.pStages[code.ordinal]
+        saveManualStage(
+            stage,
+            time: time,
+            sourceFrameIndex: sourceFrameIndex
+        )
+        playbackManager.seek(to: time)
+    }
+
+    private func saveManualStage(
+        _ stage: SwingStage,
+        time: Double,
+        sourceFrameIndex: Int?
+    ) {
+        let marker = KeyframeMarker(
+            time: time,
+            stage: stage,
+            source: .manual
+        )
         keyframes.removeAll { $0.stage == stage.rawValue }
         keyframes.append(marker)
         keyframes.sort { $0.time < $1.time }
         guard let view = practiceCameraView,
               let automaticFrame = playbackManager.analysisOutput?.result.detections
                 .first(where: { $0.stage == stage })?.sourceFrameIndex,
-              playbackManager.sourceFrameRate > 0 else { return }
-        let manualFrame = Int((playbackManager.currentTime * playbackManager.sourceFrameRate).rounded())
+              let sourceFrameIndex else { return }
         stageCorrections.removeAll { $0.stage == stage && $0.view == view }
         stageCorrections.append(StageCorrection(
             stage: stage,
             view: view,
             automaticFrameIndex: automaticFrame,
-            manualFrameIndex: manualFrame
+            manualFrameIndex: sourceFrameIndex
         ))
     }
 

@@ -195,11 +195,11 @@ git commit -m "feat: add precise P point correction workspace"
 - Rename precise correction action to `修正 P 点`
 - Replace `AnnotationWorkspaceView` presentation with `PPointCorrectionWorkspace`
 
-- [ ] **Step 1: Change source-contract tests and verify RED**
+- [x] **Step 1: Change source-contract tests and verify RED**
 
 Assert that `ContentView` opens `PPointCorrectionWorkspace`, that the phone-facing source no longer opens `AnnotationWorkspaceView`, and that visible labels use `画线` and `修正 P 点`.
 
-- [ ] **Step 2: Wire corrected stages into the current project**
+- [x] **Step 2: Wire corrected stages into the current project**
 
 On save:
 
@@ -209,11 +209,11 @@ On save:
 4. persist through `LocalProjectStore`;
 5. return to the same analysis screen and seek to the corrected frame.
 
-- [ ] **Step 3: Preserve locks across reanalysis**
+- [x] **Step 3: Preserve locks across reanalysis**
 
 Keep `StageMarkerMerger.merge(existing:automatic:)` and `ManualStageDetectionPolicy` behavior covered so automatic analysis never replaces manual stages.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 Run the presentation, integration, manual-lock, and project-persistence smoke tests plus a full unsigned iOS build.
 

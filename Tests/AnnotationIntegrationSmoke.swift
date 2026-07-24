@@ -51,12 +51,14 @@ struct AnnotationIntegrationSmoke {
             let workspace = try! String(contentsOfFile: arguments[2], encoding: .utf8)
             let components = try! String(contentsOfFile: arguments[3], encoding: .utf8)
 
-            precondition(contentView.contains("showAnnotationWorkspace"))
-            precondition(contentView.contains("AnnotationWorkspaceView("))
-            precondition(contentView.contains(".fullScreenCover(isPresented: $showAnnotationWorkspace)"))
-            precondition(workspace.contains("let onAnnotate: () -> Void"))
-            precondition(components.contains("let onAnnotate: () -> Void"))
-            precondition(components.contains("Text(\"标注\")"))
+            precondition(contentView.contains("showPPointCorrection"))
+            precondition(contentView.contains("PPointCorrectionWorkspace("))
+            precondition(!contentView.contains("AnnotationWorkspaceView("))
+            precondition(workspace.contains("let onCorrectPPoints: () -> Void"))
+            precondition(components.contains("let onCorrectPPoints: () -> Void"))
+            precondition(workspace.contains("Text(\"修正 P 点\")"))
+            precondition(workspace.contains("Text(\"画线\")"))
+            precondition(components.contains("Text(\"修正 P 点\")"))
         }
     }
 }
