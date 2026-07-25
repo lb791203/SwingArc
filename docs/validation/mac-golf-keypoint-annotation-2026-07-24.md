@@ -83,6 +83,10 @@ The smoke verified:
 - media SHA, timeline SHA, or frame-count mismatch opens read-only;
 - held-out restore and clip selection do not decode or load prediction content;
 - save failure opens read-only without claiming the revision was saved.
+- out-of-order A→B media open and frame completion cannot publish stale A data;
+- unreadable revision history opens read-only instead of appearing empty;
+- multiple prediction runs require an explicit persisted run ID rather than
+  filename-order selection.
 
 Observed output:
 
