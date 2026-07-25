@@ -11,7 +11,7 @@ public enum DatasetAnnotationAction: Equatable, Sendable {
 }
 
 /// A display-only point. It never mutates the immutable prediction run.
-public struct DatasetAnnotationPresentation: Equatable, Sendable {
+public struct DatasetLandmarkPresentation: Equatable, Sendable {
     public let landmark: GolfLandmark
     public let point: GolfNormalizedPoint
     public let isPrediction: Bool
@@ -31,7 +31,9 @@ public struct DatasetAnnotationPresentation: Equatable, Sendable {
 }
 
 public struct DatasetAnnotationState: Equatable, Sendable {
-    public let predictionRun: GolfPredictionRun
+    /// Held-out blind passes intentionally have no loaded prediction object.
+    public let predictionRun: GolfPredictionRun?
+    public let parentPredictionRunID: String
     public let mediaFrameCount: Int
     public let annotationQueue: [GolfAnnotationQueueItem]
     public internal(set) var currentSourceFrameIndex: Int
@@ -40,7 +42,8 @@ public struct DatasetAnnotationState: Equatable, Sendable {
     public let revisionID: String
 
     public init(
-        predictionRun: GolfPredictionRun,
+        predictionRun: GolfPredictionRun?,
+        parentPredictionRunID: String? = nil,
         mediaFrameCount: Int,
         annotationQueue: [GolfAnnotationQueueItem],
         currentSourceFrameIndex: Int,
@@ -49,6 +52,7 @@ public struct DatasetAnnotationState: Equatable, Sendable {
         revisionID: String
     ) {
         self.predictionRun = predictionRun
+        self.parentPredictionRunID = parentPredictionRunID ?? predictionRun?.predictionRunID ?? ""
         self.mediaFrameCount = max(0, mediaFrameCount)
         self.annotationQueue = annotationQueue
         self.currentSourceFrameIndex = Self.clamped(
@@ -72,7 +76,7 @@ public struct DatasetAnnotationState: Equatable, Sendable {
     }
 
     public var currentPredictionFrame: GolfPredictionFrame? {
-        predictionRun.frames.first { $0.sourceFrameIndex == currentSourceFrameIndex }
+        predictionRun?.frames.first { $0.sourceFrameIndex == currentSourceFrameIndex }
     }
 
     public var currentFrameIsReviewed: Bool {
@@ -128,14 +132,14 @@ public struct DatasetAnnotationState: Equatable, Sendable {
 
     /// Prediction-first display: an undecided point is shown from the run, while
     /// accepted/corrected decisions override it. Hidden and unresolved decisions draw nothing.
-    public func presentation(for landmark: GolfLandmark) -> DatasetAnnotationPresentation? {
+    public func presentation(for landmark: GolfLandmark) -> DatasetLandmarkPresentation? {
         let key = AnnotationDecisionKey(frameIndex: currentSourceFrameIndex, landmark: landmark)
         if let decision = decisions[key] {
             guard let point = decision.fullFramePoint,
                   decision.kind == .acceptedPrediction || decision.kind == .correctedPoint else {
                 return nil
             }
-            return DatasetAnnotationPresentation(
+            return DatasetLandmarkPresentation(
                 landmark: landmark,
                 point: point,
                 isPrediction: decision.kind == .acceptedPrediction,
@@ -147,7 +151,7 @@ public struct DatasetAnnotationState: Equatable, Sendable {
               Self.isUnitPoint(point) else {
             return nil
         }
-        return DatasetAnnotationPresentation(
+        return DatasetLandmarkPresentation(
             landmark: landmark,
             point: point,
             isPrediction: true,

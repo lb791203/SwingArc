@@ -87,6 +87,7 @@
 	D20000000000000000000123 /* DatasetFrameCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000143 /* DatasetFrameCanvas.swift */; };
 	D20000000000000000000124 /* DatasetKeypointInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000144 /* DatasetKeypointInspector.swift */; };
 	D20000000000000000000125 /* DatasetTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000145 /* DatasetTimelineView.swift */; };
+	D20000000000000000000126 /* DatasetWorkspaceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000146 /* DatasetWorkspaceController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -168,6 +169,7 @@
 		D20000000000000000000143 /* DatasetFrameCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetFrameCanvas.swift; sourceTree = "<group>"; };
 		D20000000000000000000144 /* DatasetKeypointInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetKeypointInspector.swift; sourceTree = "<group>"; };
 		D20000000000000000000145 /* DatasetTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetTimelineView.swift; sourceTree = "<group>"; };
+		D20000000000000000000146 /* DatasetWorkspaceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetWorkspaceController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -329,6 +331,7 @@
 			isa = PBXGroup;
 			children = (
 				D20000000000000000000022 /* DatasetImportController.swift */,
+				D20000000000000000000146 /* DatasetWorkspaceController.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -538,6 +541,7 @@
 				D20000000000000000000123 /* DatasetFrameCanvas.swift in Sources */,
 				D20000000000000000000124 /* DatasetKeypointInspector.swift in Sources */,
 				D20000000000000000000125 /* DatasetTimelineView.swift in Sources */,
+				D20000000000000000000126 /* DatasetWorkspaceController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

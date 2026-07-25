@@ -15,7 +15,7 @@ struct DatasetClipRowModel: Identifiable {
 }
 
 /// Filter categories for the clip list.
-enum DatasetSidebarFilter: String, CaseIterable, Hashable {
+public enum DatasetSidebarFilter: String, CaseIterable, Hashable, Codable, Sendable {
     case allClips = "全部"
     case pendingReview = "待复核"
     case p6p8 = "P6/P8"

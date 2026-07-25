@@ -39,6 +39,7 @@ struct DatasetFrameCanvas: View {
     let onCorrectPoint: (GolfLandmark, GolfNormalizedPoint) -> Void
     let onToggleROI: () -> Void
     let isLoading: Bool
+    let isEditable: Bool
     let statusMessage: String?
 
     private let landmarkColors: [GolfLandmark: Color] = [
@@ -163,6 +164,7 @@ struct DatasetFrameCanvas: View {
                 guard let landmark = selectedLandmark,
                       displayedImage != nil,
                       !isLoading,
+                      isEditable,
                       imageRect.contains(gesture.location),
                       imageRect.width > 0, imageRect.height > 0 else { return }
                 let imagePoint = GolfNormalizedPoint(
@@ -227,7 +229,7 @@ struct DatasetFrameCanvas: View {
         fullFrameImage: nil, roiImage: nil,
         fullFrameImageSize: CGSize(width: 1920, height: 1080), roiImageSize: CGSize(width: 512, height: 512),
         landmarkPoints: [], selectedLandmark: nil, trailPoints: [:], visionSkeleton: [], roiTransform: nil,
-        onCorrectPoint: { _, _ in }, onToggleROI: {}, isLoading: false, statusMessage: nil
+        onCorrectPoint: { _, _ in }, onToggleROI: {}, isLoading: false, isEditable: false, statusMessage: nil
     )
     .frame(width: 800, height: 500)
 }

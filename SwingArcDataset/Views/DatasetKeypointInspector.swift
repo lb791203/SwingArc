@@ -35,6 +35,7 @@ struct DatasetKeypointInspector: View {
     let canSave: Bool
     let canAcceptFrame: Bool
     let isFrameEditable: Bool
+    let allowsPredictionAcceptance: Bool
     let selectedLandmark: GolfLandmark?
     let onSelectLandmark: (GolfLandmark) -> Void
     let onAcceptPrediction: (GolfLandmark) -> Void
@@ -103,7 +104,7 @@ struct DatasetKeypointInspector: View {
             }
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                actionButton("接受预测", color: .green, enabled: isFrameEditable && landmark.predictionPoint != nil) { onAcceptPrediction(landmark.id) }
+                actionButton("接受预测", color: .green, enabled: isFrameEditable && allowsPredictionAcceptance && landmark.predictionPoint != nil) { onAcceptPrediction(landmark.id) }
                 actionButton("修正坐标", color: .yellow, enabled: isFrameEditable) { onCorrectPoint(landmark.id) }
                 actionButton("遮挡", color: .orange, enabled: isFrameEditable) { onSetOccluded(landmark.id) }
                 actionButton("出画", color: .red, enabled: isFrameEditable) { onSetOutOfFrame(landmark.id) }
@@ -148,7 +149,7 @@ struct DatasetKeypointInspector: View {
     DatasetKeypointInspector(
         landmarks: GolfLandmark.allCases.map { LandmarkInspectorRowModel(id: $0, label: $0.rawValue, predictionPoint: nil, predictionConfidence: nil, decisionPoint: nil, decisionKind: nil) },
         predictionRunID: "—", revisionID: "—", isReviewed: false, isComplete: false, canSave: false, canAcceptFrame: false,
-        isFrameEditable: false, selectedLandmark: nil, onSelectLandmark: { _ in }, onAcceptPrediction: { _ in }, onCorrectPoint: { _ in },
+        isFrameEditable: false, allowsPredictionAcceptance: false, selectedLandmark: nil, onSelectLandmark: { _ in }, onAcceptPrediction: { _ in }, onCorrectPoint: { _ in },
         onSetOccluded: { _ in }, onSetOutOfFrame: { _ in }, onSetUnresolved: { _ in }, onAcceptFrame: {}
     )
 }

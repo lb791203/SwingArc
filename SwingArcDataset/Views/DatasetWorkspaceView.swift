@@ -17,6 +17,7 @@ struct DatasetWorkspaceView: View {
     let isFrameLoading: Bool
     let showsROI: Bool
     let currentSourceTime: Double?
+    let workspaceAccess: DatasetWorkspaceAccess
 
     let onSelectClip: (String) -> Void
     let onSelectFilter: (DatasetSidebarFilter) -> Void
@@ -53,6 +54,7 @@ struct DatasetWorkspaceView: View {
                     onCorrectPoint: onCorrectPoint,
                     onToggleROI: onToggleROI,
                     isLoading: isFrameLoading,
+                    isEditable: workspaceAccess == .editable,
                     statusMessage: statusMessage
                 )
                 Divider()
@@ -68,13 +70,14 @@ struct DatasetWorkspaceView: View {
             if let state = annotationState {
                 DatasetKeypointInspector(
                     landmarks: inspectorRows(from: state),
-                    predictionRunID: state.predictionRun.predictionRunID,
-                    revisionID: state.revisionID,
+                    predictionRunID: state.predictionRun?.predictionRunID ?? state.parentPredictionRunID,
+                    revisionID: state.revisionID.isEmpty ? "尚未保存" : state.revisionID,
                     isReviewed: state.currentFrameIsReviewed,
                     isComplete: state.currentFrameIsComplete,
                     canSave: state.canSaveCurrentFrame,
                     canAcceptFrame: state.canAcceptCurrentFrame,
-                    isFrameEditable: state.frameCount > 0,
+                    isFrameEditable: state.frameCount > 0 && workspaceAccess == .editable,
+                    allowsPredictionAcceptance: state.predictionRun != nil,
                     selectedLandmark: selectedLandmark,
                     onSelectLandmark: { selectedLandmark = $0 },
                     onAcceptPrediction: onAcceptPrediction,
@@ -117,6 +120,7 @@ struct DatasetWorkspaceView: View {
         var parts: [String] = []
         if let currentSourceTime { parts.append(String(format: "源时间 %.3fs", currentSourceTime)) }
         if showsROI { parts.append("512 × 512 ROI") }
+        if case .readOnly(let reason) = workspaceAccess { parts.append("只读：\(reason)") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
@@ -141,9 +145,38 @@ struct DatasetWorkspaceView: View {
         clips: [], selectedClipID: nil, selectedFilter: .allClips, annotationState: nil,
         fullFrameImage: nil, roiImage: nil,
         fullFrameImageSize: CGSize(width: 1920, height: 1080), roiImageSize: CGSize(width: 512, height: 512),
-        visionSkeleton: [], trailPoints: [:], timelineStages: [], isFrameLoading: false, showsROI: false, currentSourceTime: nil,
+        visionSkeleton: [], trailPoints: [:], timelineStages: [], isFrameLoading: false, showsROI: false, currentSourceTime: nil, workspaceAccess: .readOnly(reason: "预览"),
         onSelectClip: { _ in }, onSelectFilter: { _ in }, onStep: { _ in }, onToggleROI: {}, onAcceptPrediction: { _ in },
         onCorrectPoint: { _, _ in }, onSetOccluded: { _ in }, onSetOutOfFrame: { _ in }, onSetUnresolved: { _ in }, onAcceptFrame: {}
     )
     .frame(minWidth: 1000, minHeight: 600)
+}
+
+/// Keeps the workspace dependency-injected while binding the production actions
+/// to one retained controller instance.
+struct DatasetWorkspaceHostView: View {
+    @ObservedObject var controller: DatasetWorkspaceController
+
+    var body: some View {
+        DatasetWorkspaceView(
+            clips: controller.clips.map { clip in
+                DatasetClipRowModel(id: clip.clipID, golferID: clip.golferID, view: clip.view.rawValue,
+                                    split: controller.split(for: clip).rawValue, completionProgress: 0,
+                                    pendingReviewCount: 0, hasP6P8Issues: false, hasTrackingBreaks: false,
+                                    hasLowConfidence: false, hasROIOOB: false)
+            }, selectedClipID: controller.selectedClipID, selectedFilter: controller.selectedFilter,
+            annotationState: controller.annotationState, fullFrameImage: controller.fullFrameImage, roiImage: nil,
+            fullFrameImageSize: CGSize(width: 1920, height: 1080), roiImageSize: CGSize(width: 512, height: 512),
+            visionSkeleton: [], trailPoints: [:], timelineStages: [], isFrameLoading: controller.isFrameLoading, showsROI: false,
+            currentSourceTime: controller.currentSourceTime, workspaceAccess: controller.access,
+            onSelectClip: { _ in }, onSelectFilter: controller.selectFilter,
+            onStep: { controller.dispatch(.step($0)) }, onToggleROI: {},
+            onAcceptPrediction: { controller.dispatch(.acceptPrediction($0, decidedAt: Date())) },
+            onCorrectPoint: { controller.dispatch(.correctPoint($0, $1, decidedAt: Date())) },
+            onSetOccluded: { controller.dispatch(.setOccluded($0, decidedAt: Date())) },
+            onSetOutOfFrame: { controller.dispatch(.setOutOfFrame($0, decidedAt: Date())) },
+            onSetUnresolved: { controller.dispatch(.setUnresolved($0, decidedAt: Date())) },
+            onAcceptFrame: { controller.dispatch(.acceptUnresolvedFrame(decidedAt: Date())) }
+        )
+    }
 }
