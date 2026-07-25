@@ -51,17 +51,20 @@ public struct DatasetWorkspaceSessionRecord: Codable, Equatable, Sendable {
     public let currentSourceFrameIndex: Int
     public let filter: DatasetSidebarFilter
     public let activeRevisionID: String?
+    public let activePredictionRunID: String?
 
     public init(
         clipID: String,
         currentSourceFrameIndex: Int,
         filter: DatasetSidebarFilter,
-        activeRevisionID: String?
+        activeRevisionID: String?,
+        activePredictionRunID: String? = nil
     ) {
         self.clipID = clipID
         self.currentSourceFrameIndex = currentSourceFrameIndex
         self.filter = filter
         self.activeRevisionID = activeRevisionID
+        self.activePredictionRunID = activePredictionRunID
     }
 }
 
@@ -204,6 +207,23 @@ public protocol DatasetWorkspaceMediaAccessing: AnyObject {
 }
 
 @MainActor
+public protocol DatasetWorkspaceMediaAccessFactory: AnyObject {
+    /// Every call must return a new independently owned media session.
+    func makeMediaAccess() -> DatasetWorkspaceMediaAccessing
+}
+
+@MainActor
+public final class SecurityScopedExactVideoMediaAccessFactory:
+    DatasetWorkspaceMediaAccessFactory
+{
+    public init() {}
+
+    public func makeMediaAccess() -> DatasetWorkspaceMediaAccessing {
+        SecurityScopedExactVideoMediaAccess()
+    }
+}
+
+@MainActor
 public final class SecurityScopedExactVideoMediaAccess:
     DatasetWorkspaceMediaAccessing
 {
@@ -269,8 +289,9 @@ public final class DatasetWorkspaceController: ObservableObject {
     private let store: DatasetWorkspaceStore
     private let sessionPersistence: DatasetWorkspaceSessionPersisting
     private let bookmarkPersistence: DatasetWorkspaceBookmarkPersisting
-    private let mediaAccess: DatasetWorkspaceMediaAccessing
+    private let mediaAccessFactory: DatasetWorkspaceMediaAccessFactory
     private let annotatorID: String
+    private var activeMediaAccess: DatasetWorkspaceMediaAccessing?
     private var selectionGeneration = 0
     private var frameLoadGeneration = 0
 
@@ -281,6 +302,7 @@ public final class DatasetWorkspaceController: ObservableObject {
     @Published public private(set) var access: DatasetWorkspaceAccess =
         .readOnly(reason: "尚未选择 clip")
     @Published public private(set) var activeRevisionID: String?
+    @Published public private(set) var activePredictionRunID: String?
     @Published public private(set) var fullFrameImage: CGImage?
     @Published public private(set) var currentSourceTime: Double?
     @Published public private(set) var isFrameLoading = false
@@ -290,13 +312,14 @@ public final class DatasetWorkspaceController: ObservableObject {
         sessionPersistence: DatasetWorkspaceSessionPersisting,
         bookmarkPersistence: DatasetWorkspaceBookmarkPersisting =
             UserDefaultsDatasetWorkspaceBookmarkPersistence(),
-        mediaAccess: DatasetWorkspaceMediaAccessing? = nil,
+        mediaAccessFactory: DatasetWorkspaceMediaAccessFactory? = nil,
         annotatorID: String
     ) {
         self.store = store
         self.sessionPersistence = sessionPersistence
         self.bookmarkPersistence = bookmarkPersistence
-        self.mediaAccess = mediaAccess ?? SecurityScopedExactVideoMediaAccess()
+        self.mediaAccessFactory = mediaAccessFactory
+            ?? SecurityScopedExactVideoMediaAccessFactory()
         self.annotatorID = annotatorID
         reloadClipList()
     }
@@ -342,14 +365,19 @@ public final class DatasetWorkspaceController: ObservableObject {
         await selectClip(
             record.clipID,
             preferredRevisionID: record.activeRevisionID,
+            preferredPredictionRunID: record.activePredictionRunID,
             preferredFrame: record.currentSourceFrameIndex
         )
     }
 
-    public func selectClip(_ clipID: String) async {
+    public func selectClip(
+        _ clipID: String,
+        predictionRunID: String? = nil
+    ) async {
         await selectClip(
             clipID,
             preferredRevisionID: nil,
+            preferredPredictionRunID: predictionRunID,
             preferredFrame: nil
         )
     }
@@ -357,9 +385,11 @@ public final class DatasetWorkspaceController: ObservableObject {
     private func selectClip(
         _ clipID: String,
         preferredRevisionID: String?,
+        preferredPredictionRunID: String?,
         preferredFrame: Int?
     ) async {
         selectionGeneration += 1
+        frameLoadGeneration += 1
         let generation = selectionGeneration
         guard let clip = clips.first(where: { $0.clipID == clipID }) else {
             clearSelection(reason: "找不到所选 clip。")
@@ -368,9 +398,11 @@ public final class DatasetWorkspaceController: ObservableObject {
         selectedClipID = clipID
         annotationState = nil
         activeRevisionID = nil
+        activePredictionRunID = nil
         fullFrameImage = nil
         currentSourceTime = nil
-        mediaAccess.close()
+        activeMediaAccess?.close()
+        activeMediaAccess = nil
 
         guard let bookmark = bookmarkPersistence.loadBookmark(for: clipID),
               !bookmark.isEmpty else {
@@ -379,20 +411,43 @@ public final class DatasetWorkspaceController: ObservableObject {
             return
         }
 
+        let candidateMediaAccess = mediaAccessFactory.makeMediaAccess()
         do {
-            let metadata = try await mediaAccess.open(bookmark: bookmark)
-            guard generation == selectionGeneration else { return }
-            let revision = latestRevision(
+            let metadata = try await candidateMediaAccess.open(
+                bookmark: bookmark
+            )
+            guard generation == selectionGeneration else {
+                candidateMediaAccess.close()
+                return
+            }
+            let revision = try latestRevision(
                 for: clipID,
                 preferredID: preferredRevisionID
             )
             let predictionRunIDs = try store.listPredictionRunIDs(
                 clipID: clipID
             )
-            let parentPredictionRunID =
-                revision?.parentPredictionRunID
-                ?? predictionRunIDs.last
-                ?? ""
+            let parentPredictionRunID: String
+            if let revision {
+                parentPredictionRunID = revision.parentPredictionRunID
+            } else if let preferredPredictionRunID {
+                guard predictionRunIDs.contains(preferredPredictionRunID) else {
+                    candidateMediaAccess.close()
+                    access = .readOnly(reason: "指定的预测运行不存在。")
+                    persistSession()
+                    return
+                }
+                parentPredictionRunID = preferredPredictionRunID
+            } else if predictionRunIDs.count == 1 {
+                parentPredictionRunID = predictionRunIDs[0]
+            } else if predictionRunIDs.count > 1 {
+                candidateMediaAccess.close()
+                access = .readOnly(reason: "存在多个预测运行，必须明确选择一个运行。")
+                persistSession()
+                return
+            } else {
+                parentPredictionRunID = ""
+            }
             try openVerifiedClip(
                 clip: clip,
                 split: split(for: clip),
@@ -403,13 +458,16 @@ public final class DatasetWorkspaceController: ObservableObject {
                 preferredFrame: preferredFrame
             )
             guard case .editable = access else {
-                mediaAccess.close()
+                candidateMediaAccess.close()
                 return
             }
+            activeMediaAccess = candidateMediaAccess
             await loadExactCurrentFrame()
         } catch {
+            candidateMediaAccess.close()
             guard generation == selectionGeneration else { return }
-            mediaAccess.close()
+            activeMediaAccess?.close()
+            activeMediaAccess = nil
             access = .readOnly(
                 reason: "无法打开或核验视频书签：\(error.localizedDescription)"
             )
@@ -438,7 +496,7 @@ public final class DatasetWorkspaceController: ObservableObject {
             return
         }
 
-        let revision = latestRevision(
+        let revision = try latestRevision(
             for: clip.clipID,
             preferredID: preferredRevisionID
         )
@@ -474,6 +532,7 @@ public final class DatasetWorkspaceController: ObservableObject {
             revisionID: revision?.revisionID ?? ""
         )
         activeRevisionID = revision?.revisionID
+        activePredictionRunID = parentID
         access = .editable
         persistSession()
     }
@@ -501,7 +560,9 @@ public final class DatasetWorkspaceController: ObservableObject {
         if case .step = action {
             annotationState = next
             persistSession()
-            Task { await self.loadExactCurrentFrame() }
+            if activeMediaAccess != nil {
+                Task { await self.loadExactCurrentFrame() }
+            }
             return
         }
         guard next != state else { return }
@@ -523,6 +584,9 @@ public final class DatasetWorkspaceController: ObservableObject {
             }
         }
         do {
+            guard let mediaAccess = activeMediaAccess else {
+                throw CocoaError(.fileNoSuchFile)
+            }
             let frame = try await mediaAccess.frame(at: frameIndex)
             guard generation == frameLoadGeneration,
                   frameIndex == annotationState?.currentSourceFrameIndex else {
@@ -537,7 +601,9 @@ public final class DatasetWorkspaceController: ObservableObject {
     }
 
     public func closeMedia() {
-        mediaAccess.close()
+        frameLoadGeneration += 1
+        activeMediaAccess?.close()
+        activeMediaAccess = nil
     }
 
     func split(for clip: GolfClipIdentity) -> GolfDatasetSplit {
@@ -586,8 +652,8 @@ public final class DatasetWorkspaceController: ObservableObject {
     private func latestRevision(
         for clipID: String,
         preferredID: String?
-    ) -> GolfAnnotationRevision? {
-        let revisions = (try? store.loadRevisions(clipID: clipID)) ?? []
+    ) throws -> GolfAnnotationRevision? {
+        let revisions = try store.loadRevisions(clipID: clipID)
         if let preferredID,
            let preferred = revisions.first(where: {
                $0.revisionID == preferredID
@@ -607,7 +673,8 @@ public final class DatasetWorkspaceController: ObservableObject {
                 currentSourceFrameIndex:
                     annotationState?.currentSourceFrameIndex ?? 0,
                 filter: selectedFilter,
-                activeRevisionID: activeRevisionID
+                activeRevisionID: activeRevisionID,
+                activePredictionRunID: activePredictionRunID
             )
         )
     }
@@ -615,10 +682,12 @@ public final class DatasetWorkspaceController: ObservableObject {
     private func clearSelection(reason: String) {
         selectionGeneration += 1
         frameLoadGeneration += 1
-        mediaAccess.close()
+        activeMediaAccess?.close()
+        activeMediaAccess = nil
         selectedClipID = nil
         annotationState = nil
         activeRevisionID = nil
+        activePredictionRunID = nil
         fullFrameImage = nil
         currentSourceTime = nil
         access = .readOnly(reason: reason)

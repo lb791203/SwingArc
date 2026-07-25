@@ -109,6 +109,7 @@ private final class SpyStore: DatasetWorkspaceStore {
     var predictionLoads = 0
     var saves: [GolfAnnotationRevision] = []
     var failSave = false
+    var failRevisionLoad = false
 
     init(clips: [GolfClipIdentity], prediction: GolfPredictionRun) {
         self.clips = clips
@@ -132,7 +133,8 @@ private final class SpyStore: DatasetWorkspaceStore {
     }
 
     func loadRevisions(clipID: String) throws -> [GolfAnnotationRevision] {
-        revisions.filter { $0.clipID == clipID }
+        if failRevisionLoad { throw CocoaError(.fileReadCorruptFile) }
+        return revisions.filter { $0.clipID == clipID }
     }
 
     func listPredictionRunIDs(clipID: String) throws -> [String] {
@@ -155,7 +157,15 @@ private final class SpyStore: DatasetWorkspaceStore {
 }
 
 @MainActor
+private final class StubMediaRecorder {
+    var openedBookmarks: [Data] = []
+    var closeCount = 0
+    var requestedFrames: [Int] = []
+}
+
+@MainActor
 private final class StubMediaAccess: DatasetWorkspaceMediaAccessing {
+    let recorder: StubMediaRecorder
     var metadata = DatasetWorkspaceMediaMetadata(
         mediaSHA256: shaA,
         frameCount: 10,
@@ -163,19 +173,20 @@ private final class StubMediaAccess: DatasetWorkspaceMediaAccessing {
         orientedWidth: 1280,
         orientedHeight: 720
     )
-    var openedBookmarks: [Data] = []
-    var closeCount = 0
-    var requestedFrames: [Int] = []
+
+    init(recorder: StubMediaRecorder) {
+        self.recorder = recorder
+    }
 
     func open(bookmark: Data) async throws -> DatasetWorkspaceMediaMetadata {
-        openedBookmarks.append(bookmark)
+        recorder.openedBookmarks.append(bookmark)
         return metadata
     }
 
     func frame(
         at sourceFrameIndex: Int
     ) async throws -> DatasetWorkspaceDecodedFrame {
-        requestedFrames.append(sourceFrameIndex)
+        recorder.requestedFrames.append(sourceFrameIndex)
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let context = CGContext(
             data: nil,
@@ -193,8 +204,104 @@ private final class StubMediaAccess: DatasetWorkspaceMediaAccessing {
     }
 
     func close() {
-        closeCount += 1
+        recorder.closeCount += 1
     }
+}
+
+@MainActor
+private final class StubMediaFactory: DatasetWorkspaceMediaAccessFactory {
+    let recorder = StubMediaRecorder()
+    var queued: [DatasetWorkspaceMediaAccessing] = []
+
+    func makeMediaAccess() -> DatasetWorkspaceMediaAccessing {
+        if !queued.isEmpty {
+            return queued.removeFirst()
+        }
+        return StubMediaAccess(recorder: recorder)
+    }
+}
+
+@MainActor
+private final class SuspendingMediaAccess: DatasetWorkspaceMediaAccessing {
+    let recorder: StubMediaRecorder
+    let imageWidth: Int
+    var suspendOpen = false
+    var suspendFrame = false
+    private(set) var openStarted = false
+    private(set) var frameStarted = false
+    private(set) var closeCount = 0
+    private var openContinuation: CheckedContinuation<Void, Never>?
+    private var frameContinuation: CheckedContinuation<Void, Never>?
+
+    init(recorder: StubMediaRecorder, imageWidth: Int) {
+        self.recorder = recorder
+        self.imageWidth = imageWidth
+    }
+
+    func open(bookmark: Data) async throws -> DatasetWorkspaceMediaMetadata {
+        recorder.openedBookmarks.append(bookmark)
+        openStarted = true
+        if suspendOpen {
+            await withCheckedContinuation { continuation in
+                openContinuation = continuation
+            }
+        }
+        return metadata()
+    }
+
+    func frame(
+        at sourceFrameIndex: Int
+    ) async throws -> DatasetWorkspaceDecodedFrame {
+        recorder.requestedFrames.append(sourceFrameIndex)
+        frameStarted = true
+        if suspendFrame {
+            await withCheckedContinuation { continuation in
+                frameContinuation = continuation
+            }
+        }
+        let context = CGContext(
+            data: nil,
+            width: imageWidth,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: imageWidth * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        return DatasetWorkspaceDecodedFrame(
+            image: context.makeImage()!,
+            sourceTime: Double(sourceFrameIndex) / 30
+        )
+    }
+
+    func close() {
+        closeCount += 1
+        recorder.closeCount += 1
+    }
+
+    func resumeOpen() {
+        suspendOpen = false
+        openContinuation?.resume()
+        openContinuation = nil
+    }
+
+    func resumeFrame() {
+        suspendFrame = false
+        frameContinuation?.resume()
+        frameContinuation = nil
+    }
+}
+
+@MainActor
+private func waitUntil(
+    _ description: String,
+    condition: @MainActor () -> Bool
+) async {
+    for _ in 0..<1_000 {
+        if condition() { return }
+        await Task.yield()
+    }
+    preconditionFailure("Timed out waiting for \(description)")
 }
 
 private func metadata(
@@ -240,12 +347,12 @@ struct MacDatasetBlindModeSmoke {
         )
         let sessions = InMemoryDatasetWorkspaceSessionPersistence()
         let bookmarks = InMemoryDatasetWorkspaceBookmarkPersistence()
-        let media = StubMediaAccess()
+        let mediaFactory = StubMediaFactory()
         let controller = DatasetWorkspaceController(
             store: store,
             sessionPersistence: sessions,
             bookmarkPersistence: bookmarks,
-            mediaAccess: media,
+            mediaAccessFactory: mediaFactory,
             annotatorID: "smoke"
         )
 
@@ -333,12 +440,12 @@ struct MacDatasetBlindModeSmoke {
                 activeRevisionID: "revision-a"
             )
         )
-        let restoredMedia = StubMediaAccess()
+        let restoredMediaFactory = StubMediaFactory()
         let restored = DatasetWorkspaceController(
             store: store,
             sessionPersistence: sessions,
             bookmarkPersistence: bookmarks,
-            mediaAccess: restoredMedia,
+            mediaAccessFactory: restoredMediaFactory,
             annotatorID: "restore"
         )
         await restored.restore()
@@ -346,7 +453,7 @@ struct MacDatasetBlindModeSmoke {
         precondition(restored.annotationState?.currentSourceFrameIndex == 4)
         precondition(restored.selectedFilter == .p6p8)
         precondition(restored.activeRevisionID == "revision-a")
-        precondition(restoredMedia.requestedFrames == [4])
+        precondition(restoredMediaFactory.recorder.requestedFrames == [4])
         precondition(
             store.predictionLoads == 0,
             "held-out restore must not load prediction content"
@@ -360,11 +467,12 @@ struct MacDatasetBlindModeSmoke {
                 activeRevisionID: nil
             )
         )
+        let latestMediaFactory = StubMediaFactory()
         let latest = DatasetWorkspaceController(
             store: store,
             sessionPersistence: sessions,
             bookmarkPersistence: bookmarks,
-            mediaAccess: StubMediaAccess(),
+            mediaAccessFactory: latestMediaFactory,
             annotatorID: "latest"
         )
         await latest.restore()
@@ -380,8 +488,102 @@ struct MacDatasetBlindModeSmoke {
             store.predictionLoads == 1,
             "switching back to held-out must not load predictions"
         )
-        precondition(restoredMedia.openedBookmarks == [Data([1]), Data([2]), Data([1])])
-        precondition(restoredMedia.closeCount >= 3)
+        precondition(
+            restoredMediaFactory.recorder.openedBookmarks
+                == [Data([1]), Data([2]), Data([1])]
+        )
+        precondition(restoredMediaFactory.recorder.closeCount >= 2)
+
+        store.failRevisionLoad = true
+        await restored.selectClip(held.clipID)
+        if case .readOnly(let reason) = restored.access {
+            precondition(reason.contains("核验视频书签"))
+        } else {
+            preconditionFailure("revision read failure must be read-only")
+        }
+        store.failRevisionLoad = false
+
+        store.revisions = []
+        store.predictionRunIDs = ["run-a", "run-b"]
+        let loadsBeforeMultipleRunCheck = store.predictionLoads
+        await restored.selectClip(held.clipID)
+        if case .readOnly(let reason) = restored.access {
+            precondition(reason.contains("多个预测运行"))
+        } else {
+            preconditionFailure("ambiguous prediction runs must be read-only")
+        }
+        precondition(store.predictionLoads == loadsBeforeMultipleRunCheck)
+        await restored.selectClip(
+            held.clipID,
+            predictionRunID: "run-a"
+        )
+        precondition(restored.activePredictionRunID == "run-a")
+        precondition(sessions.load()?.activePredictionRunID == "run-a")
+        precondition(
+            store.predictionLoads == loadsBeforeMultipleRunCheck,
+            "explicit held-out provenance must not decode prediction content"
+        )
+
+        store.predictionRunIDs = ["fixture-run"]
+        let openRaceFactory = StubMediaFactory()
+        let slowOpen = SuspendingMediaAccess(
+            recorder: openRaceFactory.recorder,
+            imageWidth: 7
+        )
+        slowOpen.suspendOpen = true
+        let fastOpen = SuspendingMediaAccess(
+            recorder: openRaceFactory.recorder,
+            imageWidth: 2
+        )
+        openRaceFactory.queued = [slowOpen, fastOpen]
+        let openRace = DatasetWorkspaceController(
+            store: store,
+            sessionPersistence: InMemoryDatasetWorkspaceSessionPersistence(),
+            bookmarkPersistence: bookmarks,
+            mediaAccessFactory: openRaceFactory,
+            annotatorID: "open-race"
+        )
+        let slowOpenTask = Task {
+            await openRace.selectClip(held.clipID)
+        }
+        await waitUntil("slow media open") { slowOpen.openStarted }
+        await openRace.selectClip(training.clipID)
+        slowOpen.resumeOpen()
+        await slowOpenTask.value
+        precondition(openRace.selectedClipID == training.clipID)
+        precondition(openRace.fullFrameImage?.width == 2)
+        precondition(slowOpen.closeCount >= 1)
+
+        let frameRaceFactory = StubMediaFactory()
+        let slowFrame = SuspendingMediaAccess(
+            recorder: frameRaceFactory.recorder,
+            imageWidth: 9
+        )
+        slowFrame.suspendFrame = true
+        let fastFrame = SuspendingMediaAccess(
+            recorder: frameRaceFactory.recorder,
+            imageWidth: 3
+        )
+        frameRaceFactory.queued = [slowFrame, fastFrame]
+        let frameRace = DatasetWorkspaceController(
+            store: store,
+            sessionPersistence: InMemoryDatasetWorkspaceSessionPersistence(),
+            bookmarkPersistence: bookmarks,
+            mediaAccessFactory: frameRaceFactory,
+            annotatorID: "frame-race"
+        )
+        let slowFrameTask = Task {
+            await frameRace.selectClip(held.clipID)
+        }
+        await waitUntil("slow frame decode") { slowFrame.frameStarted }
+        await frameRace.selectClip(training.clipID)
+        slowFrame.resumeFrame()
+        await slowFrameTask.value
+        precondition(frameRace.selectedClipID == training.clipID)
+        precondition(
+            frameRace.fullFrameImage?.width == 3,
+            "stale frame from prior clip must not overwrite active clip"
+        )
 
         store.predictionRunIDs = []
         store.revisions = []
