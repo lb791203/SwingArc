@@ -79,6 +79,8 @@ The smoke verified:
 - one append-only atomic full revision snapshot per explicit landmark decision;
 - frame stepping persists only the session cursor;
 - relaunch restores the exact clip, source frame, filter, and revision;
+- a missing persisted revision opens read-only and does not substitute or erase
+  it;
 - bookmarks remain independently restorable for multiple clips;
 - media SHA, timeline SHA, or frame-count mismatch opens read-only;
 - held-out restore and clip selection do not decode or load prediction content;

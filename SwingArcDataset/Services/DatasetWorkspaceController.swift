@@ -44,6 +44,20 @@ public enum DatasetWorkspaceAccess: Equatable, Sendable {
     case readOnly(reason: String)
 }
 
+private enum DatasetWorkspaceControllerError: LocalizedError {
+    case missingRevision(String)
+    case unreadableRevisionHistory(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingRevision(let revisionID):
+            return "上次活动修订 \(revisionID) 已不存在，已停止恢复。"
+        case .unreadableRevisionHistory(let reason):
+            return "无法读取标注修订历史：\(reason)"
+        }
+    }
+}
+
 /// Cursor state is intentionally separate from immutable annotation revisions
 /// and from the per-clip bookmark repository.
 public struct DatasetWorkspaceSessionRecord: Codable, Equatable, Sendable {
@@ -401,6 +415,7 @@ public final class DatasetWorkspaceController: ObservableObject {
         activePredictionRunID = nil
         fullFrameImage = nil
         currentSourceTime = nil
+        isFrameLoading = false
         activeMediaAccess?.close()
         activeMediaAccess = nil
 
@@ -463,6 +478,12 @@ public final class DatasetWorkspaceController: ObservableObject {
             }
             activeMediaAccess = candidateMediaAccess
             await loadExactCurrentFrame()
+        } catch let error as DatasetWorkspaceControllerError {
+            candidateMediaAccess.close()
+            guard generation == selectionGeneration else { return }
+            activeMediaAccess?.close()
+            activeMediaAccess = nil
+            access = .readOnly(reason: error.localizedDescription)
         } catch {
             candidateMediaAccess.close()
             guard generation == selectionGeneration else { return }
@@ -602,6 +623,7 @@ public final class DatasetWorkspaceController: ObservableObject {
 
     public func closeMedia() {
         frameLoadGeneration += 1
+        isFrameLoading = false
         activeMediaAccess?.close()
         activeMediaAccess = nil
     }
@@ -653,11 +675,22 @@ public final class DatasetWorkspaceController: ObservableObject {
         for clipID: String,
         preferredID: String?
     ) throws -> GolfAnnotationRevision? {
-        let revisions = try store.loadRevisions(clipID: clipID)
-        if let preferredID,
-           let preferred = revisions.first(where: {
-               $0.revisionID == preferredID
-           }) {
+        let revisions: [GolfAnnotationRevision]
+        do {
+            revisions = try store.loadRevisions(clipID: clipID)
+        } catch {
+            throw DatasetWorkspaceControllerError.unreadableRevisionHistory(
+                error.localizedDescription
+            )
+        }
+        if let preferredID {
+            guard let preferred = revisions.first(where: {
+                $0.revisionID == preferredID
+            }) else {
+                throw DatasetWorkspaceControllerError.missingRevision(
+                    preferredID
+                )
+            }
             return preferred
         }
         return revisions.max {
@@ -690,6 +723,7 @@ public final class DatasetWorkspaceController: ObservableObject {
         activePredictionRunID = nil
         fullFrameImage = nil
         currentSourceTime = nil
+        isFrameLoading = false
         access = .readOnly(reason: reason)
     }
 

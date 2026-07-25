@@ -481,6 +481,33 @@ struct MacDatasetBlindModeSmoke {
             "latest revision uses createdAt then revisionID"
         )
 
+        sessions.save(
+            DatasetWorkspaceSessionRecord(
+                clipID: held.clipID,
+                currentSourceFrameIndex: 4,
+                filter: .allClips,
+                activeRevisionID: "revision-missing"
+            )
+        )
+        let missingRevision = DatasetWorkspaceController(
+            store: store,
+            sessionPersistence: sessions,
+            bookmarkPersistence: bookmarks,
+            mediaAccessFactory: StubMediaFactory(),
+            annotatorID: "missing-revision"
+        )
+        await missingRevision.restore()
+        if case .readOnly(let reason) = missingRevision.access {
+            precondition(reason.contains("已不存在"))
+        } else {
+            preconditionFailure("missing persisted revision must be read-only")
+        }
+        precondition(missingRevision.activeRevisionID == nil)
+        precondition(
+            sessions.load()?.activeRevisionID == "revision-missing",
+            "failed exact restore must not erase the requested revision ID"
+        )
+
         await restored.selectClip(training.clipID)
         precondition(store.predictionLoads == 1)
         await restored.selectClip(held.clipID)
@@ -497,7 +524,7 @@ struct MacDatasetBlindModeSmoke {
         store.failRevisionLoad = true
         await restored.selectClip(held.clipID)
         if case .readOnly(let reason) = restored.access {
-            precondition(reason.contains("核验视频书签"))
+            precondition(reason.contains("标注修订历史"))
         } else {
             preconditionFailure("revision read failure must be read-only")
         }
