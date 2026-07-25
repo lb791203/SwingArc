@@ -1,9 +1,9 @@
 # Mac golf keypoint annotation validation
 
-Validation executed on 2026-07-25 for Plan 2 / Task 6. This record keeps
-measured results separate from unresolved identity decisions. No source video,
-truth JSON, production prediction, or Application Support dataset was modified
-while collecting this evidence.
+Validation executed on 2026-07-25 for Plan 2 / Task 6 and extended on
+2026-07-26 after the user supplied the anonymous golfer mapping. This record
+keeps measured results separate from the remaining ROI and prediction-readiness
+gates. No source video or truth JSON was modified.
 
 ## Current gate
 
@@ -12,12 +12,19 @@ Task 6 is **not fully green**:
 - all 8 video/truth pairs match by media SHA-256, source-timeline SHA-256, and
   exact frame count;
 - the inventory contains 5 DTL and 3 Face-on clips;
+- the user-confirmed mapping is locked as 6 `golfer-001` training clips and
+  2 `golfer-002` validation clips; both golfers are right-handed and no golfer
+  appears in more than one split;
+- all 8 clips were imported through `SwingArcDataset.app`, and every
+  app-created security-scoped bookmark reopens after relaunch and passes media,
+  timeline, and frame-count verification;
 - 5 DTL clips pass the current automatic primary-track and stable-ROI path;
 - 2 Face-on clips require a manual primary-subject anchor;
 - 1 Face-on clip remains below the identity-stability threshold;
-- the two anonymous golfer assignments and their locked training/validation
-  split have not been supplied by the user, so no identity or split was guessed
-  and no real clip was imported.
+- the imported clips do not yet have immutable prediction runs, so the
+  annotation workspace correctly remains read-only with
+  `缺少可追溯的预测运行 ID。`; no prediction or reviewed keypoint label was
+  fabricated to bypass that provenance gate.
 
 ## Reproducible inputs
 
@@ -31,6 +38,42 @@ Task 6 is **not fully green**:
 Both helpers use the repository's exact-frame, identity, queue, Vision-track,
 and stable-ROI implementations. The ROI run decoded every source frame. It did
 not use P-point labels to construct the ROI.
+
+## Confirmed identity, split, and live import
+
+The A-H labels below are the visual-comparison labels shown to the user. Their
+mapping was supplied explicitly; it was not inferred from filenames, clothing,
+or pose similarity.
+
+| Label | Video | Imported clip ID | Golfer | Split | Handedness |
+|---|---|---|---|---|---|
+| A | `imported-334AD734-3E15-4673-A0DA-B87AE2DCE123.mp4` | `golfer-001-dtl-001` | `golfer-001` | training | right |
+| B | `imported-4BC8E027-63AB-4EB7-870C-9386EF721E04.mp4` | `golfer-001-face-on-001` | `golfer-001` | training | right |
+| C | `imported-B3ADCDD3-EFA6-47CF-83D8-C0821A8EEC01.mp4` | `golfer-001-face-on-002` | `golfer-001` | training | right |
+| D | `imported-C2BEA6B0-133C-446E-874B-F175365D88F4.mp4` | `golfer-001-dtl-002` | `golfer-001` | training | right |
+| E | `imported-CC52F22C-4662-4ACC-B943-BFF5F426DC0E.mp4` | `golfer-002-dtl-001` | `golfer-002` | validation | right |
+| F | `imported-D0CDADE8-A0F8-4BB7-A847-0FD9E8094255.mp4` | `golfer-002-dtl-002` | `golfer-002` | validation | right |
+| G | `imported-E26D3E11-B7A1-459A-91A9-1D342E673397.mp4` | `golfer-001-face-on-003` | `golfer-001` | training | right |
+| H | `imported-E37467FC-4653-4E32-A7E4-B758BC71CE43.mp4` | `golfer-001-dtl-003` | `golfer-001` | training | right |
+
+The live dataset is stored under
+`~/Library/Application Support/SwingArcDataset/golf-keypoints-v1`. The registry
+contains exactly `golfer-001 -> training` and
+`golfer-002 -> validation`; all eight clip records carry `right`,
+`training-allowed`, the verified media identity, and the P-point truth SHA-256.
+`GolfDatasetValidator` reported:
+
+```text
+dataset contract passed: golfers=2 clips=8 training=6 validation=2
+```
+
+A command-line preflight initially produced non-empty bookmarks that were
+scoped to the helper executable and therefore could not be resolved by the
+app. This was detected by opening a real clip in the UI. The final import was
+then repeated through the app itself without weakening the security-scoped
+bookmark contract. Each of the eight rows was selected after import and again
+after process relaunch. Every row passed bookmark and media identity opening
+and stopped only at the expected missing-prediction-run gate.
 
 ## Media and queue inventory
 
@@ -100,8 +143,8 @@ The production binding also passes the source contract smoke: an import receipt
 is handed to the retained controller, the bookmark is saved under its clip ID,
 the sidebar calls the controller's asynchronous clip selection, and the canvas
 uses the selected media/image dimensions. The behavior smoke uses an injected
-media-access implementation; a real security-scoped import remains blocked by
-the unresolved golfer mapping described below.
+media-access implementation. The 2026-07-26 live pass additionally verified
+real app-created security-scoped bookmarks for all eight imported clips.
 
 ## Build and launch proof
 
@@ -145,13 +188,29 @@ The standalone blind smoke compiler reports existing AVFoundation deprecation
 warnings from `ExactVideoFrameProvider.swift`; no warning was introduced by the
 Task 6 controller, and no test or build failed.
 
-## Required user identity input
+The mapping follow-up also passed both isolated builds:
 
-Before the 8 real clips can be imported, provide:
+- `/tmp/task6-mapping-mac-build.log`
+- `/tmp/task6-mapping-ios-build.log`
 
-1. the `golfer-001` or `golfer-002` assignment for each imported video;
-2. which golfer is locked to `training` and which to `validation`;
-3. the handedness associated with each golfer.
+The Mac artifact used for the live eight-clip import and relaunch check was:
 
-Until that mapping is explicit, identity and split import remain intentionally
-blocked.
+`/tmp/SwingArc-Task6-Mapping-Mac/Build/Products/Debug/SwingArcDataset.app`
+
+## Closed identity input and remaining gates
+
+The former anonymous identity, golfer-level split, and handedness blocker is
+closed. It must not be reopened or recomputed from filenames:
+
+- `golfer-001`: A, B, C, D, G, H; right-handed; training.
+- `golfer-002`: E, F; right-handed; validation.
+
+The remaining real-data work is independent of that mapping:
+
+1. add a traceable immutable prediction run for each imported clip;
+2. obtain manual primary-subject anchors for B and G, and resolve C's
+   identity-stability failure without lowering the threshold;
+3. complete and review the five-keypoint annotation revisions, then freeze a
+   resolved training/validation export;
+4. retain the development-only label: two golfers and no held-out golfers
+   cannot support a release-accuracy claim.
