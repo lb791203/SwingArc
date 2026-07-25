@@ -15,8 +15,12 @@ struct RealVideoReport: Encodable {
 @main
 struct RealVideoP1P8Acceptance {
     static func main() throws {
-        guard CommandLine.arguments.count == 3 else {
-            fputs("usage: real-video-p1p8 <video-path> <manifest-path>\n", stderr)
+        guard CommandLine.arguments.count == 4,
+              let view = cameraView(CommandLine.arguments[3]) else {
+            fputs(
+                "usage: real-video-p1p8 <video-path> <manifest-path> <dtl|face-on>\n",
+                stderr
+            )
             exit(EXIT_FAILURE)
         }
 
@@ -45,6 +49,7 @@ struct RealVideoP1P8Acceptance {
         let runID = gate.begin()
         let outcome = SwingVideoAnalysisEngine().analyze(
             url: videoURL,
+            view: view,
             runID: runID,
             gate: gate,
             progress: { _ in }
@@ -89,6 +94,14 @@ struct RealVideoP1P8Acceptance {
         case .cancelled:
             fputs("analysis cancelled\n", stderr)
             exit(EXIT_FAILURE)
+        }
+    }
+
+    private static func cameraView(_ value: String) -> PracticeCameraView? {
+        switch value {
+        case "dtl": return .downTheLine
+        case "face-on": return .faceOn
+        default: return nil
         }
     }
 }

@@ -22,8 +22,12 @@ struct StageDiagnosticReport: Encodable {
 @main
 struct RealVideoTrackingDiagnostics {
     static func main() throws {
-        guard CommandLine.arguments.count == 2 else {
-            fputs("usage: real-video-tracking-diagnostics <video-path>\n", stderr)
+        guard CommandLine.arguments.count == 3,
+              let view = cameraView(CommandLine.arguments[2]) else {
+            fputs(
+                "usage: real-video-tracking-diagnostics <video-path> <dtl|face-on>\n",
+                stderr
+            )
             exit(EXIT_FAILURE)
         }
 
@@ -33,6 +37,7 @@ struct RealVideoTrackingDiagnostics {
         let engine = SwingVideoAnalysisEngine()
         let outcome = engine.analyze(
             url: videoURL,
+            view: view,
             runID: runID,
             gate: gate,
             progress: { _ in }
@@ -91,6 +96,14 @@ struct RealVideoTrackingDiagnostics {
             exit(EXIT_FAILURE)
         case .completed, .failed:
             break
+        }
+    }
+
+    private static func cameraView(_ value: String) -> PracticeCameraView? {
+        switch value {
+        case "dtl": return .downTheLine
+        case "face-on": return .faceOn
+        default: return nil
         }
     }
 }

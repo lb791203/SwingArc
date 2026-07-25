@@ -314,7 +314,10 @@ class VideoPlaybackManager: ObservableObject {
     }
     
     /// Runs the shared adaptive engine and publishes only the active run.
-    func analyzeSwing(completion: @escaping (SwingAnalysisResult) -> Void) {
+    func analyzeSwing(
+        view: PracticeCameraView,
+        completion: @escaping (SwingAnalysisResult) -> Void
+    ) {
         // Beginning a replacement atomically invalidates the old run without
         // publishing an explicit-cancel failure.
         let runID = AnalysisRunPublicationPolicy.beginReplacement(gate: analysisRunGate)
@@ -340,6 +343,7 @@ class VideoPlaybackManager: ObservableObject {
             guard let self, self.analysisRunGate.isActive(runID) else { return }
             let outcome = SwingVideoAnalysisEngine().analyze(
                 url: asset.url,
+                view: view,
                 runID: runID,
                 gate: self.analysisRunGate
             ) { [weak self] update in
@@ -411,8 +415,11 @@ class VideoPlaybackManager: ObservableObject {
     }
 
     /// 兼容旧界面调用；新界面应使用 analyzeSwing 读取完整状态。
-    func autoDetectSwingStages(completion: @escaping ([KeyframeMarker]) -> Void) {
-        analyzeSwing { completion($0.detectedMarkers) }
+    func autoDetectSwingStages(
+        view: PracticeCameraView,
+        completion: @escaping ([KeyframeMarker]) -> Void
+    ) {
+        analyzeSwing(view: view) { completion($0.detectedMarkers) }
     }
 
     private func finishAnalysis(with failure: AnalysisFailure, completion: @escaping (SwingAnalysisResult) -> Void) {
@@ -496,6 +503,7 @@ class VideoPlaybackManager: ObservableObject {
                 )
                 self.currentPose = pose
                 self.analysisOutput = SwingVideoAnalysisOutput(
+                    view: output.view,
                     result: output.result,
                     poseSamples: refined.poseSamples,
                     leadArm: output.leadArm,
@@ -563,6 +571,7 @@ class VideoPlaybackManager: ObservableObject {
                     poseSamples = refined.poseSamples
                 }
                 self.analysisOutput = SwingVideoAnalysisOutput(
+                    view: output.view,
                     result: output.result,
                     poseSamples: poseSamples,
                     leadArm: output.leadArm,
@@ -600,10 +609,10 @@ class VideoPlaybackManager: ObservableObject {
         view: PracticeCameraView?,
         manualMarkers: [KeyframeMarker]
     ) -> SwingFeedbackPipelineResult? {
-        guard let output = analysisOutput else { return nil }
+        guard let output = analysisOutput,
+              view == output.view else { return nil }
         return SwingFeedbackPipeline.make(
             output: output,
-            view: view,
             manualMarkers: manualMarkers
         )
     }

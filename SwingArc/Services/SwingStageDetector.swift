@@ -3203,6 +3203,181 @@ enum OrderedStageSolver {
     }
 }
 
+struct PoseOnlyBodyStageIndices: Equatable {
+    let address: Int
+    let takeaway: Int
+    let leadArmParallelBackswing: Int
+    let leadArmParallelDownswing: Int
+    let impact: Int
+}
+
+/// View-aware body geometry used only when the strict body + golf-object
+/// solver has no markers. P2 remains a low-confidence body proxy until a
+/// reliable shaft observation is available; P6 is never inferred here.
+enum PoseOnlyStageGeometry {
+    static func resolve(
+        evidence: [SwingFrameEvidence],
+        topIndex: Int,
+        view: PracticeCameraView
+    ) -> PoseOnlyBodyStageIndices? {
+        guard evidence.indices.contains(topIndex),
+              topIndex >= 3,
+              topIndex + 2 < evidence.count else { return nil }
+
+        let beforeTop = evidence.startIndex..<topIndex
+        let address = beforeTop.first(where: { index in
+            guard let relative = handRelativeToHip(evidence[index]) else {
+                return false
+            }
+            let armIsAddressLike = evidence[index].leadArmAngle.map {
+                $0 >= 65
+            } ?? true
+            return relative.y >= -0.01 && armIsAddressLike
+        }) ?? beforeTop.startIndex
+
+        guard address + 2 < topIndex else { return nil }
+        let p3Range = (address + 2)..<topIndex
+        guard let p3 = bestIndex(in: p3Range, evidence: evidence, score: {
+            frame in
+            switch view {
+            case .faceOn:
+                guard let angle = frame.leadArmAngle else {
+                    return .greatestFiniteMagnitude
+                }
+                let extensionPenalty = max(
+                    0,
+                    150 - (frame.leadArmExtension ?? 0)
+                ) / 30
+                return abs(angle) + extensionPenalty
+            case .downTheLine:
+                guard let relative = handRelativeToHip(frame) else {
+                    return .greatestFiniteMagnitude
+                }
+                return abs(Double(relative.y) + 0.10) * 100
+            }
+        }) else { return nil }
+
+        guard address + 1 < p3 else { return nil }
+        let p2Range = (address + 1)..<p3
+        guard let p2 = bestIndex(in: p2Range, evidence: evidence, score: {
+            frame in
+            switch view {
+            case .faceOn:
+                guard let angle = frame.leadArmAngle else {
+                    return .greatestFiniteMagnitude
+                }
+                return abs(angle - 41)
+            case .downTheLine:
+                guard let relative = handRelativeToHip(frame) else {
+                    return .greatestFiniteMagnitude
+                }
+                return abs(Double(relative.y)) * 100
+            }
+        }) else { return nil }
+
+        guard let addressRelative = handRelativeToHip(evidence[address]) else {
+            return nil
+        }
+        let impactSearch = (topIndex + 2)..<evidence.endIndex
+        let impact = impactSearch.first(where: { index in
+            guard let relative = handRelativeToHip(evidence[index]) else {
+                return false
+            }
+            return relative.y >= addressRelative.y - 0.015
+        }) ?? bestIndex(in: impactSearch, evidence: evidence, score: { frame in
+            guard let relative = handRelativeToHip(frame) else {
+                return .greatestFiniteMagnitude
+            }
+            return hypot(
+                Double(relative.x - addressRelative.x),
+                Double(relative.y - addressRelative.y)
+            )
+        })
+        guard let impact, topIndex + 1 < impact else { return nil }
+
+        let p5Range = (topIndex + 1)..<impact
+        guard let p5 = bestIndex(in: p5Range, evidence: evidence, score: {
+            frame in
+            switch view {
+            case .faceOn:
+                guard let angle = frame.leadArmAngle else {
+                    return .greatestFiniteMagnitude
+                }
+                let extensionPenalty = max(
+                    0,
+                    145 - (frame.leadArmExtension ?? 0)
+                ) / 30
+                return abs(angle) + extensionPenalty
+            case .downTheLine:
+                guard let relative = handRelativeToHip(frame) else {
+                    return .greatestFiniteMagnitude
+                }
+                return abs(Double(relative.y) + 0.095) * 100
+            }
+        }) else { return nil }
+
+        return PoseOnlyBodyStageIndices(
+            address: address,
+            takeaway: p2,
+            leadArmParallelBackswing: p3,
+            leadArmParallelDownswing: p5,
+            impact: impact
+        )
+    }
+
+    private static func bestIndex(
+        in range: Range<Int>,
+        evidence: [SwingFrameEvidence],
+        score: (SwingFrameEvidence) -> Double
+    ) -> Int? {
+        range.min { first, second in
+            let firstScore = score(evidence[first])
+            let secondScore = score(evidence[second])
+            if abs(firstScore - secondScore) > 0.000_001 {
+                return firstScore < secondScore
+            }
+            return first < second
+        }.flatMap {
+            score(evidence[$0]).isFinite ? $0 : nil
+        }
+    }
+
+    private static func handRelativeToHip(
+        _ frame: SwingFrameEvidence
+    ) -> CGPoint? {
+        guard let hand = frame.handCenter, let hip = frame.hipCenter else {
+            return nil
+        }
+        return CGPoint(x: hand.x - hip.x, y: hand.y - hip.y)
+    }
+}
+
+/// In DTL recordings the wrists commonly become occluded by the torso exactly
+/// as the club reaches the post-impact P8 corridor. The event is useful as an
+/// editable P8 suggestion, but never counts as club evidence.
+enum PoseOnlyFollowThroughResolver {
+    static func resolve(
+        samples: [SwingPoseSample],
+        after impactTime: Double,
+        view: PracticeCameraView
+    ) -> SwingPoseSample? {
+        guard view == .downTheLine else { return nil }
+        return samples
+            .filter {
+                $0.time > impactTime
+                    && $0.sourceFrameIndex != nil
+                    && $0.aggregateConfidence >= 0.30
+            }
+            .first {
+                let hasWrist = $0.leftWrist != nil || $0.rightWrist != nil
+                let hasShoulders = $0.leftShoulder != nil
+                    && $0.rightShoulder != nil
+                let hasHips = $0.leftHip != nil && $0.rightHip != nil
+                return !hasWrist && hasShoulders && hasHips
+            }
+    }
+}
+
 enum SwingStageDetector {
     private static let directionChangeThreshold: CGFloat = 0.015
 
@@ -3222,13 +3397,17 @@ enum SwingStageDetector {
     }
 
     /// Returns conservative body-only candidates when the strict body + club
-    /// solver cannot complete. Club-defined P6/P8 deliberately stay unresolved.
+    /// solver cannot complete. Club-defined P6 remains unresolved; DTL P8 may
+    /// expose a low-confidence, editable wrist-occlusion event.
     static func detectPoseOnlyCandidates(
-        _ rawSamples: [SwingPoseSample]
+        _ rawSamples: [SwingPoseSample],
+        view: PracticeCameraView = .downTheLine
     ) -> SwingAnalysisResult {
-        let samples = rawSamples
-            .filter { !$0.wristY.isNaN }
+        let allSamples = rawSamples
+            .filter { $0.time.isFinite }
             .sorted { $0.time < $1.time }
+        let samples = allSamples
+            .filter { !$0.wristY.isNaN }
         guard samples.count >= 9,
               zip(samples, samples.dropFirst()).allSatisfy({ $0.time < $1.time }) else {
             return unresolvedResult()
@@ -3239,51 +3418,45 @@ enum SwingStageDetector {
             return unresolvedResult()
         }
 
-        // Repeated video frames at P1 and P4 are normal. This compatibility
-        // path is not part of the production candidate/solver pipeline.
-        if p4Index >= 3 {
-            let p1Index = (0..<p4Index).reduce(0) { best, index in
-                samples[index].wristY >= samples[best].wristY ? index : best
-            }
-            let ascentLength = p4Index - p1Index
-            let p2Index = p1Index + max(1, ascentLength / 3)
-            let p3Index = p1Index + max(2, (ascentLength * 2) / 3)
-            let p1 = samples[p1Index]
-            let p2 = samples[p2Index]
-            let p3 = samples[p3Index]
-            let p4 = samples[p4Index]
-            // Slow-motion Vision tracks commonly contain short reversals or
-            // repeated frames. Preserve ordered correction candidates when
-            // the full address-to-top movement is clear instead of requiring
-            // every interpolated third to be strictly monotonic.
-            if p1Index < p2Index, p2Index < p3Index, p3Index < p4Index,
-               p1.wristY > p4.wristY + directionChangeThreshold {
-                resolved[.address] = p1
-                resolved[.takeaway] = p2
-                resolved[.leadArmParallelBackswing] = p3
-                resolved[.top] = p4
-            }
+        let frames = samples.enumerated().map { index, sample in
+            SwingFrameSample(
+                sourceFrameIndex: sample.sourceFrameIndex ?? index,
+                time: sample.time,
+                pose: sample,
+                objectEvidence: .empty
+            )
         }
-
-        // P5 is lead-arm-parallel on the downswing. It happens when the hands
-        // cross the shoulder line, not at the first frame that leaves P4.
-        if let p5Index = downswingParallelIndex(after: p4Index, in: samples) {
-            resolved[.leadArmParallelDownswing] = samples[p5Index]
-
-            // Legacy pose-only samples cannot establish P6 (shaft-parallel
-            // delivery) or P8 (shaft-parallel release). They stay unresolved
-            // rather than being inferred from hand motion. P7 can still be
-            // retained as an impact compatibility signal.
-            if let p7Index = impactIndex(after: p5Index, in: samples) {
-                resolved[.impact] = samples[p7Index]
-            }
+        let evidence = SwingFeatureExtractor.extract(frames: frames)
+        if let indices = PoseOnlyStageGeometry.resolve(
+            evidence: evidence,
+            topIndex: p4Index,
+            view: view
+        ) {
+            resolved[.address] = samples[indices.address]
+            resolved[.takeaway] = samples[indices.takeaway]
+            resolved[.leadArmParallelBackswing] =
+                samples[indices.leadArmParallelBackswing]
+            resolved[.top] = samples[p4Index]
+            resolved[.leadArmParallelDownswing] =
+                samples[indices.leadArmParallelDownswing]
+            // P6 remains unresolved until the club detector supplies shaft
+            // evidence. P7 may use the body returning to its address corridor.
+            resolved[.impact] = samples[indices.impact]
+            resolved[.followThrough] = PoseOnlyFollowThroughResolver.resolve(
+                samples: allSamples,
+                after: samples[indices.impact].time,
+                view: view
+            )
         }
 
         let detections = SwingStage.pStages.map { stage -> SwingStageDetection in
             guard let sample = resolved[stage] else {
                 return SwingStageDetection(stage: stage, time: nil, confidence: 0, status: .unresolved)
             }
-            let confidence = evidenceConfidence(for: stage, sample: sample)
+            let rawConfidence = evidenceConfidence(for: stage, sample: sample)
+            let confidence = stage == .followThrough
+                ? max(0.36, min(0.49, rawConfidence))
+                : rawConfidence
             let status: SwingStageDetectionStatus
             if confidence >= 0.75 {
                 status = .confirmed
@@ -3469,14 +3642,16 @@ enum ProductAnalysisFallback {
     static func resolve(
         strictResult: SwingAnalysisResult,
         poseSamples: [SwingPoseSample],
-        supplementalPoseSamples: [SwingPoseSample] = []
+        supplementalPoseSamples: [SwingPoseSample] = [],
+        view: PracticeCameraView = .downTheLine
     ) -> SwingAnalysisResult {
         guard strictResult.detectedMarkers.isEmpty else { return strictResult }
         let poseOnly = SwingStageDetector.detectPoseOnlyCandidates(
             mergedPoseSamples(
                 primary: poseSamples,
                 supplemental: supplementalPoseSamples
-            )
+            ),
+            view: view
         )
         let detections = poseOnly.detections.map { detection -> SwingStageDetection in
             guard detection.status != .unresolved else { return detection }
@@ -3547,6 +3722,7 @@ enum CoarseFallbackSelectionPolicy {
                 && $0.time <= preferredAttempt.endTime
         }
     }
+
 }
 
 /// Keeps full-swing analysis dense enough to resolve the short motion interval

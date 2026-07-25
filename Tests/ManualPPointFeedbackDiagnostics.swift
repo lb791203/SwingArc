@@ -22,6 +22,7 @@ struct ManualPPointFeedbackDiagnostics {
         let runID = gate.begin()
         let outcome = SwingVideoAnalysisEngine().analyze(
             url: videoURL,
+            view: .downTheLine,
             runID: runID,
             gate: gate,
             progress: { _ in }
@@ -52,6 +53,7 @@ struct ManualPPointFeedbackDiagnostics {
                 poseSamples: output.poseSamples
             )
             output = SwingVideoAnalysisOutput(
+                view: output.view,
                 result: output.result,
                 poseSamples: refined.poseSamples,
                 leadArm: output.leadArm,
@@ -73,7 +75,6 @@ struct ManualPPointFeedbackDiagnostics {
 
         guard let feedback = SwingFeedbackPipeline.make(
             output: output,
-            view: .downTheLine,
             manualMarkers: markers
         )?.feedback else {
             preconditionFailure("Feedback pipeline returned nil")

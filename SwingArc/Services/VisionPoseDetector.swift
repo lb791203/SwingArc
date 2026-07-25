@@ -580,6 +580,10 @@ final class SwingObjectDetector {
 }
 
 struct SwingVideoAnalysisOutput: Equatable {
+    /// The user-confirmed camera view used for this complete analysis run.
+    /// Downstream feedback must consume this value instead of attaching a
+    /// camera label after the detector has finished.
+    let view: PracticeCameraView
     let result: SwingAnalysisResult
     /// The exact fine-frame pose inputs used to resolve the P1–P8 path. This
     /// lets downstream, evidence-backed technique checks reuse the completed
@@ -595,6 +599,7 @@ struct SwingVideoAnalysisOutput: Equatable {
     let observationFrames: [SwingFrameObservation]
 
     init(
+        view: PracticeCameraView,
         result: SwingAnalysisResult,
         poseSamples: [SwingPoseSample],
         leadArm: LeadArmSide,
@@ -604,6 +609,7 @@ struct SwingVideoAnalysisOutput: Equatable {
         trackingDiagnostics: PrimaryGolferTrackingDiagnostics = .init(),
         observationFrames: [SwingFrameObservation] = []
     ) {
+        self.view = view
         self.result = result
         self.poseSamples = poseSamples
         self.leadArm = leadArm
@@ -839,6 +845,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
 
     func analyze(
         url: URL,
+        view: PracticeCameraView,
         runID: UUID,
         gate: AnalysisRunGate,
         candidateWindow: SwingWindow? = nil,
@@ -1020,6 +1027,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                     )
                     let outcome = candidateEngine.analyze(
                         url: url,
+                        view: view,
                         runID: runID,
                         gate: gate,
                         candidateWindow: SwingWindow(
@@ -1120,6 +1128,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         ) -> SwingVideoAnalysisOutcome {
             publish(.solving, progress: 1, runID: runID, gate: gate, handler: progress)
             return activeCompletedAnalysis(
+                view: view,
                 strictResult: ConstrainedSwingPathSolver.solve(
                     candidateSets: [],
                     timeline: timeline
@@ -1262,6 +1271,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                         handler: progress
                     )
                     return activeCompletedAnalysis(
+                        view: view,
                         strictResult: ConstrainedSwingPathSolver.solve(
                             candidateSets: [],
                             timeline: finalTimeline
@@ -1314,6 +1324,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         ) != nil {
             publish(.solving, progress: 1, runID: runID, gate: gate, handler: progress)
             return activeCompletedAnalysis(
+                view: view,
                 strictResult: ConstrainedSwingPathSolver.solve(
                     candidateSets: [],
                     timeline: finalTimeline
@@ -1347,6 +1358,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         guard !bodyCandidates.isEmpty else {
             publish(.solving, progress: 1, runID: runID, gate: gate, handler: progress)
             return activeCompletedAnalysis(
+                view: view,
                 strictResult: ConstrainedSwingPathSolver.solve(
                     candidateSets: [],
                     timeline: finalTimeline
@@ -1484,6 +1496,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         ) != nil {
             publish(.solving, progress: 1, runID: runID, gate: gate, handler: progress)
             return activeCompletedAnalysis(
+                view: view,
                 strictResult: ConstrainedSwingPathSolver.solve(
                     candidateSets: [],
                     timeline: finalTimeline
@@ -1515,6 +1528,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         guard gate.isActive(runID) else { return .cancelled }
         publish(.solving, progress: 1, runID: runID, gate: gate, handler: progress)
         return activeCompletedAnalysis(
+            view: view,
             strictResult: result,
             frames: mergedFrames,
             supplementalPoseSamples: coarseFallbackPoseSamples,
@@ -1639,6 +1653,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
     }
 
     private func activeCompletedAnalysis(
+        view: PracticeCameraView,
         strictResult: SwingAnalysisResult,
         frames: [SwingFrameSample],
         supplementalPoseSamples: [SwingPoseSample],
@@ -1658,9 +1673,11 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         )
         let result = ProductAnalysisFallback.resolve(
             strictResult: strictResult,
-            poseSamples: poseSamples
+            poseSamples: poseSamples,
+            view: view
         )
         return .completed(SwingVideoAnalysisOutput(
+            view: view,
             result: result,
             poseSamples: poseSamples,
             leadArm: timeline

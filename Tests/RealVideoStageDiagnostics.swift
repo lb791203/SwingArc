@@ -32,9 +32,9 @@ struct RealVideoStageDiagnosticReport: Encodable {
 @main
 struct RealVideoStageDiagnostics {
     static func main() async throws {
-        guard (2...4).contains(CommandLine.arguments.count) else {
+        guard (3...5).contains(CommandLine.arguments.count) else {
             fputs(
-                "usage: real-video-stage-diagnostics <video-path> [capture-fps] [--blocking-blur]\n",
+                "usage: real-video-stage-diagnostics <video-path> <dtl|face-on> [capture-fps] [--blocking-blur]\n",
                 stderr
             )
             exit(EXIT_FAILURE)
@@ -44,13 +44,14 @@ struct RealVideoStageDiagnostics {
         let valueArguments = CommandLine.arguments.dropFirst().filter {
             $0 != "--blocking-blur"
         }
-        guard (1...2).contains(valueArguments.count) else {
+        guard (2...3).contains(valueArguments.count),
+              let view = cameraView(valueArguments[1]) else {
             fputs("invalid diagnostic arguments\n", stderr)
             exit(EXIT_FAILURE)
         }
         let captureFrameRate: Double
-        if valueArguments.count == 2 {
-            guard let parsed = Double(valueArguments[1]),
+        if valueArguments.count == 3 {
+            guard let parsed = Double(valueArguments[2]),
                   parsed.isFinite,
                   parsed > 0 else {
                 fputs("capture-fps must be a positive number\n", stderr)
@@ -80,6 +81,7 @@ struct RealVideoStageDiagnostics {
             : SwingVideoAnalysisEngine()
         let outcome = engine.analyze(
             url: videoURL,
+            view: view,
             runID: runID,
             gate: gate,
             progress: { _ in }
@@ -168,6 +170,14 @@ struct RealVideoStageDiagnostics {
             exit(EXIT_FAILURE)
         case .completed, .failed:
             break
+        }
+    }
+
+    private static func cameraView(_ value: String) -> PracticeCameraView? {
+        switch value {
+        case "dtl": return .downTheLine
+        case "face-on": return .faceOn
+        default: return nil
         }
     }
 }

@@ -5,13 +5,12 @@ import Foundation
 /// consume its solved stages and the pose samples from that same pass.
 enum PracticeFeedbackPolicy {
     static func make(
-        output: SwingVideoAnalysisOutput,
-        view: PracticeCameraView
+        output: SwingVideoAnalysisOutput
     ) -> PriorityFeedback {
         let findings = SwingTechniqueEvaluator.evaluate(
             samples: output.poseSamples,
             stages: output.result.detections,
-            view: view,
+            view: output.view,
             leadArm: output.leadArm
         )
         return .select(from: findings)
@@ -37,6 +36,7 @@ final class OnDevicePracticeAnalyzer: PracticeAnalyzing {
         analysisQueue.async {
             let outcome = SwingVideoAnalysisEngine().analyze(
                 url: clipURL,
+                view: view,
                 runID: runID,
                 gate: gate,
                 progress: { _ in }
@@ -44,7 +44,7 @@ final class OnDevicePracticeAnalyzer: PracticeAnalyzing {
             DispatchQueue.main.async {
                 switch outcome {
                 case let .completed(output):
-                    completion(.success(PracticeFeedbackPolicy.make(output: output, view: view)))
+                    completion(.success(PracticeFeedbackPolicy.make(output: output)))
                 case .failed, .cancelled:
                     completion(.failure(.analysisFailed))
                 }

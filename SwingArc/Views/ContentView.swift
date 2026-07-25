@@ -174,6 +174,7 @@ struct ContentView: View {
             ShareSheet(items: [payload.url])
         }
         .confirmationDialog("导出", isPresented: $showExportActions, titleVisibility: .visible) {
+            Button("分享 P 点标准答案") { exportPPointGroundTruth() }
             Button("保存当前标注帧") { performMediaAction(.save, kind: .frame) }
             Button("保存标注视频") { performMediaAction(.save, kind: .annotatedVideo) }
             Button("分享当前标注帧") { performMediaAction(.share, kind: .frame) }
@@ -192,7 +193,7 @@ struct ContentView: View {
             if isExporting {
                 ZStack {
                     Color.black.opacity(0.45).ignoresSafeArea()
-                    ProgressView("正在生成媒体…")
+                    ProgressView("正在生成…")
                         .tint(.white)
                         .foregroundStyle(.white)
                         .padding(18)
@@ -322,7 +323,10 @@ struct ContentView: View {
         saveStatus = .saved
         migrateLegacyAnnotationIfNeeded(for: url)
 
-        if didLoad, AutomaticAnalysisPolicy.shouldAnalyze(event: origin) {
+        if didLoad, AutomaticAnalysisPolicy.shouldAnalyze(
+            event: origin,
+            view: self.practiceCameraView
+        ) {
             DispatchQueue.main.async {
                 guard currentProjectURL == url, playbackManager.analysisState == .idle else { return }
                 runAISwingAnalysis()
@@ -452,8 +456,12 @@ struct ContentView: View {
     }
 
     private func runAISwingAnalysis() {
+        guard let view = practiceCameraView else {
+            statusMessage = "请先选择正后方 DTL 或正面 Face-on，再开始分析。"
+            return
+        }
         playbackManager.pause()
-        playbackManager.analyzeSwing { result in
+        playbackManager.analyzeSwing(view: view) { result in
             keyframes = StageMarkerMerger.merge(existing: keyframes, automatic: result.detectedMarkers)
             guard let currentProjectURL else { return }
             playbackManager.refineManualPPoints(
@@ -525,6 +533,31 @@ struct ContentView: View {
             automaticFrameIndex: automaticFrame,
             manualFrameIndex: sourceFrameIndex
         ))
+    }
+
+    private func exportPPointGroundTruth() {
+        guard let videoURL = currentProjectURL else {
+            statusMessage = "没有可导出的视频。"
+            return
+        }
+        guard let view = practiceCameraView else {
+            statusMessage = "请先选择正后方 DTL 或正面 Face-on。"
+            return
+        }
+        isExporting = true
+        Task {
+            do {
+                let receipt = try await PPointGroundTruthExportService.export(
+                    videoURL: videoURL,
+                    view: view,
+                    markers: keyframes
+                )
+                sharePayload = SharePayload(url: receipt.url)
+            } catch {
+                statusMessage = error.localizedDescription
+            }
+            isExporting = false
+        }
     }
 
     private func performMediaAction(_ action: MediaAction, kind: MediaExportKind) {

@@ -66,6 +66,8 @@
 		B00000000000000000000001 /* PPointCorrectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* PPointCorrectionState.swift */; };
 		B00000000000000000000003 /* PPointCorrectionWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000004 /* PPointCorrectionWorkspace.swift */; };
 		B00000000000000000000005 /* LegacyAnnotationMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000006 /* LegacyAnnotationMigration.swift */; };
+		C10000000000000000000001 /* PPointGroundTruthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000002 /* PPointGroundTruthModels.swift */; };
+		C10000000000000000000003 /* PPointGroundTruthExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000004 /* PPointGroundTruthExportService.swift */; };
 		D20000000000000000000101 /* SwingArcDatasetApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000020 /* SwingArcDatasetApp.swift */; };
 		D20000000000000000000102 /* DatasetWorkspaceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000021 /* DatasetWorkspaceState.swift */; };
 		D20000000000000000000103 /* DatasetImportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000022 /* DatasetImportController.swift */; };
@@ -142,6 +144,8 @@
 		B00000000000000000000002 /* PPointCorrectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PPointCorrectionState.swift; sourceTree = "<group>"; };
 		B00000000000000000000004 /* PPointCorrectionWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PPointCorrectionWorkspace.swift; sourceTree = "<group>"; };
 		B00000000000000000000006 /* LegacyAnnotationMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyAnnotationMigration.swift; sourceTree = "<group>"; };
+		C10000000000000000000002 /* PPointGroundTruthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PPointGroundTruthModels.swift; sourceTree = "<group>"; };
+		C10000000000000000000004 /* PPointGroundTruthExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PPointGroundTruthExportService.swift; sourceTree = "<group>"; };
 		D20000000000000000000020 /* SwingArcDatasetApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArcDatasetApp.swift; sourceTree = "<group>"; };
 		D20000000000000000000021 /* DatasetWorkspaceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetWorkspaceState.swift; sourceTree = "<group>"; };
 		D20000000000000000000022 /* DatasetImportController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetImportController.swift; sourceTree = "<group>"; };
@@ -209,6 +213,7 @@
 				A90000000000000000000002 /* AnnotationModels.swift */,
 				A90000000000000000000004 /* AnnotationWorkspaceState.swift */,
 				B00000000000000000000002 /* PPointCorrectionState.swift */,
+				C10000000000000000000002 /* PPointGroundTruthModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -242,6 +247,7 @@
 				A9000000000000000000000C /* AnnotationExportService.swift */,
 				A90000000000000000000012 /* AnnotationPredictionAdapter.swift */,
 				B00000000000000000000006 /* LegacyAnnotationMigration.swift */,
+				C10000000000000000000004 /* PPointGroundTruthExportService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -484,6 +490,8 @@
 				B00000000000000000000001 /* PPointCorrectionState.swift in Sources */,
 				B00000000000000000000003 /* PPointCorrectionWorkspace.swift in Sources */,
 				B00000000000000000000005 /* LegacyAnnotationMigration.swift in Sources */,
+				C10000000000000000000001 /* PPointGroundTruthModels.swift in Sources */,
+				C10000000000000000000003 /* PPointGroundTruthExportService.swift in Sources */,
 			);
 		};
 		D20000000000000000000200 /* Sources */ = {

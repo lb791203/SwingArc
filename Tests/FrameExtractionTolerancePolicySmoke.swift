@@ -100,6 +100,17 @@ struct FrameExtractionTolerancePolicySmoke {
             constantTimeline.presentationTime(sourceFrameIndex: 29)
                 == CMTime(value: 29, timescale: 30)
         )
+        let exportedSlowMotionTimeline = SourceFrameTimeline(
+            duration: 16.533333333333335,
+            constantFrameRate: 30
+        )!
+        precondition(
+            exportedSlowMotionTimeline.count == 496,
+            "Floating-point duration noise must not create a phantom final frame"
+        )
+        precondition(
+            exportedSlowMotionTimeline.maximumSourceFrameIndex == 495
+        )
 
         if CommandLine.arguments.count > 1 {
             let analyzer = try! String(

@@ -15,6 +15,7 @@ struct PracticeFeedbackPolicySmoke {
             rightWrist: CGPoint(x: 0.84, y: 0.52)
         )
         let output = SwingVideoAnalysisOutput(
+            view: .downTheLine,
             result: SwingAnalysisResult(
                 detectedMarkers: [],
                 unresolvedStages: [],
@@ -27,14 +28,14 @@ struct PracticeFeedbackPolicySmoke {
             elapsedSeconds: 0.4
         )
         guard case let .finding(finding) = PracticeFeedbackPolicy.make(
-            output: output,
-            view: .downTheLine
+            output: output
         ) else {
             preconditionFailure("Expected evidence-backed finding")
         }
         precondition(finding.kind == .overTheTop)
 
         let lowEvidence = SwingVideoAnalysisOutput(
+            view: .downTheLine,
             result: SwingAnalysisResult(
                 detectedMarkers: [],
                 unresolvedStages: Set(SwingStage.allCases),
@@ -46,7 +47,7 @@ struct PracticeFeedbackPolicySmoke {
             sourceFrameRate: 240,
             elapsedSeconds: 0.4
         )
-        precondition(PracticeFeedbackPolicy.make(output: lowEvidence, view: .downTheLine) == .unresolved)
+        precondition(PracticeFeedbackPolicy.make(output: lowEvidence) == .unresolved)
     }
 
     private static func confirmedStages() -> [SwingStageDetection] {

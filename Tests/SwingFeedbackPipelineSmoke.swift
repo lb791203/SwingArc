@@ -7,9 +7,8 @@ struct SwingFeedbackPipelineSmoke {
         precondition(
             SwingFeedbackPipeline.make(
                 output: output,
-                view: nil,
                 manualMarkers: []
-            ) == nil
+            ) != nil
         )
 
         let manualTop = KeyframeMarker(
@@ -20,7 +19,6 @@ struct SwingFeedbackPipelineSmoke {
         )
         guard let result = SwingFeedbackPipeline.make(
             output: output,
-            view: .downTheLine,
             manualMarkers: [manualTop]
         ) else {
             preconditionFailure("Expected simplified feedback pipeline result")
@@ -65,6 +63,7 @@ struct SwingFeedbackPipelineSmoke {
             frame(index: offset, stage: stage)
         }
         return SwingVideoAnalysisOutput(
+            view: .downTheLine,
             result: SwingAnalysisResult(
                 detectedMarkers: detections.compactMap(\.marker),
                 unresolvedStages: [],

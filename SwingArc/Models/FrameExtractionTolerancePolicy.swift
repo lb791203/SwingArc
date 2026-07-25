@@ -45,7 +45,16 @@ struct SourceFrameTimeline: Equatable {
               constantFrameRate <= Double(Int32.max) else {
             return nil
         }
-        let frameCount = max(1, Int(ceil(duration * constantFrameRate)))
+        let rawFrameCount = duration * constantFrameRate
+        let nearestWholeFrameCount = rawFrameCount.rounded()
+        let frameCount = max(
+            1,
+            Int(
+                abs(rawFrameCount - nearestWholeFrameCount) <= 0.000_001
+                    ? nearestWholeFrameCount
+                    : ceil(rawFrameCount)
+            )
+        )
         let timescale = CMTimeScale(constantFrameRate)
         self.init(presentationTimes: (0..<frameCount).map {
             CMTime(value: CMTimeValue($0), timescale: timescale)

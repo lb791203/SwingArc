@@ -654,7 +654,11 @@ enum VideoLoadOrigin: Equatable {
 }
 
 enum AutomaticAnalysisPolicy {
-    static func shouldAnalyze(event: VideoLoadOrigin) -> Bool {
+    static func shouldAnalyze(
+        event: VideoLoadOrigin,
+        view: PracticeCameraView?
+    ) -> Bool {
+        guard view != nil else { return false }
         switch event {
         case .importCompleted, .capturedClipSaved:
             return true

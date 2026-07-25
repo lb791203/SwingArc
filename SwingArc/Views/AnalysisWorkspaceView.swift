@@ -117,8 +117,7 @@ struct AnalysisWorkspaceView: View {
                             onSelectStage: selectStage,
                             onAdjustStage: openAdjustment
                         )
-                    } else if practiceCameraView == nil,
-                              playbackManager.analysisOutput != nil {
+                    } else if practiceCameraView == nil {
                         VStack(spacing: 18) {
                             Spacer()
 
@@ -130,7 +129,7 @@ struct AnalysisWorkspaceView: View {
                                 .font(.system(size: 24, weight: .bold, design: .rounded))
                                 .foregroundStyle(AnalysisTheme.proTourPrimaryText)
 
-                            Text("用于正确解释动作，不会重新分析视频")
+                            Text("选择后将使用对应视角分析视频")
                                 .font(.system(size: 15, weight: .medium))
                                 .foregroundStyle(AnalysisTheme.proTourSecondaryText)
 
@@ -191,7 +190,7 @@ struct AnalysisWorkspaceView: View {
             ) else { return }
 
             try? await Task.sleep(for: .milliseconds(250))
-            onAnalyze()
+            requestAnalysis()
             #endif
         }
         .preferredColorScheme(.dark)
@@ -303,7 +302,7 @@ struct AnalysisWorkspaceView: View {
                         onToggleDrawing: toggleDrawingMode,
                         onAnalyze: {
                             interactionMode = .idle
-                            onAnalyze()
+                            requestAnalysis()
                         },
                         onShowResults: showResults(isRegularLayout: isRegularLayout)
                     )
@@ -506,7 +505,7 @@ struct AnalysisWorkspaceView: View {
                 if playbackManager.analysisState.hasCompletedResult {
                     showResults(isRegularLayout: false)()
                 } else {
-                    onAnalyze()
+                    requestAnalysis()
                 }
             } label: {
                 Image(
@@ -640,6 +639,8 @@ struct AnalysisWorkspaceView: View {
     ) -> some View {
         Button {
             practiceCameraView = view
+            showsResultsSheet = false
+            onAnalyze()
         } label: {
             Text(title)
                 .font(.system(size: 16, weight: .bold, design: .rounded))
@@ -657,6 +658,14 @@ struct AnalysisWorkspaceView: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+
+    private func requestAnalysis() {
+        guard practiceCameraView != nil else {
+            showsResultsSheet = true
+            return
+        }
+        onAnalyze()
     }
 
     private func toggleDrawingMode() {

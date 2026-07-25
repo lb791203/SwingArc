@@ -9,10 +9,8 @@ struct SwingFeedbackPipelineResult: Equatable {
 enum SwingFeedbackPipeline {
     static func make(
         output: SwingVideoAnalysisOutput,
-        view: PracticeCameraView?,
         manualMarkers: [KeyframeMarker]
     ) -> SwingFeedbackPipelineResult? {
-        guard let view else { return nil }
         let detections = ManualStageDetectionPolicy.applying(
             manualMarkers: manualMarkers,
             sourceFrameRate: output.sourceFrameRate,
@@ -29,7 +27,7 @@ enum SwingFeedbackPipeline {
             personHeight: personHeight
         )
         let artifact = SwingAnalysisArtifactBuilder.make(
-            view: view,
+            view: output.view,
             sourceFrameRate: output.sourceFrameRate,
             frames: output.observationFrames,
             detections: detections,
@@ -38,7 +36,7 @@ enum SwingFeedbackPipeline {
         let findings = SwingTechniqueEvaluator.evaluate(
             samples: output.poseSamples,
             stages: detections,
-            view: view,
+            view: output.view,
             leadArm: output.leadArm
         )
         return SwingFeedbackPipelineResult(
