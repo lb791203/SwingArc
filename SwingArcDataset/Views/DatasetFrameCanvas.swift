@@ -16,6 +16,13 @@ struct DatasetTrailPoint: Identifiable {
     var id: String { "\(landmark.rawValue)-\(frameDelta)-\(fullFramePoint.x)-\(fullFramePoint.y)" }
 }
 
+/// One explicit Vision body-pose edge in full-frame normalized coordinates.
+struct DatasetSkeletonSegment: Identifiable {
+    let id: String
+    let start: GolfNormalizedPoint
+    let end: GolfNormalizedPoint
+}
+
 /// The canvas deliberately has no zoom transform: hit testing must use the same
 /// aspect-fit image rect that renders the source pixels.
 struct DatasetFrameCanvas: View {
@@ -27,7 +34,7 @@ struct DatasetFrameCanvas: View {
     let landmarkPoints: [CanvasLandmarkPoint]
     let selectedLandmark: GolfLandmark?
     let trailPoints: [GolfLandmark: [(delta: Int, point: GolfNormalizedPoint)]]
-    let visionSkeleton: [GolfNormalizedPoint]?
+    let visionSkeleton: [DatasetSkeletonSegment]
     let roiTransform: GolfROIAffineTransform?
     let onCorrectPoint: (GolfLandmark, GolfNormalizedPoint) -> Void
     let onToggleROI: () -> Void
@@ -72,10 +79,12 @@ struct DatasetFrameCanvas: View {
                         Text("无可用帧数据").foregroundColor(.secondary)
                     }
 
-                    drawSkeleton(in: imageRect)
-                    drawTrails(in: imageRect)
-                    drawShaft(in: imageRect)
-                    drawLandmarks(in: imageRect)
+                    if displayedImage != nil, !isLoading {
+                        drawSkeleton(in: imageRect)
+                        drawTrails(in: imageRect)
+                        drawShaft(in: imageRect)
+                        drawLandmarks(in: imageRect)
+                    }
                 }
                 .contentShape(Rectangle())
                 .gesture(correctionGesture(in: imageRect))
@@ -85,13 +94,12 @@ struct DatasetFrameCanvas: View {
 
     @ViewBuilder
     private func drawSkeleton(in imageRect: CGRect) -> some View {
-        if let skeleton = visionSkeleton {
-            let points = skeleton.compactMap(displayPoint)
-            if points.count > 1 {
+        ForEach(visionSkeleton) { segment in
+            if let start = displayPoint(segment.start),
+               let end = displayPoint(segment.end) {
                 Path { path in
-                    guard let first = points.first else { return }
-                    path.move(to: screenPoint(first, in: imageRect))
-                    for point in points.dropFirst() { path.addLine(to: screenPoint(point, in: imageRect)) }
+                    path.move(to: screenPoint(start, in: imageRect))
+                    path.addLine(to: screenPoint(end, in: imageRect))
                 }
                 .stroke(.cyan.opacity(0.65), lineWidth: 1.5)
             }
@@ -153,6 +161,8 @@ struct DatasetFrameCanvas: View {
         DragGesture(minimumDistance: 0)
             .onEnded { gesture in
                 guard let landmark = selectedLandmark,
+                      displayedImage != nil,
+                      !isLoading,
                       imageRect.contains(gesture.location),
                       imageRect.width > 0, imageRect.height > 0 else { return }
                 let imagePoint = GolfNormalizedPoint(
@@ -216,7 +226,7 @@ struct DatasetFrameCanvas: View {
     DatasetFrameCanvas(
         fullFrameImage: nil, roiImage: nil,
         fullFrameImageSize: CGSize(width: 1920, height: 1080), roiImageSize: CGSize(width: 512, height: 512),
-        landmarkPoints: [], selectedLandmark: nil, trailPoints: [:], visionSkeleton: nil, roiTransform: nil,
+        landmarkPoints: [], selectedLandmark: nil, trailPoints: [:], visionSkeleton: [], roiTransform: nil,
         onCorrectPoint: { _, _ in }, onToggleROI: {}, isLoading: false, statusMessage: nil
     )
     .frame(width: 800, height: 500)

@@ -120,11 +120,13 @@ private func testManualDecisionsDoNotRequirePrediction() {
     precondition(value.currentFrameIsReviewed)
     precondition(value.currentFrameIsComplete, "corrected and hidden decisions do not need a prediction")
     precondition(value.canSaveCurrentFrame)
+    precondition(value.canAcceptCurrentFrame, "manual-only frames remain eligible for the batch action")
     print("  ✓ manual decisions do not require prediction")
 }
 
 private func testAcceptedPredictionNeedsPrediction() {
     var value = state(currentFrame: 101)
+    precondition(!value.canAcceptCurrentFrame)
     value = reduce(value, .acceptPrediction(.ball, decidedAt: decisionTime))
     precondition(value.decisionsForCurrentFrame.isEmpty)
     value = reduce(value, .setUnresolved(.ball, decidedAt: decisionTime))

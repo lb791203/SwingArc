@@ -17,11 +17,13 @@ struct MacDatasetWorkspaceSourceSmoke {
             "接受当前帧", "−5", "−1", "+1", "+5", "grip", "shaftStart", "shaftEnd", "clubhead", "ball",
             "onCorrectPoint", "DragGesture", "aspectFitRect", "fullFramePointToROI", "roiPointToFullFrame",
             "predictionPoint", "fullFrameImage", "roiImage", "visionSkeleton", "trailPoints", "timelineStages",
+            "DatasetSkeletonSegment", "displayedImage != nil", "!isLoading",
             "无可用帧数据", "选择一段 clip 开始标注"
         ] {
             precondition(source.contains(token), "Missing required source contract: \(token)")
         }
         precondition(!source.contains("[CanvasLandmark:"), "Canvas must use GolfLandmark")
+        precondition(!source.contains("visionSkeleton: [GolfNormalizedPoint]"), "Skeleton must use explicit edges")
         precondition(!source.contains("pred-run-fixture"), "Production workspace must not use fixture predictions")
         print("All Mac workspace source contracts passed.")
     }

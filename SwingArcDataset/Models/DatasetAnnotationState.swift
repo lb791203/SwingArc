@@ -80,6 +80,27 @@ public struct DatasetAnnotationState: Equatable, Sendable {
         return GolfLandmark.allCases.allSatisfy { decided.contains($0) }
     }
 
+    /// Whether the batch action can resolve every still-undecided landmark.
+    /// Existing manual decisions remain valid even when this frame has no prediction.
+    public var canAcceptCurrentFrame: Bool {
+        guard frameCount > 0 else { return false }
+        return GolfLandmark.allCases.allSatisfy { landmark in
+            let key = AnnotationDecisionKey(
+                frameIndex: currentSourceFrameIndex,
+                landmark: landmark
+            )
+            if decisions[key] != nil {
+                return true
+            }
+            guard let point = currentPredictionFrame?
+                .points[landmark]?
+                .resolvedFullFramePoint else {
+                return false
+            }
+            return Self.isUnitPoint(point)
+        }
+    }
+
     public var canSaveCurrentFrame: Bool {
         guard currentFrameIsReviewed else { return false }
         return decisionsForCurrentFrame.allSatisfy {

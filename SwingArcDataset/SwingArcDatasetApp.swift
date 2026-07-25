@@ -21,7 +21,7 @@ struct SwingArcDatasetApp: App {
                     clips: [], selectedClipID: nil, selectedFilter: .allClips, annotationState: nil,
                     fullFrameImage: nil, roiImage: nil,
                     fullFrameImageSize: CGSize(width: 1920, height: 1080), roiImageSize: CGSize(width: 512, height: 512),
-                    visionSkeleton: nil, trailPoints: [:], timelineStages: [], isFrameLoading: false, showsROI: false, currentSourceTime: nil,
+                    visionSkeleton: [], trailPoints: [:], timelineStages: [], isFrameLoading: false, showsROI: false, currentSourceTime: nil,
                     onSelectClip: { _ in }, onSelectFilter: { _ in }, onStep: { _ in }, onToggleROI: {}, onAcceptPrediction: { _ in },
                     onCorrectPoint: { _, _ in }, onSetOccluded: { _ in }, onSetOutOfFrame: { _ in }, onSetUnresolved: { _ in }, onAcceptFrame: {}
                 )

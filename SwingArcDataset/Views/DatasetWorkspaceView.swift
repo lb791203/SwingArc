@@ -11,7 +11,7 @@ struct DatasetWorkspaceView: View {
     let roiImage: CGImage?
     let fullFrameImageSize: CGSize
     let roiImageSize: CGSize
-    let visionSkeleton: [GolfNormalizedPoint]?
+    let visionSkeleton: [DatasetSkeletonSegment]
     let trailPoints: [GolfLandmark: [(delta: Int, point: GolfNormalizedPoint)]]
     let timelineStages: [TimelineStageMarker]
     let isFrameLoading: Bool
@@ -73,7 +73,7 @@ struct DatasetWorkspaceView: View {
                     isReviewed: state.currentFrameIsReviewed,
                     isComplete: state.currentFrameIsComplete,
                     canSave: state.canSaveCurrentFrame,
-                    canAcceptFrame: canAcceptFrame(state: state),
+                    canAcceptFrame: state.canAcceptCurrentFrame,
                     isFrameEditable: state.frameCount > 0,
                     selectedLandmark: selectedLandmark,
                     onSelectLandmark: { selectedLandmark = $0 },
@@ -90,6 +90,14 @@ struct DatasetWorkspaceView: View {
             }
         }
         .navigationSplitViewStyle(.prominentDetail)
+        .onChange(of: selectedClipID) { _, _ in
+            selectedLandmark = nil
+        }
+        .onChange(of: annotationState == nil) { _, isEmpty in
+            if isEmpty {
+                selectedLandmark = nil
+            }
+        }
     }
 
     private var currentLandmarkPoints: [CanvasLandmarkPoint] {
@@ -110,14 +118,6 @@ struct DatasetWorkspaceView: View {
         if let currentSourceTime { parts.append(String(format: "源时间 %.3fs", currentSourceTime)) }
         if showsROI { parts.append("512 × 512 ROI") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    private func canAcceptFrame(state: DatasetAnnotationState) -> Bool {
-        guard state.frameCount > 0, let prediction = state.currentPredictionFrame else { return false }
-        return GolfLandmark.allCases.allSatisfy { landmark in
-            let key = AnnotationDecisionKey(frameIndex: state.currentSourceFrameIndex, landmark: landmark)
-            return state.decisions[key] != nil || prediction.points[landmark]?.resolvedFullFramePoint != nil
-        }
     }
 
     private func inspectorRows(from state: DatasetAnnotationState) -> [LandmarkInspectorRowModel] {
@@ -141,7 +141,7 @@ struct DatasetWorkspaceView: View {
         clips: [], selectedClipID: nil, selectedFilter: .allClips, annotationState: nil,
         fullFrameImage: nil, roiImage: nil,
         fullFrameImageSize: CGSize(width: 1920, height: 1080), roiImageSize: CGSize(width: 512, height: 512),
-        visionSkeleton: nil, trailPoints: [:], timelineStages: [], isFrameLoading: false, showsROI: false, currentSourceTime: nil,
+        visionSkeleton: [], trailPoints: [:], timelineStages: [], isFrameLoading: false, showsROI: false, currentSourceTime: nil,
         onSelectClip: { _ in }, onSelectFilter: { _ in }, onStep: { _ in }, onToggleROI: {}, onAcceptPrediction: { _ in },
         onCorrectPoint: { _, _ in }, onSetOccluded: { _ in }, onSetOutOfFrame: { _ in }, onSetUnresolved: { _ in }, onAcceptFrame: {}
     )
