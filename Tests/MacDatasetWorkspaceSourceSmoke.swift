@@ -9,6 +9,8 @@ struct MacDatasetWorkspaceSourceSmoke {
             "SwingArcDataset/Views/DatasetFrameCanvas.swift",
             "SwingArcDataset/Views/DatasetKeypointInspector.swift",
             "SwingArcDataset/Views/DatasetTimelineView.swift",
+            "SwingArcDataset/Views/DatasetImportSheet.swift",
+            "SwingArcDataset/Services/DatasetWorkspaceController.swift",
             "SwingArcDataset/SwingArcDatasetApp.swift"
         ]
         let source = try paths.map { try String(contentsOfFile: $0, encoding: .utf8) }.joined(separator: "\n")
@@ -18,7 +20,9 @@ struct MacDatasetWorkspaceSourceSmoke {
             "onCorrectPoint", "DragGesture", "aspectFitRect", "fullFramePointToROI", "roiPointToFullFrame",
             "predictionPoint", "fullFrameImage", "roiImage", "visionSkeleton", "trailPoints", "timelineStages",
             "DatasetSkeletonSegment", "displayedImage != nil", "!isLoading",
-            "无可用帧数据", "选择一段 clip 开始标注"
+            "无可用帧数据", "选择一段 clip 开始标注",
+            "registerImportedClip", "controller.selectClip", "controller.fullFrameImageSize",
+            "onImported(receipt)"
         ] {
             precondition(source.contains(token), "Missing required source contract: \(token)")
         }

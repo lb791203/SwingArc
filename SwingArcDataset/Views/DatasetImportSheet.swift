@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct DatasetImportSheet: View {
     let store: GolfDatasetStore
+    let onImported: (DatasetImportReceipt) -> Void
 
     @State private var state = DatasetImportState.empty
     @State private var clipID = ""
@@ -14,6 +15,14 @@ struct DatasetImportSheet: View {
     @State private var showsTruthPicker = false
     @State private var isVerifying = false
     @State private var status = "正在读取数据集注册表…"
+
+    init(
+        store: GolfDatasetStore,
+        onImported: @escaping (DatasetImportReceipt) -> Void = { _ in }
+    ) {
+        self.store = store
+        self.onImported = onImported
+    }
 
     var body: some View {
         Form {
@@ -230,6 +239,7 @@ struct DatasetImportSheet: View {
                 store: store
             )
             status = "已导入 \(receipt.clip.clipID)，拆分：\(receipt.split.rawValue)。"
+            onImported(receipt)
         } catch {
             status = error.localizedDescription
         }

@@ -166,10 +166,12 @@ struct DatasetWorkspaceHostView: View {
                                     hasLowConfidence: false, hasROIOOB: false)
             }, selectedClipID: controller.selectedClipID, selectedFilter: controller.selectedFilter,
             annotationState: controller.annotationState, fullFrameImage: controller.fullFrameImage, roiImage: nil,
-            fullFrameImageSize: CGSize(width: 1920, height: 1080), roiImageSize: CGSize(width: 512, height: 512),
+            fullFrameImageSize: controller.fullFrameImageSize, roiImageSize: CGSize(width: 512, height: 512),
             visionSkeleton: [], trailPoints: [:], timelineStages: [], isFrameLoading: controller.isFrameLoading, showsROI: false,
             currentSourceTime: controller.currentSourceTime, workspaceAccess: controller.access,
-            onSelectClip: { _ in }, onSelectFilter: controller.selectFilter,
+            onSelectClip: { clipID in
+                Task { await controller.selectClip(clipID) }
+            }, onSelectFilter: controller.selectFilter,
             onStep: { controller.dispatch(.step($0)) }, onToggleROI: {},
             onAcceptPrediction: { controller.dispatch(.acceptPrediction($0, decidedAt: Date())) },
             onCorrectPoint: { controller.dispatch(.correctPoint($0, $1, decidedAt: Date())) },

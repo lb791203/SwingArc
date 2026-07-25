@@ -206,6 +206,41 @@ public final class GolfDatasetStore: @unchecked Sendable {
         return try Self.decoder().decode(GolfClipIdentity.self, from: data)
     }
 
+    /// Narrow read APIs deliberately avoid decoding immutable prediction payloads.
+    /// Annotation clients use these paths for blind held-out review.
+    public func loadClips() throws -> [GolfClipIdentity] {
+        let clipsDir = rootDirectory.appendingPathComponent("clips")
+        guard fileManager.fileExists(atPath: clipsDir.path) else { return [] }
+        return try fileManager.contentsOfDirectory(at: clipsDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+            .compactMap { url in
+                try validateID(url.lastPathComponent)
+                let clipJSON = url.appendingPathComponent("clip.json")
+                guard fileManager.fileExists(atPath: clipJSON.path) else { return nil }
+                return try Self.decoder().decode(GolfClipIdentity.self, from: Data(contentsOf: clipJSON))
+            }
+            .sorted { $0.clipID < $1.clipID }
+    }
+
+    public func loadRevisions(clipID: String) throws -> [GolfAnnotationRevision] {
+        try validateID(clipID)
+        let directory = clipDirectory(clipID: clipID).appendingPathComponent("annotations")
+        guard fileManager.fileExists(atPath: directory.path) else { return [] }
+        return try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+            .filter { $0.pathExtension == "json" }
+            .map { try Self.decoder().decode(GolfAnnotationRevision.self, from: Data(contentsOf: $0)) }
+    }
+
+    /// Lists only run identifiers. It never decodes a prediction JSON document.
+    public func listPredictionRunIDs(clipID: String) throws -> [String] {
+        try validateID(clipID)
+        let directory = clipDirectory(clipID: clipID).appendingPathComponent("predictions")
+        guard fileManager.fileExists(atPath: directory.path) else { return [] }
+        return try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+            .filter { $0.pathExtension == "json" }
+            .map { $0.deletingPathExtension().lastPathComponent }
+            .sorted()
+    }
+
     // MARK: - Prediction
 
     public func appendPrediction(_ prediction: GolfPredictionRun) throws {
