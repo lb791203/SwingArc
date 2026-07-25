@@ -1,106 +1,101 @@
 import Foundation
 
-// MARK: - Annotation Action
-
 public enum DatasetAnnotationAction: Equatable, Sendable {
     case step(Int)
-    case acceptPrediction(GolfLandmark)
-    case correctPoint(GolfLandmark, GolfNormalizedPoint)
-    case setOccluded(GolfLandmark)
-    case setOutOfFrame(GolfLandmark)
-    case setUnresolved(GolfLandmark)
-    case acceptUnresolvedFrame
+    case acceptPrediction(GolfLandmark, decidedAt: Date)
+    case correctPoint(GolfLandmark, GolfNormalizedPoint, decidedAt: Date)
+    case setOccluded(GolfLandmark, decidedAt: Date)
+    case setOutOfFrame(GolfLandmark, decidedAt: Date)
+    case setUnresolved(GolfLandmark, decidedAt: Date)
+    case acceptUnresolvedFrame(decidedAt: Date)
 }
 
-// MARK: - Annotation State
+/// A display-only point. It never mutates the immutable prediction run.
+public struct DatasetAnnotationPresentation: Equatable, Sendable {
+    public let landmark: GolfLandmark
+    public let point: GolfNormalizedPoint
+    public let isPrediction: Bool
+    public let heatmapConfidence: Double?
+
+    public init(
+        landmark: GolfLandmark,
+        point: GolfNormalizedPoint,
+        isPrediction: Bool,
+        heatmapConfidence: Double?
+    ) {
+        self.landmark = landmark
+        self.point = point
+        self.isPrediction = isPrediction
+        self.heatmapConfidence = heatmapConfidence
+    }
+}
 
 public struct DatasetAnnotationState: Equatable, Sendable {
-    /// The immutable prediction run driving this annotation session.
     public let predictionRun: GolfPredictionRun
-
-    /// Current frame index in the source timeline.
+    public let mediaFrameCount: Int
+    public let annotationQueue: [GolfAnnotationQueueItem]
     public internal(set) var currentSourceFrameIndex: Int
-
-    /// Keyed by `(sourceFrameIndex, landmark)` to guarantee one decision per landmark per frame.
-    /// Using a flat dictionary so replacements are free of duplicates by construction.
     public internal(set) var decisions: [AnnotationDecisionKey: GolfAnnotationDecision]
-
-    /// Stable annotator identity for this session.
     public let annotatorID: String
-
-    /// Current revision ID.
     public let revisionID: String
 
     public init(
         predictionRun: GolfPredictionRun,
+        mediaFrameCount: Int,
+        annotationQueue: [GolfAnnotationQueueItem],
         currentSourceFrameIndex: Int,
         decisions: [AnnotationDecisionKey: GolfAnnotationDecision] = [:],
         annotatorID: String,
         revisionID: String
     ) {
         self.predictionRun = predictionRun
-        self.currentSourceFrameIndex = currentSourceFrameIndex
+        self.mediaFrameCount = max(0, mediaFrameCount)
+        self.annotationQueue = annotationQueue
+        self.currentSourceFrameIndex = Self.clamped(
+            currentSourceFrameIndex,
+            mediaFrameCount: max(0, mediaFrameCount)
+        )
         self.decisions = decisions
         self.annotatorID = annotatorID
         self.revisionID = revisionID
     }
 
-    // MARK: Derived Properties
+    public var frameCount: Int { mediaFrameCount }
 
-    /// Total frame count from the prediction run.
-    public var frameCount: Int {
-        predictionRun.frames.count
-    }
-
-    /// Decisions that belong to the currently displayed frame.
     public var decisionsForCurrentFrame: [GolfAnnotationDecision] {
         decisions.filter { $0.key.frameIndex == currentSourceFrameIndex }
             .values
-            // Deterministic order: GolfLandmark.allCases order
-            .sorted { lhs, rhs in
-                let lhsIndex = GolfLandmark.allCases.firstIndex(of: lhs.landmark) ?? 0
-                let rhsIndex = GolfLandmark.allCases.firstIndex(of: rhs.landmark) ?? 0
-                return lhsIndex < rhsIndex
+            .sorted {
+                (GolfLandmark.allCases.firstIndex(of: $0.landmark) ?? 0)
+                    < (GolfLandmark.allCases.firstIndex(of: $1.landmark) ?? 0)
             }
     }
 
-    /// The prediction frame for the current source index, if available.
     public var currentPredictionFrame: GolfPredictionFrame? {
-        predictionRun.frames.first(where: { $0.sourceFrameIndex == currentSourceFrameIndex })
+        predictionRun.frames.first { $0.sourceFrameIndex == currentSourceFrameIndex }
     }
 
-    /// All five landmarks have a decision, including `unresolved`.
     public var currentFrameIsReviewed: Bool {
-        let decidedLandmarks = Set(decisionsForCurrentFrame.map(\.landmark))
-        return GolfLandmark.allCases.allSatisfy { decidedLandmarks.contains($0) }
+        let decided = Set(decisionsForCurrentFrame.map(\.landmark))
+        return GolfLandmark.allCases.allSatisfy { decided.contains($0) }
     }
 
-    /// All five decisions are contractually valid for saving.
-    /// `unresolved` is rejected by validation, so if all five are validated it's savable.
     public var canSaveCurrentFrame: Bool {
         guard currentFrameIsReviewed else { return false }
-        do {
-            for decision in decisionsForCurrentFrame {
-                _ = try decision.validated()
-            }
-            return true
-        } catch {
-            return false
+        return decisionsForCurrentFrame.allSatisfy {
+            (try? $0.validated()) != nil
         }
     }
 
-    /// All five decisions can produce resolved training targets.
-    /// `unresolved` resolves to nil → not complete.
     public var currentFrameIsComplete: Bool {
         guard currentFrameIsReviewed else { return false }
-        // Must have prediction for the frame to resolve acceptedPrediction decisions
-        guard let predFrame = currentPredictionFrame else { return false }
         for decision in decisionsForCurrentFrame {
-            if decision.kind == .unresolved { return false }
+            guard decision.kind != .unresolved else { return false }
             do {
-                let validated = try decision.validated()
-                let prediction = predFrame.points[decision.landmark]
-                if try validated.resolvedLandmark(prediction: prediction) == nil {
+                let prediction = decision.kind == .acceptedPrediction
+                    ? currentPredictionFrame?.points[decision.landmark]
+                    : nil
+                guard try decision.validated().resolvedLandmark(prediction: prediction) != nil else {
                     return false
                 }
             } catch {
@@ -109,11 +104,70 @@ public struct DatasetAnnotationState: Equatable, Sendable {
         }
         return true
     }
+
+    /// Prediction-first display: an undecided point is shown from the run, while
+    /// accepted/corrected decisions override it. Hidden and unresolved decisions draw nothing.
+    public func presentation(for landmark: GolfLandmark) -> DatasetAnnotationPresentation? {
+        let key = AnnotationDecisionKey(frameIndex: currentSourceFrameIndex, landmark: landmark)
+        if let decision = decisions[key] {
+            guard let point = decision.fullFramePoint,
+                  decision.kind == .acceptedPrediction || decision.kind == .correctedPoint else {
+                return nil
+            }
+            return DatasetAnnotationPresentation(
+                landmark: landmark,
+                point: point,
+                isPrediction: decision.kind == .acceptedPrediction,
+                heatmapConfidence: currentPredictionFrame?.points[landmark]?.heatmapConfidence
+            )
+        }
+        guard let prediction = currentPredictionFrame?.points[landmark],
+              let point = prediction.resolvedFullFramePoint,
+              Self.isUnitPoint(point) else {
+            return nil
+        }
+        return DatasetAnnotationPresentation(
+            landmark: landmark,
+            point: point,
+            isPrediction: true,
+            heatmapConfidence: prediction.heatmapConfidence
+        )
+    }
+
+    public func fullFramePointToROI(_ point: GolfNormalizedPoint) -> GolfNormalizedPoint? {
+        guard Self.isUnitPoint(point), let transform = usableROITransform else { return nil }
+        let result = transform.fullFramePointToROI(point)
+        return Self.isUnitPoint(result) ? result : nil
+    }
+
+    public func roiPointToFullFrame(_ point: GolfNormalizedPoint) -> GolfNormalizedPoint? {
+        guard Self.isUnitPoint(point), let transform = usableROITransform else { return nil }
+        let result = transform.roiPointToFullFrame(point)
+        return Self.isUnitPoint(result) ? result : nil
+    }
+
+    private var usableROITransform: GolfROIAffineTransform? {
+        guard let transform = currentPredictionFrame?.roiTransform else { return nil }
+        let values = [transform.a, transform.b, transform.c, transform.d, transform.tx, transform.ty,
+                      transform.invA, transform.invB, transform.invC, transform.invD, transform.invTx, transform.invTy]
+        guard values.allSatisfy(\.isFinite),
+              abs(transform.a * transform.d - transform.b * transform.c) > 0.000_000_001,
+              abs(transform.invA * transform.invD - transform.invB * transform.invC) > 0.000_000_001 else {
+            return nil
+        }
+        return transform
+    }
+
+    fileprivate static func isUnitPoint(_ point: GolfNormalizedPoint) -> Bool {
+        point.x.isFinite && point.y.isFinite && (0...1).contains(point.x) && (0...1).contains(point.y)
+    }
+
+    fileprivate static func clamped(_ index: Int, mediaFrameCount: Int) -> Int {
+        guard mediaFrameCount > 0 else { return 0 }
+        return max(0, min(mediaFrameCount - 1, index))
+    }
 }
 
-// MARK: - Decision Key
-
-/// Unique key for a single landmark decision at a specific frame.
 public struct AnnotationDecisionKey: Hashable, Equatable, Sendable {
     public let frameIndex: Int
     public let landmark: GolfLandmark
@@ -124,8 +178,6 @@ public struct AnnotationDecisionKey: Hashable, Equatable, Sendable {
     }
 }
 
-// MARK: - Reducer
-
 public enum DatasetAnnotationReducer {
     public static func reduce(
         _ state: DatasetAnnotationState,
@@ -134,111 +186,51 @@ public enum DatasetAnnotationReducer {
         var next = state
         switch action {
         case .step(let delta):
-            let newIndex = next.currentSourceFrameIndex + delta
-            next.currentSourceFrameIndex = max(0, min(next.frameCount - 1, newIndex))
-
-        case .acceptPrediction(let landmark):
-            guard let predFrame = next.currentPredictionFrame,
-                  let predPoint = predFrame.points[landmark],
-                  predPoint.resolvedFullFramePoint != nil else {
-                // No prediction available — cannot accept
-                return next
-            }
-            let key = AnnotationDecisionKey(
-                frameIndex: next.currentSourceFrameIndex,
-                landmark: landmark
+            next.currentSourceFrameIndex = DatasetAnnotationState.clamped(
+                next.currentSourceFrameIndex + delta,
+                mediaFrameCount: next.mediaFrameCount
             )
-            let decisionPoint = predPoint.resolvedFullFramePoint!
-            let decision = GolfAnnotationDecision(
-                landmark: landmark,
-                kind: .acceptedPrediction,
-                fullFramePoint: decisionPoint,
-                annotatorID: next.annotatorID,
-                decidedAt: Date(timeIntervalSince1970: 0) // injected stable time; real time set by controller
-            )
-            next.decisions[key] = decision
-
-        case .correctPoint(let landmark, let point):
-            let key = AnnotationDecisionKey(
-                frameIndex: next.currentSourceFrameIndex,
-                landmark: landmark
-            )
-            let decision = GolfAnnotationDecision(
-                landmark: landmark,
-                kind: .correctedPoint,
-                fullFramePoint: point,
-                annotatorID: next.annotatorID,
-                decidedAt: Date(timeIntervalSince1970: 0)
-            )
-            next.decisions[key] = decision
-
-        case .setOccluded(let landmark):
-            let key = AnnotationDecisionKey(
-                frameIndex: next.currentSourceFrameIndex,
-                landmark: landmark
-            )
-            let decision = GolfAnnotationDecision(
-                landmark: landmark,
-                kind: .occluded,
-                fullFramePoint: nil,
-                annotatorID: next.annotatorID,
-                decidedAt: Date(timeIntervalSince1970: 0)
-            )
-            next.decisions[key] = decision
-
-        case .setOutOfFrame(let landmark):
-            let key = AnnotationDecisionKey(
-                frameIndex: next.currentSourceFrameIndex,
-                landmark: landmark
-            )
-            let decision = GolfAnnotationDecision(
-                landmark: landmark,
-                kind: .outOfFrame,
-                fullFramePoint: nil,
-                annotatorID: next.annotatorID,
-                decidedAt: Date(timeIntervalSince1970: 0)
-            )
-            next.decisions[key] = decision
-
-        case .setUnresolved(let landmark):
-            let key = AnnotationDecisionKey(
-                frameIndex: next.currentSourceFrameIndex,
-                landmark: landmark
-            )
-            let decision = GolfAnnotationDecision(
-                landmark: landmark,
-                kind: .unresolved,
-                fullFramePoint: nil,
-                annotatorID: next.annotatorID,
-                decidedAt: Date(timeIntervalSince1970: 0)
-            )
-            next.decisions[key] = decision
-
-        case .acceptUnresolvedFrame:
-            // Fill in acceptedPrediction for pending landmarks that have predictions.
-            // Preserve existing corrected/occluded/outOfFrame/unresolved decisions.
-            guard let predFrame = next.currentPredictionFrame else { return next }
-            for landmark in GolfLandmark.allCases {
-                let key = AnnotationDecisionKey(
-                    frameIndex: next.currentSourceFrameIndex,
-                    landmark: landmark
-                )
-                // Skip if already decided
-                if next.decisions[key] != nil { continue }
-                // Only accept if prediction exists with a full-frame point
-                if let predPoint = predFrame.points[landmark],
-                   predPoint.resolvedFullFramePoint != nil {
-                    let decision = GolfAnnotationDecision(
-                        landmark: landmark,
-                        kind: .acceptedPrediction,
-                        fullFramePoint: predPoint.resolvedFullFramePoint!,
-                        annotatorID: next.annotatorID,
-                        decidedAt: Date(timeIntervalSince1970: 0)
-                    )
-                    next.decisions[key] = decision
-                }
+        case .acceptPrediction(let landmark, let decidedAt):
+            guard let point = next.currentPredictionFrame?.points[landmark]?.resolvedFullFramePoint,
+                  DatasetAnnotationState.isUnitPoint(point) else { return next }
+            next.replace(landmark, kind: .acceptedPrediction, point: point, decidedAt: decidedAt)
+        case .correctPoint(let landmark, let point, let decidedAt):
+            guard DatasetAnnotationState.isUnitPoint(point) else { return next }
+            next.replace(landmark, kind: .correctedPoint, point: point, decidedAt: decidedAt)
+        case .setOccluded(let landmark, let decidedAt):
+            next.replace(landmark, kind: .occluded, point: nil, decidedAt: decidedAt)
+        case .setOutOfFrame(let landmark, let decidedAt):
+            next.replace(landmark, kind: .outOfFrame, point: nil, decidedAt: decidedAt)
+        case .setUnresolved(let landmark, let decidedAt):
+            next.replace(landmark, kind: .unresolved, point: nil, decidedAt: decidedAt)
+        case .acceptUnresolvedFrame(let decidedAt):
+            for landmark in GolfLandmark.allCases where next.decision(for: landmark) == nil {
+                guard let point = next.currentPredictionFrame?.points[landmark]?.resolvedFullFramePoint,
+                      DatasetAnnotationState.isUnitPoint(point) else { continue }
+                next.replace(landmark, kind: .acceptedPrediction, point: point, decidedAt: decidedAt)
             }
         }
         return next
+    }
+}
+
+private extension DatasetAnnotationState {
+    func decision(for landmark: GolfLandmark) -> GolfAnnotationDecision? {
+        decisions[AnnotationDecisionKey(frameIndex: currentSourceFrameIndex, landmark: landmark)]
+    }
+
+    mutating func replace(
+        _ landmark: GolfLandmark,
+        kind: GolfAnnotationDecisionKind,
+        point: GolfNormalizedPoint?,
+        decidedAt: Date
+    ) {
+        decisions[AnnotationDecisionKey(frameIndex: currentSourceFrameIndex, landmark: landmark)] = GolfAnnotationDecision(
+            landmark: landmark,
+            kind: kind,
+            fullFramePoint: point,
+            annotatorID: annotatorID,
+            decidedAt: decidedAt
+        )
     }
 }

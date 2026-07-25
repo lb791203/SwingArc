@@ -80,6 +80,7 @@
 		D2000000000000000000010A /* AnnotationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9000000000000000000000A /* AnnotationStore.swift */; };
 		D2000000000000000000010B /* FrameExtractionTolerancePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D60000000000000000000004 /* FrameExtractionTolerancePolicy.swift */; };
 		D2000000000000000000010C /* ExactVideoFrameProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000006 /* ExactVideoFrameProvider.swift */; };
+		D2000000000000000000010D /* GolfAnnotationFrameQueueBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000034 /* GolfAnnotationFrameQueueBuilder.swift */; };
 	D20000000000000000000120 /* DatasetAnnotationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000140 /* DatasetAnnotationState.swift */; };
 	D20000000000000000000121 /* DatasetWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000141 /* DatasetWorkspaceView.swift */; };
 	D20000000000000000000122 /* DatasetClipSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000142 /* DatasetClipSidebar.swift */; };
@@ -160,6 +161,7 @@
 		D20000000000000000000031 /* GolfKeypointAnnotations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Models/GolfKeypointAnnotations.swift; sourceTree = SOURCE_ROOT; };
 		D20000000000000000000032 /* GolfPredictionRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Models/GolfPredictionRun.swift; sourceTree = SOURCE_ROOT; };
 		D20000000000000000000033 /* GolfDatasetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Services/GolfDatasetStore.swift; sourceTree = SOURCE_ROOT; };
+		D20000000000000000000034 /* GolfAnnotationFrameQueueBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Services/GolfAnnotationFrameQueueBuilder.swift; sourceTree = SOURCE_ROOT; };
 		D20000000000000000000140 /* DatasetAnnotationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetAnnotationState.swift; sourceTree = "<group>"; };
 		D20000000000000000000141 /* DatasetWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetWorkspaceView.swift; sourceTree = "<group>"; };
 		D20000000000000000000142 /* DatasetClipSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetClipSidebar.swift; sourceTree = "<group>"; };
@@ -351,6 +353,7 @@
 				D20000000000000000000031 /* GolfKeypointAnnotations.swift */,
 				D20000000000000000000032 /* GolfPredictionRun.swift */,
 				D20000000000000000000033 /* GolfDatasetStore.swift */,
+				D20000000000000000000034 /* GolfAnnotationFrameQueueBuilder.swift */,
 			);
 			name = Shared;
 			sourceTree = "<group>";
@@ -528,6 +531,7 @@
 				D2000000000000000000010A /* AnnotationStore.swift in Sources */,
 				D2000000000000000000010B /* FrameExtractionTolerancePolicy.swift in Sources */,
 				D2000000000000000000010C /* ExactVideoFrameProvider.swift in Sources */,
+				D2000000000000000000010D /* GolfAnnotationFrameQueueBuilder.swift in Sources */,
 				D20000000000000000000120 /* DatasetAnnotationState.swift in Sources */,
 				D20000000000000000000121 /* DatasetWorkspaceView.swift in Sources */,
 				D20000000000000000000122 /* DatasetClipSidebar.swift in Sources */,

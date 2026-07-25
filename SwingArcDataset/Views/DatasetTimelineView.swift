@@ -24,7 +24,7 @@ struct DatasetTimelineView: View {
                 Spacer()
 
                 VStack(spacing: 2) {
-                    Text("帧 \(currentFrame + 1) / \(totalFrames)")
+                    Text(totalFrames > 0 ? "帧 \(currentFrame + 1) / \(totalFrames)" : "无媒体帧")
                         .font(.caption.monospacedDigit())
                     Text("源帧 \(currentFrame)")
                         .font(.caption2)
@@ -91,6 +91,7 @@ struct DatasetTimelineView: View {
                 .background(Color.gray.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+        .disabled(totalFrames <= 0)
         .help("移动 \(label) 帧")
     }
 }

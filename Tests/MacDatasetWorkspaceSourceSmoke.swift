@@ -1,56 +1,28 @@
 import Foundation
 
-private func requireToken(_ source: String, _ token: String, _ index: Int) throws {
-    precondition(source.contains(token), "Source file \(index) missing required token: '\(token)'")
-}
-
 @main
 struct MacDatasetWorkspaceSourceSmoke {
     static func main() throws {
-        print("Checkpoint B: Three-column workspace source contract smoke tests")
-        print()
-
-        let filePaths = [
+        let paths = [
             "SwingArcDataset/Views/DatasetWorkspaceView.swift",
             "SwingArcDataset/Views/DatasetClipSidebar.swift",
             "SwingArcDataset/Views/DatasetFrameCanvas.swift",
             "SwingArcDataset/Views/DatasetKeypointInspector.swift",
-            "SwingArcDataset/Views/DatasetTimelineView.swift"
+            "SwingArcDataset/Views/DatasetTimelineView.swift",
+            "SwingArcDataset/SwingArcDatasetApp.swift"
         ]
-
-        print("Reading \(filePaths.count) source files...")
-        let sources = try filePaths.map { path in
-            try String(contentsOfFile: path, encoding: .utf8)
+        let source = try paths.map { try String(contentsOfFile: $0, encoding: .utf8) }.joined(separator: "\n")
+        for token in [
+            "NavigationSplitView", "DatasetClipSidebar", "DatasetFrameCanvas", "DatasetKeypointInspector", "DatasetTimelineView",
+            "接受当前帧", "−5", "−1", "+1", "+5", "grip", "shaftStart", "shaftEnd", "clubhead", "ball",
+            "onCorrectPoint", "DragGesture", "aspectFitRect", "fullFramePointToROI", "roiPointToFullFrame",
+            "predictionPoint", "fullFrameImage", "roiImage", "visionSkeleton", "trailPoints", "timelineStages",
+            "无可用帧数据", "选择一段 clip 开始标注"
+        ] {
+            precondition(source.contains(token), "Missing required source contract: \(token)")
         }
-
-        // Combine all sources into one for broad token search
-        let combined = sources.joined(separator: "\n")
-
-        let requiredTokens = [
-            "NavigationSplitView",
-            "DatasetClipSidebar",
-            "DatasetFrameCanvas",
-            "DatasetKeypointInspector",
-            "DatasetTimelineView",
-            "接受当前帧",
-            "−5",
-            "−1",
-            "+1",
-            "+5",
-            "grip",
-            "shaftStart",
-            "shaftEnd",
-            "clubhead",
-            "ball"
-        ]
-
-        print("Verifying \(requiredTokens.count) required tokens across all view files...")
-        for (i, token) in requiredTokens.enumerated() {
-            precondition(combined.contains(token), "Missing required token #\(i): '\(token)'")
-        }
-
-        print()
-        print("All required tokens present across workspace view sources.")
-        print("Checkpoint B passed.")
+        precondition(!source.contains("[CanvasLandmark:"), "Canvas must use GolfLandmark")
+        precondition(!source.contains("pred-run-fixture"), "Production workspace must not use fixture predictions")
+        print("All Mac workspace source contracts passed.")
     }
 }
