@@ -95,6 +95,7 @@
 		D20000000000000000000127 /* DatasetSubjectAnchorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000147 /* DatasetSubjectAnchorController.swift */; };
 		D20000000000000000000128 /* DatasetPredictionRunGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000148 /* DatasetPredictionRunGenerator.swift */; };
 		D20000000000000000000129 /* DatasetSubjectAnchorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000149 /* DatasetSubjectAnchorSheet.swift */; };
+		D2000000000000000000012A /* DatasetAnnotationQueueMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000000000000000000014A /* DatasetAnnotationQueueMode.swift */; };
 	D20000000000000000000120 /* DatasetAnnotationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000140 /* DatasetAnnotationState.swift */; };
 	D20000000000000000000121 /* DatasetWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000141 /* DatasetWorkspaceView.swift */; };
 	D20000000000000000000122 /* DatasetClipSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000142 /* DatasetClipSidebar.swift */; };
@@ -195,6 +196,7 @@
 		D20000000000000000000147 /* DatasetSubjectAnchorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArcDataset/Services/DatasetSubjectAnchorController.swift; sourceTree = SOURCE_ROOT; };
 		D20000000000000000000148 /* DatasetPredictionRunGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArcDataset/Services/DatasetPredictionRunGenerator.swift; sourceTree = SOURCE_ROOT; };
 		D20000000000000000000149 /* DatasetSubjectAnchorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArcDataset/Views/DatasetSubjectAnchorSheet.swift; sourceTree = SOURCE_ROOT; };
+		D2000000000000000000014A /* DatasetAnnotationQueueMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetAnnotationQueueMode.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -348,6 +350,7 @@
 			children = (
 				D20000000000000000000021 /* DatasetWorkspaceState.swift */,
 				D20000000000000000000140 /* DatasetAnnotationState.swift */,
+				D2000000000000000000014A /* DatasetAnnotationQueueMode.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -578,6 +581,7 @@
 				D20000000000000000000127 /* DatasetSubjectAnchorController.swift in Sources */,
 				D20000000000000000000128 /* DatasetPredictionRunGenerator.swift in Sources */,
 				D20000000000000000000129 /* DatasetSubjectAnchorSheet.swift in Sources */,
+				D2000000000000000000012A /* DatasetAnnotationQueueMode.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -15,6 +15,14 @@ public struct GolfAnnotationQueuePolicy: Sendable {
 }
 
 public enum GolfAnnotationQueueReason: String, Codable, Comparable, Sendable {
+    case p1Stage = "p1-stage"
+    case p2Stage = "p2-stage"
+    case p3Stage = "p3-stage"
+    case p4Stage = "p4-stage"
+    case p5Stage = "p5-stage"
+    case p6Stage = "p6-stage"
+    case p7Stage = "p7-stage"
+    case p8Stage = "p8-stage"
     case sparseP1P5 = "sparse-p1-p5"
     case sparseP5P8 = "sparse-p5-p8"
     case p6Dense = "p6-dense"
