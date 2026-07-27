@@ -18,6 +18,8 @@ struct GolfDatasetValidatorSmoke {
         let errors = GolfDatasetValidator.validate(snapshot: valid)
         precondition(errors.isEmpty, "Valid snapshot should pass, got \(errors)")
 
+        testManualBootstrapAndModelInferenceValidation(registry: registry, clip: clip)
+
         // 2. Duplicate clip ID
         let dupSnap = GolfDatasetSnapshot(
             registry: registry,
@@ -817,7 +819,7 @@ struct GolfDatasetValidatorSmoke {
             visionRequestVersion: "v1",
             roiAlgorithmVersion: "roi-v1",
             roiConfigSHA256: String(repeating: "r", count: 64),
-            modelSHA256: String(repeating: "m", count: 64),
+            modelSHA256: String(repeating: "a", count: 64),
             decoderVersion: "dec-v1",
             trackerVersion: "trk-v1",
             createdAt: Date(timeIntervalSince1970: 1000),
@@ -838,7 +840,7 @@ struct GolfDatasetValidatorSmoke {
                     ]
                 )
             ],
-            provenanceHash: String(repeating: "p", count: 64)
+            provenanceHash: String(repeating: "f", count: 64)
         )
     }
 
@@ -877,6 +879,214 @@ struct GolfDatasetValidatorSmoke {
                 ])
             ],
             notes: nil
+        )
+    }
+
+    static func testManualBootstrapAndModelInferenceValidation(registry: GolferRegistry, clip: GolfClipIdentity) {
+        // modelInference missing modelSHA256
+        let badModelInfRun = GolfPredictionRun(
+            schemaVersion: 2,
+            runKind: .modelInference,
+            predictionRunID: "bad-model-run",
+            clipID: clip.clipID,
+            mediaSHA256: clip.media.sha256,
+            timelineSHA256: clip.media.timelineSHA256,
+            visionFrameworkVersion: "v1",
+            visionRequestVersion: "r1",
+            roiAlgorithmVersion: "roi-v1",
+            roiConfigSHA256: String(repeating: "r", count: 64),
+            modelSHA256: nil, // FAIL: modelInference requires 64-hex modelSHA256
+            decoderVersion: "dec-v1",
+            trackerVersion: "trk-v1",
+            createdAt: Date(),
+            frames: [],
+            provenanceHash: String(repeating: "f", count: 64)
+        )
+        let snap1 = GolfDatasetSnapshot(registry: registry, clips: [clip], predictions: [badModelInfRun], revisions: [])
+        let errs1 = GolfDatasetValidator.validate(snapshot: snap1)
+        precondition(errs1.contains(.invalidModelSHA256(predictionRunID: "bad-model-run")), "Must reject modelInference with missing modelSHA256, got \(errs1)")
+
+        // manualBootstrap with modelSHA256
+        let badBootstrapRun = GolfPredictionRun(
+            schemaVersion: 2,
+            runKind: .manualBootstrap,
+            predictionRunID: "bad-bootstrap-run",
+            clipID: clip.clipID,
+            mediaSHA256: clip.media.sha256,
+            timelineSHA256: clip.media.timelineSHA256,
+            visionFrameworkVersion: "v1",
+            visionRequestVersion: "r1",
+            roiAlgorithmVersion: "roi-v1",
+            roiConfigSHA256: String(repeating: "r", count: 64),
+            modelSHA256: String(repeating: "m", count: 64), // FAIL: manualBootstrap must have nil modelSHA256
+            decoderVersion: "dec-v1",
+            trackerVersion: "trk-v1",
+            createdAt: Date(),
+            frames: [],
+            provenanceHash: String(repeating: "f", count: 64)
+        )
+        let snap2 = GolfDatasetSnapshot(registry: registry, clips: [clip], predictions: [badBootstrapRun], revisions: [])
+        let errs2 = GolfDatasetValidator.validate(snapshot: snap2)
+        precondition(errs2.contains(.manualBootstrapHasModelSHA(predictionRunID: "bad-bootstrap-run")), "Must reject manualBootstrap with modelSHA256, got \(errs2)")
+
+        testManualBootstrapValidationWithMissingFrames(registry: registry, clip: clip)
+        testManualBootstrapValidationWithInvalidInverseTransform(registry: registry, clip: clip)
+        testManualBootstrapValidationWithInvalidInverseTranslation(registry: registry, clip: clip)
+        testManualBootstrapValidationWithTamperedProvenanceHash(registry: registry, clip: clip)
+    }
+
+    static func testManualBootstrapValidationWithMissingFrames(registry: GolferRegistry, clip: GolfClipIdentity) {
+        // Frame count mismatch (clip frameCount is 60, but run only has 1 frame)
+        let incompleteRun = GolfPredictionRun(
+            schemaVersion: 2,
+            runKind: .manualBootstrap,
+            predictionRunID: "incomplete-run",
+            clipID: clip.clipID,
+            mediaSHA256: clip.media.sha256,
+            timelineSHA256: clip.media.timelineSHA256,
+            visionFrameworkVersion: "v1",
+            visionRequestVersion: "r1",
+            roiAlgorithmVersion: "roi-v1",
+            roiConfigSHA256: String(repeating: "r", count: 64),
+            modelSHA256: nil,
+            decoderVersion: "dec-v1",
+            trackerVersion: "trk-v1",
+            createdAt: Date(),
+            frames: [
+                GolfPredictionFrame(
+                    sourceFrameIndex: 0,
+                    sourceTime: 0.0,
+                    roiTransform: GolfROIAffineTransform(a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0, invA: 1, invB: 0, invC: 0, invD: 1, invTx: 0, invTy: 0),
+                    points: [:]
+                )
+            ],
+            provenanceHash: String(repeating: "f", count: 64)
+        )
+        let snap = GolfDatasetSnapshot(registry: registry, clips: [clip], predictions: [incompleteRun], revisions: [])
+        let errs = GolfDatasetValidator.validate(snapshot: snap)
+        precondition(errs.contains(.emptyPredictionRunFrames(predictionRunID: "incomplete-run")), "Must reject incomplete manualBootstrap frames, got \(errs)")
+    }
+
+    static func testManualBootstrapValidationWithInvalidInverseTransform(registry: GolferRegistry, clip: GolfClipIdentity) {
+        // Transform forward x inverse does not equal identity matrix
+        let badTransformRun = GolfPredictionRun(
+            schemaVersion: 2,
+            runKind: .manualBootstrap,
+            predictionRunID: "bad-transform-run",
+            clipID: clip.clipID,
+            mediaSHA256: clip.media.sha256,
+            timelineSHA256: clip.media.timelineSHA256,
+            visionFrameworkVersion: "v1",
+            visionRequestVersion: "r1",
+            roiAlgorithmVersion: "roi-v1",
+            roiConfigSHA256: String(repeating: "r", count: 64),
+            modelSHA256: nil,
+            decoderVersion: "dec-v1",
+            trackerVersion: "trk-v1",
+            createdAt: Date(),
+            frames: [
+                GolfPredictionFrame(
+                    sourceFrameIndex: 0,
+                    sourceTime: 0.0,
+                    roiTransform: GolfROIAffineTransform(
+                        a: 2, b: 0, c: 0, d: 2, tx: 0, ty: 0,
+                        invA: 1, invB: 0, invC: 0, invD: 1, invTx: 0, invTy: 0 // invA * a = 2 != 1 -> INVALID
+                    ),
+                    points: [:]
+                )
+            ],
+            provenanceHash: String(repeating: "f", count: 64)
+        )
+        let snap = GolfDatasetSnapshot(registry: registry, clips: [clip], predictions: [badTransformRun], revisions: [])
+        let errs = GolfDatasetValidator.validate(snapshot: snap)
+        precondition(errs.contains(.invalidPredictionROITransform(predictionRunID: "bad-transform-run", sourceFrameIndex: 0)), "Must reject invalid inverse transform, got \(errs)")
+    }
+
+    static func testManualBootstrapValidationWithTamperedProvenanceHash(registry: GolferRegistry, clip: GolfClipIdentity) {
+        let formatValidButIncorrectHash = String(repeating: "e", count: 64)
+        let tamperedRun = GolfPredictionRun(
+            schemaVersion: 2,
+            runKind: .manualBootstrap,
+            predictionRunID: formatValidButIncorrectHash,
+            clipID: clip.clipID,
+            mediaSHA256: clip.media.sha256,
+            timelineSHA256: clip.media.timelineSHA256,
+            visionFrameworkVersion: "v1",
+            visionRequestVersion: "r1",
+            roiAlgorithmVersion: "roi-v1",
+            roiConfigSHA256: String(repeating: "r", count: 64),
+            modelSHA256: nil,
+            decoderVersion: "dec-v1",
+            trackerVersion: "trk-v1",
+            createdAt: Date(),
+            frames: [
+                GolfPredictionFrame(
+                    sourceFrameIndex: 0,
+                    sourceTime: 0.0,
+                    roiTransform: GolfROIAffineTransform(a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0, invA: 1, invB: 0, invC: 0, invD: 1, invTx: 0, invTy: 0),
+                    points: [:]
+                )
+            ],
+            provenanceHash: formatValidButIncorrectHash
+        )
+        let snap = GolfDatasetSnapshot(registry: registry, clips: [clip], predictions: [tamperedRun], revisions: [])
+        let errs = GolfDatasetValidator.validate(snapshot: snap)
+        precondition(
+            errs.contains(.provenanceHashMismatch(predictionRunID: formatValidButIncorrectHash)),
+            "Must recompute and reject a format-valid but incorrect provenanceHash, got \(errs)"
+        )
+    }
+
+    static func testManualBootstrapValidationWithInvalidInverseTranslation(
+        registry: GolferRegistry,
+        clip: GolfClipIdentity
+    ) {
+        let runID = String(repeating: "d", count: 64)
+        let badTranslationRun = GolfPredictionRun(
+            schemaVersion: 2,
+            runKind: .manualBootstrap,
+            predictionRunID: runID,
+            clipID: clip.clipID,
+            mediaSHA256: clip.media.sha256,
+            timelineSHA256: clip.media.timelineSHA256,
+            visionFrameworkVersion: "v1",
+            visionRequestVersion: "r1",
+            roiAlgorithmVersion: "roi-v1",
+            roiConfigSHA256: String(repeating: "r", count: 64),
+            modelSHA256: nil,
+            decoderVersion: "dec-v1",
+            trackerVersion: "trk-v1",
+            createdAt: Date(),
+            frames: [
+                GolfPredictionFrame(
+                    sourceFrameIndex: 0,
+                    sourceTime: 0,
+                    roiTransform: GolfROIAffineTransform(
+                        a: 1, b: 0, c: 0, d: 1, tx: 0.25, ty: -0.1,
+                        invA: 1, invB: 0, invC: 0, invD: 1,
+                        invTx: 0, invTy: 0
+                    ),
+                    points: [:]
+                )
+            ],
+            provenanceHash: runID
+        )
+        let errors = GolfDatasetValidator.validate(
+            snapshot: GolfDatasetSnapshot(
+                registry: registry,
+                clips: [clip],
+                predictions: [badTranslationRun],
+                revisions: []
+            )
+        )
+        precondition(
+            errors.contains(
+                .invalidPredictionROITransform(
+                    predictionRunID: runID,
+                    sourceFrameIndex: 0
+                )
+            ),
+            "Must reject an inverse transform with incorrect translation, got \(errors)"
         )
     }
 }

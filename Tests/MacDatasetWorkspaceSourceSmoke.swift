@@ -11,6 +11,9 @@ struct MacDatasetWorkspaceSourceSmoke {
             "SwingArcDataset/Views/DatasetTimelineView.swift",
             "SwingArcDataset/Views/DatasetImportSheet.swift",
             "SwingArcDataset/Services/DatasetWorkspaceController.swift",
+            "SwingArcDataset/Services/DatasetSubjectAnchorController.swift",
+            "SwingArcDataset/Services/DatasetPredictionRunGenerator.swift",
+            "SwingArcDataset/Views/DatasetSubjectAnchorSheet.swift",
             "SwingArcDataset/SwingArcDatasetApp.swift"
         ]
         let source = try paths.map { try String(contentsOfFile: $0, encoding: .utf8) }.joined(separator: "\n")
@@ -22,13 +25,32 @@ struct MacDatasetWorkspaceSourceSmoke {
             "DatasetSkeletonSegment", "displayedImage != nil", "!isLoading",
             "无可用帧数据", "选择一段 clip 开始标注",
             "registerImportedClip", "controller.selectClip", "controller.fullFrameImageSize",
-            "onImported(receipt)"
+            "onImported(receipt)", "DatasetSubjectAnchorSheet", "DatasetPredictionRunGenerator",
+            "主体锚点", "manual-bootstrap"
         ] {
             precondition(source.contains(token), "Missing required source contract: \(token)")
         }
         precondition(!source.contains("[CanvasLandmark:"), "Canvas must use GolfLandmark")
         precondition(!source.contains("visionSkeleton: [GolfNormalizedPoint]"), "Skeleton must use explicit edges")
         precondition(!source.contains("pred-run-fixture"), "Production workspace must not use fixture predictions")
+        for token in [
+            "DatasetWorkspaceHostView(controller: workspaceController, store: store)",
+            "let store: GolfDatasetStore",
+            "selectedClipIdentity: controller.selectedClip",
+            "store: store",
+            "videoURL: controller.selectedVideoURL",
+            "allowsPredictionAcceptance: state.allowsPredictionAcceptance",
+            "withTaskCancellationHandler",
+            "Task.checkCancellation()",
+            "generationTask?.cancel()",
+            "@MainActor\npublic final class DatasetPredictionRunGenerator"
+        ] {
+            precondition(source.contains(token), "Production anchor entry is not wired: \(token)")
+        }
+        precondition(
+            !source.contains("registry: nil"),
+            "Generator must not fabricate a registry-less validation snapshot"
+        )
         print("All Mac workspace source contracts passed.")
     }
 }

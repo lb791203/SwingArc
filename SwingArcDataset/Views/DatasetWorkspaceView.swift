@@ -30,7 +30,26 @@ struct DatasetWorkspaceView: View {
     let onSetUnresolved: (GolfLandmark) -> Void
     let onAcceptFrame: () -> Void
 
+    var selectedClipIdentity: GolfClipIdentity? = nil
+    var store: GolfDatasetStore? = nil
+    var videoURL: URL? = nil
+
+    @StateObject private var defaultAnchorController = DatasetSubjectAnchorController()
+    @StateObject private var defaultRunGenerator = DatasetPredictionRunGenerator()
+
+    var anchorController: DatasetSubjectAnchorController? = nil
+    var runGenerator: DatasetPredictionRunGenerator? = nil
+
     @State private var selectedLandmark: GolfLandmark?
+    @State private var showsAnchorSheet = false
+
+    private var activeAnchorController: DatasetSubjectAnchorController {
+        anchorController ?? defaultAnchorController
+    }
+
+    private var activeRunGenerator: DatasetPredictionRunGenerator {
+        runGenerator ?? defaultRunGenerator
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -40,6 +59,17 @@ struct DatasetWorkspaceView: View {
             )
         } content: {
             VStack(spacing: 0) {
+                HStack {
+                    if selectedClipID != nil {
+                        Button("主体锚点") {
+                            showsAnchorSheet = true
+                        }
+                        .font(.caption)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+
                 DatasetFrameCanvas(
                     fullFrameImage: fullFrameImage,
                     roiImage: roiImage,
@@ -77,7 +107,7 @@ struct DatasetWorkspaceView: View {
                     canSave: state.canSaveCurrentFrame,
                     canAcceptFrame: state.canAcceptCurrentFrame,
                     isFrameEditable: state.frameCount > 0 && workspaceAccess == .editable,
-                    allowsPredictionAcceptance: state.predictionRun != nil,
+                    allowsPredictionAcceptance: state.allowsPredictionAcceptance,
                     selectedLandmark: selectedLandmark,
                     onSelectLandmark: { selectedLandmark = $0 },
                     onAcceptPrediction: onAcceptPrediction,
@@ -92,9 +122,38 @@ struct DatasetWorkspaceView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationSplitViewStyle(.prominentDetail)
+        .sheet(isPresented: $showsAnchorSheet) {
+            if let selectedClipIdentity, let store, let videoURL {
+                DatasetSubjectAnchorSheet(
+                    anchorController: activeAnchorController,
+                    runGenerator: activeRunGenerator,
+                    clip: selectedClipIdentity,
+                    store: store,
+                    videoURL: videoURL,
+                    onDismiss: {
+                        showsAnchorSheet = false
+                        activeAnchorController.resetState()
+                    }
+                )
+            } else {
+                VStack(spacing: 16) {
+                    Text("主体锚点 — 无视频或 Clip 数据")
+                        .font(.headline)
+                    Text("请确保选中的 Clip 存在且视频文件正常解析。")
+                        .font(.caption).foregroundColor(.secondary)
+                    Button("关闭") {
+                        showsAnchorSheet = false
+                        activeAnchorController.resetState()
+                    }
+                }
+                .padding()
+                .frame(width: 400, height: 200)
+            }
+        }
         .onChange(of: selectedClipID) { _, _ in
             selectedLandmark = nil
+            showsAnchorSheet = false
+            activeAnchorController.resetState()
         }
         .onChange(of: annotationState == nil) { _, isEmpty in
             if isEmpty {
@@ -156,6 +215,7 @@ struct DatasetWorkspaceView: View {
 /// to one retained controller instance.
 struct DatasetWorkspaceHostView: View {
     @ObservedObject var controller: DatasetWorkspaceController
+    let store: GolfDatasetStore
 
     var body: some View {
         DatasetWorkspaceView(
@@ -178,7 +238,10 @@ struct DatasetWorkspaceHostView: View {
             onSetOccluded: { controller.dispatch(.setOccluded($0, decidedAt: Date())) },
             onSetOutOfFrame: { controller.dispatch(.setOutOfFrame($0, decidedAt: Date())) },
             onSetUnresolved: { controller.dispatch(.setUnresolved($0, decidedAt: Date())) },
-            onAcceptFrame: { controller.dispatch(.acceptUnresolvedFrame(decidedAt: Date())) }
+            onAcceptFrame: { controller.dispatch(.acceptUnresolvedFrame(decidedAt: Date())) },
+            selectedClipIdentity: controller.selectedClip,
+            store: store,
+            videoURL: controller.selectedVideoURL
         )
     }
 }

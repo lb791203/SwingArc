@@ -3,6 +3,10 @@ import Foundation
 public enum GolfDatasetStoreError: Error, Equatable, CustomStringConvertible {
     case predictionAlreadyExists(String)
     case revisionConflict(String)
+    case anchorAlreadyExists(String)
+    case anchorNotFound(String)
+    case anchorClipMismatch(expected: String, got: String)
+    case invalidID(String)
     case pathTraversal
 
     public var description: String {
@@ -11,6 +15,14 @@ public enum GolfDatasetStoreError: Error, Equatable, CustomStringConvertible {
             return "Prediction run '\(id)' already exists and is immutable"
         case .revisionConflict(let id):
             return "Revision '\(id)' already exists with different content"
+        case .anchorAlreadyExists(let id):
+            return "Subject anchor '\(id)' already exists and is immutable"
+        case .anchorNotFound(let id):
+            return "Subject anchor '\(id)' not found"
+        case .anchorClipMismatch(let expected, let got):
+            return "Subject anchor clipID '\(got)' does not match directory clipID '\(expected)'"
+        case .invalidID(let msg):
+            return "Invalid ID or payload: \(msg)"
         case .pathTraversal:
             return "ID contains path traversal characters"
         }
@@ -101,6 +113,12 @@ public final class GolfDatasetStore: @unchecked Sendable {
         clipDirectory(clipID: clipID)
             .appendingPathComponent("annotations")
             .appendingPathComponent("\(revisionID).json")
+    }
+
+    private func anchorJSONURL(clipID: String, anchorID: String) -> URL {
+        clipDirectory(clipID: clipID)
+            .appendingPathComponent("anchors")
+            .appendingPathComponent("\(anchorID).json")
     }
 
     // MARK: - Atomic write
@@ -357,5 +375,66 @@ public final class GolfDatasetStore: @unchecked Sendable {
             predictions: predictions.sorted { $0.predictionRunID < $1.predictionRunID },
             revisions: revisions.sorted { $0.revisionID < $1.revisionID }
         )
+    }
+
+    // MARK: - Subject Anchors
+
+    public func appendSubjectAnchor(_ anchor: GolfSubjectAnchorDecision, clipID: String) throws {
+        try withLock {
+            try validateID(clipID)
+            try validateID(anchor.anchorID)
+            guard anchor.clipID == clipID else {
+                throw GolfDatasetStoreError.anchorClipMismatch(expected: clipID, got: anchor.clipID)
+            }
+            guard anchor.schemaVersion == GolfSubjectAnchorDecision.currentSchemaVersion else {
+                throw GolfDatasetStoreError.invalidID("schemaVersion mismatch: \(anchor.schemaVersion)")
+            }
+            let clip = try loadClip(clipID: clipID)
+            guard anchor.mediaSHA256 == clip.media.sha256 &&
+                    anchor.timelineSHA256 == clip.media.timelineSHA256 else {
+                throw GolfDatasetStoreError.invalidID(
+                    "anchor media/timeline SHA mismatch with clip"
+                )
+            }
+            let destination = anchorJSONURL(clipID: clipID, anchorID: anchor.anchorID)
+            guard !fileManager.fileExists(atPath: destination.path) else {
+                throw GolfDatasetStoreError.anchorAlreadyExists(anchor.anchorID)
+            }
+            try atomicWrite(anchor, to: destination, allowOverwrite: false)
+        }
+    }
+
+    public func loadSubjectAnchors(clipID: String) throws -> [GolfSubjectAnchorDecision] {
+        try withLock {
+            try validateID(clipID)
+            let dir = clipDirectory(clipID: clipID).appendingPathComponent("anchors")
+            guard fileManager.fileExists(atPath: dir.path) else { return [] }
+            let files = try fileManager.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+                .filter { $0.pathExtension == "json" }
+            var result: [GolfSubjectAnchorDecision] = []
+            for file in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+                let data = try Data(contentsOf: file)
+                result.append(try Self.decoder().decode(GolfSubjectAnchorDecision.self, from: data))
+            }
+            return result.sorted {
+                if $0.sourceFrameIndex != $1.sourceFrameIndex {
+                    return $0.sourceFrameIndex < $1.sourceFrameIndex
+                }
+                return $0.anchorID < $1.anchorID
+            }
+        }
+    }
+
+    public func loadSubjectAnchor(clipID: String, anchorID: String) throws -> GolfSubjectAnchorDecision {
+        try withLock {
+            try validateID(clipID)
+            try validateID(anchorID)
+            let destination = anchorJSONURL(clipID: clipID, anchorID: anchorID)
+            guard fileManager.fileExists(atPath: destination.path) else {
+                throw GolfDatasetStoreError.anchorNotFound(anchorID)
+            }
+            let data = try Data(contentsOf: destination)
+            return try Self.decoder().decode(GolfSubjectAnchorDecision.self, from: data)
+        }
     }
 }

@@ -166,6 +166,7 @@ private final class StubMediaRecorder {
 @MainActor
 private final class StubMediaAccess: DatasetWorkspaceMediaAccessing {
     let recorder: StubMediaRecorder
+    let activeURL: URL? = URL(fileURLWithPath: "/tmp/fixture-video.mov")
     var metadata = DatasetWorkspaceMediaMetadata(
         mediaSHA256: shaA,
         frameCount: 10,
@@ -225,6 +226,7 @@ private final class StubMediaFactory: DatasetWorkspaceMediaAccessFactory {
 private final class SuspendingMediaAccess: DatasetWorkspaceMediaAccessing {
     let recorder: StubMediaRecorder
     let imageWidth: Int
+    var activeURL: URL? { nil }
     var suspendOpen = false
     var suspendFrame = false
     private(set) var openStarted = false
@@ -453,6 +455,11 @@ struct MacDatasetBlindModeSmoke {
         precondition(restored.annotationState?.currentSourceFrameIndex == 4)
         precondition(restored.selectedFilter == .p6p8)
         precondition(restored.activeRevisionID == "revision-a")
+        precondition(
+            restored.selectedVideoURL ==
+                URL(fileURLWithPath: "/tmp/fixture-video.mov"),
+            "Expected active video URL, got \(String(describing: restored.selectedVideoURL))"
+        )
         precondition(restoredMediaFactory.recorder.requestedFrames == [4])
         precondition(
             store.predictionLoads == 0,
@@ -528,6 +535,7 @@ struct MacDatasetBlindModeSmoke {
         } else {
             preconditionFailure("revision read failure must be read-only")
         }
+        precondition(restored.selectedVideoURL == nil)
         store.failRevisionLoad = false
 
         store.revisions = []

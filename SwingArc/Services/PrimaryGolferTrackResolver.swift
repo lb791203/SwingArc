@@ -110,6 +110,13 @@ public enum PrimaryGolferTrackResolver {
         candidates: [GolfPoseCandidateFrame],
         manualAnchor: GolfPoseCandidateIdentifier?
     ) -> Result<[GolfPoseTrackFrame], PrimaryGolferTrackResolverError> {
+        resolve(candidates: candidates, manualAnchors: manualAnchor != nil ? [manualAnchor!] : [])
+    }
+
+    public static func resolve(
+        candidates: [GolfPoseCandidateFrame],
+        manualAnchors: [GolfPoseCandidateIdentifier]
+    ) -> Result<[GolfPoseTrackFrame], PrimaryGolferTrackResolverError> {
         guard !candidates.isEmpty else {
             return .failure(.emptyCandidates)
         }
@@ -129,65 +136,127 @@ public enum PrimaryGolferTrackResolver {
             return .failure(.nonMonotonicTime)
         }
 
-        let anchor: GolfPoseCandidateIdentifier
-        if let manualAnchor {
-            guard prepared[manualAnchor.sourceFrameIndex]?.contains(where: {
-                $0.candidateIndex == manualAnchor.candidateIndex
-            }) == true else {
-                return .failure(.anchorNotFound(manualAnchor))
+        // Validate anchors
+        var anchorsByFrame: [Int: GolfPoseCandidateIdentifier] = [:]
+        let sortedAnchors = manualAnchors.sorted { $0.sourceFrameIndex < $1.sourceFrameIndex }
+        for anchor in sortedAnchors {
+            if let existing = anchorsByFrame[anchor.sourceFrameIndex] {
+                if existing.candidateIndex != anchor.candidateIndex {
+                    return .failure(.duplicateFrameConflict(anchor.sourceFrameIndex))
+                }
+            } else {
+                guard prepared[anchor.sourceFrameIndex]?.contains(where: {
+                    $0.candidateIndex == anchor.candidateIndex
+                }) == true else {
+                    return .failure(.anchorNotFound(anchor))
+                }
+                anchorsByFrame[anchor.sourceFrameIndex] = anchor
             }
-            anchor = manualAnchor
-        } else {
+        }
+
+        let effectiveAnchors: [GolfPoseCandidateIdentifier]
+        if anchorsByFrame.isEmpty {
             guard prepared.values.allSatisfy({ $0.count == 1 }),
                   let firstFrame = sortedFrames.first,
                   let firstCandidate = prepared[firstFrame]?.first else {
                 return .failure(.manualAnchorRequired)
             }
-            anchor = GolfPoseCandidateIdentifier(
+            effectiveAnchors = [GolfPoseCandidateIdentifier(
                 sourceFrameIndex: firstFrame,
                 candidateIndex: firstCandidate.candidateIndex
-            )
+            )]
+        } else {
+            effectiveAnchors = sortedAnchors
         }
 
-        guard let anchorPosition = sortedFrames.firstIndex(of: anchor.sourceFrameIndex) else {
-            return .failure(.anchorNotFound(anchor))
-        }
-        let forwardFrames = Array(sortedFrames[anchorPosition...])
-        let backwardFrames = Array(sortedFrames[...anchorPosition].reversed())
+        var selectedByFrame: [Int: Int] = [:]
+        var statesByFrame: [Int: [Int: PathState]] = [:]
 
-        let forward: DirectionSolution
-        let backward: DirectionSolution
-        switch solveDirection(
-            frameIndices: forwardFrames,
-            anchorCandidateIndex: anchor.candidateIndex,
-            candidatesByFrame: prepared
-        ) {
-        case .success(let solution):
-            forward = solution
-        case .failure(let error):
-            return .failure(error)
-        }
-        switch solveDirection(
-            frameIndices: backwardFrames,
-            anchorCandidateIndex: anchor.candidateIndex,
-            candidatesByFrame: prepared
-        ) {
-        case .success(let solution):
-            backward = solution
-        case .failure(let error):
-            return .failure(error)
+        // Solve segment before first anchor
+        if let firstAnchor = effectiveAnchors.first,
+           let firstPos = sortedFrames.firstIndex(of: firstAnchor.sourceFrameIndex),
+           firstPos > 0 {
+            let segmentFrames = Array(sortedFrames[...firstPos].reversed())
+            switch solveDirection(
+                frameIndices: segmentFrames,
+                anchorCandidateIndex: firstAnchor.candidateIndex,
+                targetCandidateIndex: nil,
+                candidatesByFrame: prepared
+            ) {
+            case .success(let sol):
+                selectedByFrame.merge(sol.path) { _, new in new }
+                statesByFrame.merge(sol.statesByFrame) { _, new in new }
+            case .failure(let err):
+                return .failure(err)
+            }
         }
 
-        var selectedByFrame = backward.path
-        selectedByFrame.merge(forward.path) { _, forwardValue in forwardValue }
+        // Solve segments between consecutive anchors
+        if effectiveAnchors.count > 1 {
+            for i in 0..<(effectiveAnchors.count - 1) {
+                let currAnchor = effectiveAnchors[i]
+                let nextAnchor = effectiveAnchors[i + 1]
+                guard let currPos = sortedFrames.firstIndex(of: currAnchor.sourceFrameIndex),
+                      let nextPos = sortedFrames.firstIndex(of: nextAnchor.sourceFrameIndex),
+                      currPos < nextPos else {
+                    return .failure(.duplicateFrameConflict(currAnchor.sourceFrameIndex))
+                }
+                let segmentFrames = Array(sortedFrames[currPos...nextPos])
+                switch solveDirection(
+                    frameIndices: segmentFrames,
+                    anchorCandidateIndex: currAnchor.candidateIndex,
+                    targetCandidateIndex: nextAnchor.candidateIndex,
+                    candidatesByFrame: prepared
+                ) {
+                case .success(let sol):
+                    selectedByFrame.merge(sol.path) { _, new in new }
+                    statesByFrame.merge(sol.statesByFrame) { _, new in new }
+                case .failure(let err):
+                    return .failure(err)
+                }
+            }
+        }
 
-        var statesByFrame = backward.statesByFrame
-        statesByFrame.merge(forward.statesByFrame) { _, forwardValue in forwardValue }
+        // Solve segment after last anchor
+        if let lastAnchor = effectiveAnchors.last,
+           let lastPos = sortedFrames.firstIndex(of: lastAnchor.sourceFrameIndex) {
+            if lastPos < sortedFrames.count - 1 {
+                let segmentFrames = Array(sortedFrames[lastPos...])
+                switch solveDirection(
+                    frameIndices: segmentFrames,
+                    anchorCandidateIndex: lastAnchor.candidateIndex,
+                    targetCandidateIndex: nil,
+                    candidatesByFrame: prepared
+                ) {
+                case .success(let sol):
+                    selectedByFrame.merge(sol.path) { _, new in new }
+                    statesByFrame.merge(sol.statesByFrame) { _, new in new }
+                case .failure(let err):
+                    return .failure(err)
+                }
+            } else {
+                selectedByFrame[lastAnchor.sourceFrameIndex] = lastAnchor.candidateIndex
+                statesByFrame[lastAnchor.sourceFrameIndex] = [
+                    lastAnchor.candidateIndex: PathState(cost: 0, previousCandidateIndex: nil)
+                ]
+            }
+        }
 
+        // Enforce all explicit anchors in selectedByFrame
+        for anchor in effectiveAnchors {
+            selectedByFrame[anchor.sourceFrameIndex] = anchor.candidateIndex
+        }
+
+        // Ambiguity check with multi-anchor resets
         var ambiguityStart: Double?
         for frameIndex in sortedFrames {
             guard let frameTime = prepared[frameIndex]?.first?.sourceTime else {
                 return .failure(.pathResolutionFailed(frameIndex))
+            }
+            let isAnchorFrame = anchorsByFrame[frameIndex] != nil
+            if isAnchorFrame {
+                ambiguityStart = nil
+                continue
             }
             let costs = statesByFrame[frameIndex]?.values
                 .map(\PathState.cost)
@@ -268,6 +337,7 @@ public enum PrimaryGolferTrackResolver {
     private static func solveDirection(
         frameIndices: [Int],
         anchorCandidateIndex: Int,
+        targetCandidateIndex: Int? = nil,
         candidatesByFrame: [Int: [GolfPoseCandidateFrame]]
     ) -> Result<DirectionSolution, PrimaryGolferTrackResolverError> {
         guard let anchorFrame = frameIndices.first else {
@@ -328,17 +398,29 @@ public enum PrimaryGolferTrackResolver {
         }
 
         guard let lastFrame = frameIndices.last,
-              let lastStates = statesByFrame[lastFrame],
-              let lastCandidate = lastStates.keys.min(by: { lhs, rhs in
-                  guard let left = lastStates[lhs], let right = lastStates[rhs] else {
-                      return lhs < rhs
-                  }
-                  if abs(left.cost - right.cost) <= comparisonEpsilon {
-                      return lhs < rhs
-                  }
-                  return left.cost < right.cost
-              }) else {
+              let lastStates = statesByFrame[lastFrame] else {
             return .failure(.pathResolutionFailed(anchorFrame))
+        }
+
+        let lastCandidate: Int
+        if let target = targetCandidateIndex {
+            guard lastStates[target] != nil else {
+                return .failure(.pathResolutionFailed(lastFrame))
+            }
+            lastCandidate = target
+        } else {
+            guard let best = lastStates.keys.min(by: { lhs, rhs in
+                guard let left = lastStates[lhs], let right = lastStates[rhs] else {
+                    return lhs < rhs
+                }
+                if abs(left.cost - right.cost) <= comparisonEpsilon {
+                    return lhs < rhs
+                }
+                return left.cost < right.cost
+            }) else {
+                return .failure(.pathResolutionFailed(anchorFrame))
+            }
+            lastCandidate = best
         }
 
         var path: [Int: Int] = [:]

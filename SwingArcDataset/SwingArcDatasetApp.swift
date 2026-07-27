@@ -24,7 +24,7 @@ struct SwingArcDatasetApp: App {
             if !showsImporter,
                workspaceController.selectedClipID != nil
                     || !workspaceController.clips.isEmpty {
-                DatasetWorkspaceHostView(controller: workspaceController)
+                DatasetWorkspaceHostView(controller: workspaceController, store: store)
                 .frame(minWidth: 1000, minHeight: 600)
                 .task { await workspaceController.restore() }
                 .toolbar {

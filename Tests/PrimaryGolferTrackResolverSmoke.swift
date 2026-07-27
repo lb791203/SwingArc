@@ -19,6 +19,9 @@ struct PrimaryGolferTrackResolverSmoke {
         testInconsistentFrameTimeFails()
         testExactAmbiguityBoundaryPasses()
         testSingleCandidateWithoutAnchor()
+        testMultiAnchorSplitsLongAmbiguity()
+        testConflictingMultiAnchorsFail()
+        testMultiAnchorNonExistentCandidateFails()
         print("All PrimaryGolferTrackResolver tests passed.")
     }
 
@@ -528,5 +531,42 @@ struct PrimaryGolferTrackResolverSmoke {
             ))
         }
         return candidates
+    }
+
+    static func testMultiAnchorSplitsLongAmbiguity() {
+        let candidates = makeEquivalentCandidates(count: 9, fps: 30) // frames 0..8, ambiguous everywhere without anchors
+        let anchor1 = GolfPoseCandidateIdentifier(sourceFrameIndex: 0, candidateIndex: 0)
+        let anchor2 = GolfPoseCandidateIdentifier(sourceFrameIndex: 4, candidateIndex: 0)
+        let anchor3 = GolfPoseCandidateIdentifier(sourceFrameIndex: 8, candidateIndex: 0)
+        let anchors = [anchor1, anchor2, anchor3]
+        let result = PrimaryGolferTrackResolver.resolve(candidates: candidates, manualAnchors: anchors)
+        switch result {
+        case .success(let frames):
+            precondition(frames.count == 9, "Must resolve all 9 frames, got \(frames.count)")
+            precondition(frames[0].bodyCenter == candidates.first(where: { $0.sourceFrameIndex == 0 && $0.candidateIndex == 0 })!.bodyCenter)
+            precondition(frames[4].bodyCenter == candidates.first(where: { $0.sourceFrameIndex == 4 && $0.candidateIndex == 0 })!.bodyCenter)
+            precondition(frames[8].bodyCenter == candidates.first(where: { $0.sourceFrameIndex == 8 && $0.candidateIndex == 0 })!.bodyCenter)
+        case .failure(let err):
+            preconditionFailure("Expected success for multi-anchor split, got \(err)")
+        }
+    }
+
+    static func testConflictingMultiAnchorsFail() {
+        let candidates = makeEquivalentCandidates(count: 30, fps: 30)
+        let anchor1 = GolfPoseCandidateIdentifier(sourceFrameIndex: 5, candidateIndex: 0)
+        let anchor2 = GolfPoseCandidateIdentifier(sourceFrameIndex: 5, candidateIndex: 1) // conflict on frame 5!
+        let result = PrimaryGolferTrackResolver.resolve(candidates: candidates, manualAnchors: [anchor1, anchor2])
+        if case .success = result {
+            preconditionFailure("Expected failure on conflicting anchors")
+        }
+    }
+
+    static func testMultiAnchorNonExistentCandidateFails() {
+        let candidates = makeEquivalentCandidates(count: 30, fps: 30)
+        let anchor = GolfPoseCandidateIdentifier(sourceFrameIndex: 5, candidateIndex: 99)
+        let result = PrimaryGolferTrackResolver.resolve(candidates: candidates, manualAnchors: [anchor])
+        if case .success = result {
+            preconditionFailure("Expected failure on non-existent candidate anchor")
+        }
     }
 }

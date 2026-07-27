@@ -215,6 +215,7 @@ public struct DatasetWorkspaceDecodedFrame: @unchecked Sendable {
 
 @MainActor
 public protocol DatasetWorkspaceMediaAccessing: AnyObject {
+    var activeURL: URL? { get }
     func open(bookmark: Data) async throws -> DatasetWorkspaceMediaMetadata
     func frame(at sourceFrameIndex: Int) async throws -> DatasetWorkspaceDecodedFrame
     func close()
@@ -242,7 +243,7 @@ public final class SecurityScopedExactVideoMediaAccess:
     DatasetWorkspaceMediaAccessing
 {
     private let frameSession = ExactVideoFrameSession()
-    private var activeURL: URL?
+    public private(set) var activeURL: URL?
 
     public init() {}
 
@@ -320,6 +321,7 @@ public final class DatasetWorkspaceController: ObservableObject {
     @Published public private(set) var fullFrameImage: CGImage?
     @Published public private(set) var currentSourceTime: Double?
     @Published public private(set) var isFrameLoading = false
+    @Published public private(set) var selectedVideoURL: URL?
 
     public init(
         store: DatasetWorkspaceStore,
@@ -418,6 +420,7 @@ public final class DatasetWorkspaceController: ObservableObject {
         isFrameLoading = false
         activeMediaAccess?.close()
         activeMediaAccess = nil
+        selectedVideoURL = nil
 
         guard let bookmark = bookmarkPersistence.loadBookmark(for: clipID),
               !bookmark.isEmpty else {
@@ -477,18 +480,21 @@ public final class DatasetWorkspaceController: ObservableObject {
                 return
             }
             activeMediaAccess = candidateMediaAccess
+            selectedVideoURL = candidateMediaAccess.activeURL
             await loadExactCurrentFrame()
         } catch let error as DatasetWorkspaceControllerError {
             candidateMediaAccess.close()
             guard generation == selectionGeneration else { return }
             activeMediaAccess?.close()
             activeMediaAccess = nil
+            selectedVideoURL = nil
             access = .readOnly(reason: error.localizedDescription)
         } catch {
             candidateMediaAccess.close()
             guard generation == selectionGeneration else { return }
             activeMediaAccess?.close()
             activeMediaAccess = nil
+            selectedVideoURL = nil
             access = .readOnly(
                 reason: "无法打开或核验视频书签：\(error.localizedDescription)"
             )
@@ -724,6 +730,7 @@ public final class DatasetWorkspaceController: ObservableObject {
         fullFrameImage = nil
         currentSourceTime = nil
         isFrameLoading = false
+        selectedVideoURL = nil
         access = .readOnly(reason: reason)
     }
 

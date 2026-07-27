@@ -22,6 +22,14 @@ public enum GolfDatasetValidationError: Equatable, CustomStringConvertible, Comp
     case predictionClipMismatch(clipID: String, predictionRunID: String)
     case duplicateRevisionFrame(clipID: String, sourceFrameIndex: Int)
     case revisionValidationError(String)
+    case invalidModelSHA256(predictionRunID: String)
+    case manualBootstrapContainsPredictionPoints(predictionRunID: String)
+    case manualBootstrapHasModelSHA(predictionRunID: String)
+    case emptyPredictionRunFrames(predictionRunID: String)
+    case invalidPredictionFrameTime(predictionRunID: String, sourceFrameIndex: Int)
+    case invalidPredictionROITransform(predictionRunID: String, sourceFrameIndex: Int)
+    case provenanceHashMismatch(predictionRunID: String)
+    case anchorMismatch(clipID: String, anchorID: String)
 
     public var description: String {
         switch self {
@@ -67,6 +75,22 @@ public enum GolfDatasetValidationError: Equatable, CustomStringConvertible, Comp
             return "Duplicate revision frame \(index) in clip \(clipID)"
         case .revisionValidationError(let revisionID):
             return "Invalid revision metadata: \(revisionID)"
+        case .invalidModelSHA256(let id):
+            return "Invalid modelSHA256 for prediction run: \(id)"
+        case .manualBootstrapContainsPredictionPoints(let id):
+            return "Manual bootstrap run contains prediction points: \(id)"
+        case .manualBootstrapHasModelSHA(let id):
+            return "Manual bootstrap run contains modelSHA256: \(id)"
+        case .emptyPredictionRunFrames(let id):
+            return "Prediction run frames empty: \(id)"
+        case .invalidPredictionFrameTime(let id, let index):
+            return "Invalid frame time for prediction run \(id) frame \(index)"
+        case .invalidPredictionROITransform(let id, let index):
+            return "Invalid ROI transform for prediction run \(id) frame \(index)"
+        case .provenanceHashMismatch(let id):
+            return "Provenance hash mismatch for prediction run: \(id)"
+        case .anchorMismatch(let clipID, let anchorID):
+            return "Anchor \(anchorID) mismatch for clip: \(clipID)"
         }
     }
 
@@ -132,6 +156,22 @@ public enum GolfDatasetValidationError: Equatable, CustomStringConvertible, Comp
             return (clipID, index, 19, description)
         case .acceptedPredictionCoordinateMismatch(let clipID, let index, _):
             return (clipID, index, 20, description)
+        case .invalidModelSHA256(let id):
+            return (id, noFrame, 21, description)
+        case .manualBootstrapContainsPredictionPoints(let id):
+            return (id, noFrame, 22, description)
+        case .manualBootstrapHasModelSHA(let id):
+            return (id, noFrame, 23, description)
+        case .emptyPredictionRunFrames(let id):
+            return (id, noFrame, 24, description)
+        case .invalidPredictionFrameTime(let id, let index):
+            return (id, index, 25, description)
+        case .invalidPredictionROITransform(let id, let index):
+            return (id, index, 26, description)
+        case .provenanceHashMismatch(let id):
+            return (id, noFrame, 27, description)
+        case .anchorMismatch(let clipID, _):
+            return (clipID, noFrame, 28, description)
         }
     }
 }
@@ -210,6 +250,61 @@ public enum GolfDatasetValidator {
                 errors.append(.timelineHashMismatch(prediction.clipID))
             }
 
+            switch prediction.runKind {
+            case .modelInference:
+                if let modelSHA = prediction.modelSHA256 {
+                    let is64Hex = modelSHA.count == 64 && modelSHA.allSatisfy({ $0.isHexDigit })
+                    if !is64Hex {
+                        errors.append(.invalidModelSHA256(predictionRunID: prediction.predictionRunID))
+                    }
+                } else {
+                    errors.append(.invalidModelSHA256(predictionRunID: prediction.predictionRunID))
+                }
+            case .manualBootstrap:
+                if prediction.modelSHA256 != nil {
+                    errors.append(.manualBootstrapHasModelSHA(predictionRunID: prediction.predictionRunID))
+                }
+                if prediction.frames.count != clip.media.frameCount {
+                    errors.append(.emptyPredictionRunFrames(predictionRunID: prediction.predictionRunID))
+                }
+                for frame in prediction.frames {
+                    if !frame.points.isEmpty {
+                        errors.append(.manualBootstrapContainsPredictionPoints(predictionRunID: prediction.predictionRunID))
+                        break
+                    }
+                }
+            }
+
+            let provHash = prediction.provenanceHash
+            let isLowercaseSHA256 = provHash.count == 64 &&
+                provHash.unicodeScalars.allSatisfy {
+                    (48...57).contains($0.value) ||
+                        (97...102).contains($0.value)
+                }
+            var provenanceMatches = isLowercaseSHA256
+            if prediction.runKind == .manualBootstrap {
+                let canonical = GolfManualBootstrapProvenance.canonicalString(
+                    clipID: prediction.clipID,
+                    mediaSHA256: prediction.mediaSHA256,
+                    timelineSHA256: prediction.timelineSHA256,
+                    anchors: prediction.manualBootstrapAnchors,
+                    visionFrameworkVersion: prediction.visionFrameworkVersion,
+                    visionRequestVersion: prediction.visionRequestVersion,
+                    roiAlgorithmVersion: prediction.roiAlgorithmVersion,
+                    roiConfigSHA256: prediction.roiConfigSHA256,
+                    decoderVersion: prediction.decoderVersion,
+                    trackerVersion: prediction.trackerVersion,
+                    frames: prediction.frames
+                )
+                provenanceMatches = provenanceMatches &&
+                    StableSwingROIBuilder.sha256Hex(canonical) == provHash &&
+                    prediction.predictionRunID == provHash
+            }
+            if !provenanceMatches {
+                errors.append(.provenanceHashMismatch(predictionRunID: prediction.predictionRunID))
+            }
+
+            var prevTime: Double?
             let frameGroups = Dictionary(
                 grouping: prediction.frames,
                 by: \GolfPredictionFrame.sourceFrameIndex
@@ -226,6 +321,46 @@ public enum GolfDatasetValidator {
                         clipID: prediction.clipID,
                         sourceFrameIndex: frameIndex
                     ))
+                }
+            }
+
+            for frame in prediction.frames.sorted(by: { $0.sourceFrameIndex < $1.sourceFrameIndex }) {
+                if !frame.sourceTime.isFinite || (prevTime != nil && frame.sourceTime <= prevTime!) {
+                    errors.append(.invalidPredictionFrameTime(predictionRunID: prediction.predictionRunID, sourceFrameIndex: frame.sourceFrameIndex))
+                }
+                prevTime = frame.sourceTime
+
+                let t = frame.roiTransform
+                let det = t.a * t.d - t.b * t.c
+                let valuesFinite = t.a.isFinite && t.b.isFinite && t.c.isFinite && t.d.isFinite && t.tx.isFinite && t.ty.isFinite &&
+                    t.invA.isFinite && t.invB.isFinite && t.invC.isFinite && t.invD.isFinite && t.invTx.isFinite && t.invTy.isFinite
+                let invertible = abs(det) > 1e-12
+                let identityCheck: Bool
+                if valuesFinite && invertible {
+                    let probes = [
+                        GolfNormalizedPoint(x: 0, y: 0),
+                        GolfNormalizedPoint(x: 1, y: 0),
+                        GolfNormalizedPoint(x: 0, y: 1),
+                        GolfNormalizedPoint(x: 1, y: 1)
+                    ]
+                    identityCheck = probes.allSatisfy { point in
+                        let forwardRoundTrip = t.roiPointToFullFrame(
+                            t.fullFramePointToROI(point)
+                        )
+                        let inverseRoundTrip = t.fullFramePointToROI(
+                            t.roiPointToFullFrame(point)
+                        )
+                        return abs(forwardRoundTrip.x - point.x) < 1e-4 &&
+                            abs(forwardRoundTrip.y - point.y) < 1e-4 &&
+                            abs(inverseRoundTrip.x - point.x) < 1e-4 &&
+                            abs(inverseRoundTrip.y - point.y) < 1e-4
+                    }
+                } else {
+                    identityCheck = false
+                }
+
+                if !valuesFinite || !invertible || !identityCheck {
+                    errors.append(.invalidPredictionROITransform(predictionRunID: prediction.predictionRunID, sourceFrameIndex: frame.sourceFrameIndex))
                 }
             }
         }
@@ -379,7 +514,12 @@ public enum GolfDatasetValidator {
                 .min() ?? golferID
             return (clipID, noFrame)
         case .missingPredictionRun(let predictionRunID),
-             .duplicatePredictionRunID(let predictionRunID):
+             .duplicatePredictionRunID(let predictionRunID),
+             .invalidModelSHA256(let predictionRunID),
+             .manualBootstrapContainsPredictionPoints(let predictionRunID),
+             .manualBootstrapHasModelSHA(let predictionRunID),
+             .emptyPredictionRunFrames(let predictionRunID),
+             .provenanceHashMismatch(let predictionRunID):
             let revisionClip = snapshot.revisions
                 .filter { $0.parentPredictionRunID == predictionRunID }
                 .map(\GolfAnnotationRevision.clipID)
@@ -389,6 +529,14 @@ public enum GolfDatasetValidator {
                 .map(\GolfPredictionRun.clipID)
                 .min()
             return (revisionClip ?? predictionClip ?? predictionRunID, noFrame)
+        case .invalidPredictionFrameTime(let predictionRunID, let index),
+             .invalidPredictionROITransform(let predictionRunID, let index):
+            let clipID = snapshot.predictions
+                .first(where: { $0.predictionRunID == predictionRunID })?.clipID
+                ?? predictionRunID
+            return (clipID, index)
+        case .anchorMismatch(let clipID, _):
+            return (clipID, noFrame)
         case .revisionNotCompleted(let revisionID),
              .revisionValidationError(let revisionID):
             let clipID = snapshot.revisions

@@ -84,10 +84,18 @@ public struct DatasetAnnotationState: Equatable, Sendable {
         return GolfLandmark.allCases.allSatisfy { decided.contains($0) }
     }
 
+    public var allowsPredictionAcceptance: Bool {
+        guard let run = predictionRun else { return false }
+        if run.runKind == .manualBootstrap {
+            return run.frames.contains { !$0.points.isEmpty }
+        }
+        return true
+    }
+
     /// Whether the batch action can resolve every still-undecided landmark.
     /// Existing manual decisions remain valid even when this frame has no prediction.
     public var canAcceptCurrentFrame: Bool {
-        guard frameCount > 0 else { return false }
+        guard frameCount > 0, allowsPredictionAcceptance else { return false }
         return GolfLandmark.allCases.allSatisfy { landmark in
             let key = AnnotationDecisionKey(
                 frameIndex: currentSourceFrameIndex,
@@ -216,6 +224,7 @@ public enum DatasetAnnotationReducer {
                 mediaFrameCount: next.mediaFrameCount
             )
         case .acceptPrediction(let landmark, let decidedAt):
+            guard next.allowsPredictionAcceptance else { return next }
             guard let point = next.currentPredictionFrame?.points[landmark]?.resolvedFullFramePoint,
                   DatasetAnnotationState.isUnitPoint(point) else { return next }
             next.replace(landmark, kind: .acceptedPrediction, point: point, decidedAt: decidedAt)
@@ -229,6 +238,7 @@ public enum DatasetAnnotationReducer {
         case .setUnresolved(let landmark, let decidedAt):
             next.replace(landmark, kind: .unresolved, point: nil, decidedAt: decidedAt)
         case .acceptUnresolvedFrame(let decidedAt):
+            guard next.allowsPredictionAcceptance else { return next }
             for landmark in GolfLandmark.allCases where next.decision(for: landmark) == nil {
                 guard let point = next.currentPredictionFrame?.points[landmark]?.resolvedFullFramePoint,
                       DatasetAnnotationState.isUnitPoint(point) else { continue }

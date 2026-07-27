@@ -1,6 +1,36 @@
 import Foundation
+import CommonCrypto
+#if canImport(CryptoKit)
+import CryptoKit
+#endif
 
 public enum StableSwingROIBuilder {
+    public static let algorithmVersion = "roi-v1"
+
+    public static func sha256Hex(_ string: String) -> String {
+        let data = Data(string.utf8)
+        #if canImport(CryptoKit)
+        if #available(macOS 10.15, iOS 13.0, *) {
+            let hash = SHA256.hash(data: data)
+            return hash.compactMap { String(format: "%02x", $0) }.joined()
+        }
+        #endif
+        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        data.withUnsafeBytes {
+            _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &digest)
+        }
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    public static func configurationSHA256(
+        orientedFrameSize: CGSize,
+        targetSize: Double,
+        configuration: StableSwingROIConfiguration = .v1
+    ) -> String {
+        let str = "\(algorithmVersion):\(orientedFrameSize.width):\(orientedFrameSize.height):\(targetSize):\(configuration.clubBallSafetyMarginFraction):\(configuration.framePaddingFraction):\(configuration.maxBidirectionalCorrectionFraction)"
+        return sha256Hex(str)
+    }
+
     private static let maxInterpolationGapSeconds = 0.150
     private static let minIdentityConfidence = 0.5
 

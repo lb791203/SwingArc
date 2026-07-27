@@ -81,6 +81,20 @@
 		D2000000000000000000010B /* FrameExtractionTolerancePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D60000000000000000000004 /* FrameExtractionTolerancePolicy.swift */; };
 		D2000000000000000000010C /* ExactVideoFrameProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000006 /* ExactVideoFrameProvider.swift */; };
 		D2000000000000000000010D /* GolfAnnotationFrameQueueBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000034 /* GolfAnnotationFrameQueueBuilder.swift */; };
+		D2000000000000000000010E /* GolfSubjectAnchor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000035 /* GolfSubjectAnchor.swift */; };
+		D2000000000000000000010F /* GolfSubjectAnchorResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000036 /* GolfSubjectAnchorResolver.swift */; };
+		D20000000000000000000110 /* GolfManualBootstrapRunBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000037 /* GolfManualBootstrapRunBuilder.swift */; };
+		D20000000000000000000111 /* GolfSubjectAnchor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000035 /* GolfSubjectAnchor.swift */; };
+		D20000000000000000000112 /* GolfSubjectAnchorResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000036 /* GolfSubjectAnchorResolver.swift */; };
+		D20000000000000000000113 /* GolfManualBootstrapRunBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000037 /* GolfManualBootstrapRunBuilder.swift */; };
+		D20000000000000000000114 /* StableSwingROIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000038 /* StableSwingROIModels.swift */; };
+		D20000000000000000000115 /* StableSwingROIBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000039 /* StableSwingROIBuilder.swift */; };
+		D20000000000000000000116 /* PrimaryGolferTrackResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000000000000000000003A /* PrimaryGolferTrackResolver.swift */; };
+		D20000000000000000000117 /* GolfDatasetValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000000000000000000003B /* GolfDatasetValidator.swift */; };
+		D20000000000000000000118 /* VisionPoseExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000000000000000000003C /* VisionPoseExtractor.swift */; };
+		D20000000000000000000127 /* DatasetSubjectAnchorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000147 /* DatasetSubjectAnchorController.swift */; };
+		D20000000000000000000128 /* DatasetPredictionRunGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000148 /* DatasetPredictionRunGenerator.swift */; };
+		D20000000000000000000129 /* DatasetSubjectAnchorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000149 /* DatasetSubjectAnchorSheet.swift */; };
 	D20000000000000000000120 /* DatasetAnnotationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000140 /* DatasetAnnotationState.swift */; };
 	D20000000000000000000121 /* DatasetWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000141 /* DatasetWorkspaceView.swift */; };
 	D20000000000000000000122 /* DatasetClipSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000142 /* DatasetClipSidebar.swift */; };
@@ -163,6 +177,14 @@
 		D20000000000000000000032 /* GolfPredictionRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Models/GolfPredictionRun.swift; sourceTree = SOURCE_ROOT; };
 		D20000000000000000000033 /* GolfDatasetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Services/GolfDatasetStore.swift; sourceTree = SOURCE_ROOT; };
 		D20000000000000000000034 /* GolfAnnotationFrameQueueBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Services/GolfAnnotationFrameQueueBuilder.swift; sourceTree = SOURCE_ROOT; };
+		D20000000000000000000035 /* GolfSubjectAnchor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Models/GolfSubjectAnchor.swift; sourceTree = SOURCE_ROOT; };
+		D20000000000000000000036 /* GolfSubjectAnchorResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Services/GolfSubjectAnchorResolver.swift; sourceTree = SOURCE_ROOT; };
+		D20000000000000000000037 /* GolfManualBootstrapRunBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Services/GolfManualBootstrapRunBuilder.swift; sourceTree = SOURCE_ROOT; };
+		D20000000000000000000038 /* StableSwingROIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Models/StableSwingROIModels.swift; sourceTree = SOURCE_ROOT; };
+		D20000000000000000000039 /* StableSwingROIBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Services/StableSwingROIBuilder.swift; sourceTree = SOURCE_ROOT; };
+		D2000000000000000000003A /* PrimaryGolferTrackResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Services/PrimaryGolferTrackResolver.swift; sourceTree = SOURCE_ROOT; };
+		D2000000000000000000003B /* GolfDatasetValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Services/GolfDatasetValidator.swift; sourceTree = SOURCE_ROOT; };
+		D2000000000000000000003C /* VisionPoseExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArc/Services/VisionPoseExtractor.swift; sourceTree = SOURCE_ROOT; };
 		D20000000000000000000140 /* DatasetAnnotationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetAnnotationState.swift; sourceTree = "<group>"; };
 		D20000000000000000000141 /* DatasetWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetWorkspaceView.swift; sourceTree = "<group>"; };
 		D20000000000000000000142 /* DatasetClipSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetClipSidebar.swift; sourceTree = "<group>"; };
@@ -170,6 +192,9 @@
 		D20000000000000000000144 /* DatasetKeypointInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetKeypointInspector.swift; sourceTree = "<group>"; };
 		D20000000000000000000145 /* DatasetTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetTimelineView.swift; sourceTree = "<group>"; };
 		D20000000000000000000146 /* DatasetWorkspaceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatasetWorkspaceController.swift; sourceTree = "<group>"; };
+		D20000000000000000000147 /* DatasetSubjectAnchorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArcDataset/Services/DatasetSubjectAnchorController.swift; sourceTree = SOURCE_ROOT; };
+		D20000000000000000000148 /* DatasetPredictionRunGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArcDataset/Services/DatasetPredictionRunGenerator.swift; sourceTree = SOURCE_ROOT; };
+		D20000000000000000000149 /* DatasetSubjectAnchorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArcDataset/Views/DatasetSubjectAnchorSheet.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -535,6 +560,14 @@
 				D2000000000000000000010B /* FrameExtractionTolerancePolicy.swift in Sources */,
 				D2000000000000000000010C /* ExactVideoFrameProvider.swift in Sources */,
 				D2000000000000000000010D /* GolfAnnotationFrameQueueBuilder.swift in Sources */,
+				D2000000000000000000010E /* GolfSubjectAnchor.swift in Sources */,
+				D2000000000000000000010F /* GolfSubjectAnchorResolver.swift in Sources */,
+				D20000000000000000000110 /* GolfManualBootstrapRunBuilder.swift in Sources */,
+				D20000000000000000000114 /* StableSwingROIModels.swift in Sources */,
+				D20000000000000000000115 /* StableSwingROIBuilder.swift in Sources */,
+				D20000000000000000000116 /* PrimaryGolferTrackResolver.swift in Sources */,
+				D20000000000000000000117 /* GolfDatasetValidator.swift in Sources */,
+				D20000000000000000000118 /* VisionPoseExtractor.swift in Sources */,
 				D20000000000000000000120 /* DatasetAnnotationState.swift in Sources */,
 				D20000000000000000000121 /* DatasetWorkspaceView.swift in Sources */,
 				D20000000000000000000122 /* DatasetClipSidebar.swift in Sources */,
@@ -542,6 +575,9 @@
 				D20000000000000000000124 /* DatasetKeypointInspector.swift in Sources */,
 				D20000000000000000000125 /* DatasetTimelineView.swift in Sources */,
 				D20000000000000000000126 /* DatasetWorkspaceController.swift in Sources */,
+				D20000000000000000000127 /* DatasetSubjectAnchorController.swift in Sources */,
+				D20000000000000000000128 /* DatasetPredictionRunGenerator.swift in Sources */,
+				D20000000000000000000129 /* DatasetSubjectAnchorSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

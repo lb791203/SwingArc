@@ -188,6 +188,48 @@ private func testROIRoundTripAndInvalidTransformRejection() {
     print("  ✓ ROI round trip and invalid transform rejection")
 }
 
+private func testManualBootstrapDisablesPredictionAcceptance() {
+    let bootstrapRun = GolfPredictionRun(
+        schemaVersion: 2,
+        runKind: .manualBootstrap,
+        predictionRunID: "bootstrap-1",
+        clipID: "clip-1",
+        mediaSHA256: String(repeating: "a", count: 64),
+        timelineSHA256: String(repeating: "b", count: 64),
+        visionFrameworkVersion: "v1",
+        visionRequestVersion: "r1",
+        roiAlgorithmVersion: "roi-v1",
+        roiConfigSHA256: String(repeating: "c", count: 64),
+        modelSHA256: nil,
+        decoderVersion: "dec",
+        trackerVersion: "trk",
+        createdAt: Date(),
+        frames: [
+            GolfPredictionFrame(sourceFrameIndex: 0, sourceTime: 0, roiTransform: transform(), points: [:])
+        ],
+        provenanceHash: String(repeating: "f", count: 64)
+    )
+    var state = DatasetAnnotationState(
+        predictionRun: bootstrapRun,
+        mediaFrameCount: 1,
+        annotationQueue: [],
+        currentSourceFrameIndex: 0,
+        annotatorID: "annotator-1",
+        revisionID: "rev-1"
+    )
+    precondition(state.allowsPredictionAcceptance == false, "manualBootstrap without points must disable prediction acceptance")
+    precondition(state.canAcceptCurrentFrame == false, "canAcceptCurrentFrame must be false for manualBootstrap without points")
+
+    // Attempting to accept prediction must be ignored by reducer
+    state = reduce(state, .acceptPrediction(.grip, decidedAt: decisionTime))
+    precondition(state.decisionsForCurrentFrame.isEmpty, "acceptPrediction must not create decision for manualBootstrap")
+
+    // Manual corrections still work
+    state = reduce(state, .correctPoint(.grip, point(0.5, 0.5), decidedAt: decisionTime))
+    precondition(state.decisionsForCurrentFrame.count == 1, "manual correction must work on manualBootstrap")
+    print("  ✓ manualBootstrap disables prediction acceptance")
+}
+
 @main
 struct MacDatasetAnnotationStateSmoke {
     static func main() {
@@ -199,6 +241,7 @@ struct MacDatasetAnnotationStateSmoke {
         testDecidedAtReplacementAndBatchPreservation()
         testPredictionRemainsImmutableAndPresentationIsPredictionFirst()
         testROIRoundTripAndInvalidTransformRejection()
-        print("All Checkpoint A tests passed.")
+        testManualBootstrapDisablesPredictionAcceptance()
+        print("All DatasetAnnotationState tests passed.")
     }
 }

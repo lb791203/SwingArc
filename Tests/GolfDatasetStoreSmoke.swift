@@ -292,6 +292,79 @@ struct GolfDatasetStoreSmoke {
             }
         }
 
+        // 13. Subject Anchor save, load, and collision test
+        let anchorDecision = GolfSubjectAnchorDecision(
+            anchorID: "anchor-001",
+            clipID: "clip-001",
+            mediaSHA256: String(repeating: "a", count: 64),
+            timelineSHA256: String(repeating: "b", count: 64),
+            sourceFrameIndex: 10,
+            candidateIndex: 1,
+            normalizedClickPoint: GolfNormalizedPoint(x: 0.5, y: 0.5),
+            visionFrameworkVersion: "v1",
+            visionRequestRevision: "r1",
+            annotatorID: "user1",
+            decidedAt: fixedDate
+        )
+        try store.appendSubjectAnchor(anchorDecision, clipID: "clip-001")
+        let loadedAnchors = try store.loadSubjectAnchors(clipID: "clip-001")
+        precondition(loadedAnchors.count == 1)
+        precondition(loadedAnchors[0] == anchorDecision)
+
+        let loadedSingle = try store.loadSubjectAnchor(clipID: "clip-001", anchorID: "anchor-001")
+        precondition(loadedSingle == anchorDecision)
+
+        do {
+            try store.appendSubjectAnchor(anchorDecision, clipID: "clip-001")
+            preconditionFailure("Expected anchorID collision exception")
+        } catch GolfDatasetStoreError.anchorAlreadyExists {
+            // Expected
+        }
+
+        // Test anchor.clipID mismatch with directory clipID
+        let mismatchAnchor = GolfSubjectAnchorDecision(
+            anchorID: "anchor-002",
+            clipID: "clip-WRONG",
+            mediaSHA256: String(repeating: "a", count: 64),
+            timelineSHA256: String(repeating: "b", count: 64),
+            sourceFrameIndex: 10,
+            candidateIndex: 1,
+            normalizedClickPoint: GolfNormalizedPoint(x: 0.5, y: 0.5),
+            visionFrameworkVersion: "v1",
+            visionRequestRevision: "r1",
+            annotatorID: "user1",
+            decidedAt: fixedDate
+        )
+        do {
+            try store.appendSubjectAnchor(mismatchAnchor, clipID: "clip-001")
+            preconditionFailure("Expected clipID mismatch exception")
+        } catch GolfDatasetStoreError.anchorClipMismatch {
+            // Expected
+        }
+
+        let missingClipAnchor = GolfSubjectAnchorDecision(
+            anchorID: "anchor-missing-clip",
+            clipID: "clip-missing",
+            mediaSHA256: media.sha256,
+            timelineSHA256: media.timelineSHA256,
+            sourceFrameIndex: 0,
+            candidateIndex: 0,
+            normalizedClickPoint: GolfNormalizedPoint(x: 0.5, y: 0.5),
+            visionFrameworkVersion: "v1",
+            visionRequestRevision: "r1",
+            annotatorID: "user1",
+            decidedAt: fixedDate
+        )
+        do {
+            try store.appendSubjectAnchor(
+                missingClipAnchor,
+                clipID: "clip-missing"
+            )
+            preconditionFailure("Anchor writes must require a readable clip")
+        } catch {
+            // Expected
+        }
+
         print("All GolfDatasetStore tests passed.")
     }
 
