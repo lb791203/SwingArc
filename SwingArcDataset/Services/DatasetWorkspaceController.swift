@@ -476,6 +476,12 @@ public final class DatasetWorkspaceController: ObservableObject {
                 preferredFrame: preferredFrame
             )
             guard case .editable = access else {
+                if parentPredictionRunID.isEmpty,
+                   Self.mediaIdentityMatches(clip: clip, metadata: metadata) {
+                    activeMediaAccess = candidateMediaAccess
+                    selectedVideoURL = candidateMediaAccess.activeURL
+                    return
+                }
                 candidateMediaAccess.close()
                 return
             }
@@ -514,9 +520,7 @@ public final class DatasetWorkspaceController: ObservableObject {
         preferredFrame: Int? = nil
     ) throws {
         selectedClipID = clip.clipID
-        guard clip.media.sha256 == metadata.mediaSHA256,
-              clip.media.frameCount == metadata.frameCount,
-              clip.media.timelineSHA256 == metadata.timelineSHA256 else {
+        guard Self.mediaIdentityMatches(clip: clip, metadata: metadata) else {
             annotationState = nil
             access = .readOnly(reason: "媒体、帧数或源帧时间线与 clip 身份不匹配。")
             persistSession()
@@ -562,6 +566,15 @@ public final class DatasetWorkspaceController: ObservableObject {
         activePredictionRunID = parentID
         access = .editable
         persistSession()
+    }
+
+    private static func mediaIdentityMatches(
+        clip: GolfClipIdentity,
+        metadata: DatasetWorkspaceMediaMetadata
+    ) -> Bool {
+        clip.media.sha256 == metadata.mediaSHA256
+            && clip.media.frameCount == metadata.frameCount
+            && clip.media.timelineSHA256 == metadata.timelineSHA256
     }
 
     public func selectFilter(_ filter: DatasetSidebarFilter) {

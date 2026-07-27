@@ -628,6 +628,15 @@ struct MacDatasetBlindModeSmoke {
         } else {
             preconditionFailure("missing provenance must be read-only")
         }
+        precondition(
+            restored.selectedVideoURL ==
+                URL(fileURLWithPath: "/tmp/fixture-video.mov"),
+            "verified media must remain available for subject-anchor bootstrap"
+        )
+        precondition(
+            restored.annotationState == nil,
+            "missing provenance must not create an editable annotation state"
+        )
 
         print("All Mac dataset blind-mode/controller tests passed.")
     }
