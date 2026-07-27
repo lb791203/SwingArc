@@ -470,6 +470,8 @@ struct MacDatasetBlindModeSmoke {
             annotatorID: "restore"
         )
         await restored.restore()
+        precondition(restored.annotationQueueMode == .pPointFirstPass)
+        precondition(restored.annotationState?.annotationQueue.count == 8)
         precondition(restored.selectedClipID == held.clipID)
         precondition(restored.annotationState?.currentSourceFrameIndex == 4)
         precondition(restored.selectedFilter == .p6p8)
@@ -483,6 +485,19 @@ struct MacDatasetBlindModeSmoke {
         precondition(
             store.predictionLoads == 0,
             "held-out restore must not load prediction content"
+        )
+        let decisionsBeforeModeSwitch = restored.annotationState?.decisions
+        restored.selectAnnotationQueueMode(.expandedTraining)
+        precondition(restored.annotationQueueMode == .expandedTraining)
+        precondition(restored.annotationState?.annotationQueue.count == 10)
+        precondition(
+            restored.annotationState?.decisions == decisionsBeforeModeSwitch
+        )
+        restored.selectAnnotationQueueMode(.pPointFirstPass)
+        precondition(restored.annotationQueueMode == .pPointFirstPass)
+        precondition(restored.annotationState?.annotationQueue.count == 8)
+        precondition(
+            restored.annotationState?.decisions == decisionsBeforeModeSwitch
         )
 
         sessions.save(

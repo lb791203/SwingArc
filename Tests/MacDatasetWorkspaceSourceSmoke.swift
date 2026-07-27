@@ -45,6 +45,8 @@ struct MacDatasetWorkspaceSourceSmoke {
             "generationTask?.cancel()",
             "@MainActor\npublic final class DatasetPredictionRunGenerator",
             "loadPPointTruth", "makeAnnotationQueue",
+            "annotationQueueMode", "selectAnnotationQueueMode",
+            "DatasetAnnotationQueueFactory.make",
             "navigateAnnotationQueue", "navigateToNextPendingQueueFrame",
             "queuePosition:", "reviewedQueueCount:",
             "timelineStages: (controller.activePPointTruth"

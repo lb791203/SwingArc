@@ -349,6 +349,8 @@ public final class DatasetWorkspaceController: ObservableObject {
     @Published public private(set) var isFrameLoading = false
     @Published public private(set) var selectedVideoURL: URL?
     @Published public private(set) var activePPointTruth: GolfPPointTruthDocument?
+    @Published public private(set) var annotationQueueMode:
+        DatasetAnnotationQueueMode = .pPointFirstPass
     @Published public private(set) var clipProgress: [String: DatasetClipAnnotationProgress] = [:]
 
     public init(
@@ -482,6 +484,7 @@ public final class DatasetWorkspaceController: ObservableObject {
             }
             let clipSplit = split(for: clip)
             let queue = Self.makeAnnotationQueue(
+                mode: annotationQueueMode,
                 truth: truth,
                 split: clipSplit,
                 totalFrames: clip.media.frameCount
@@ -677,6 +680,54 @@ public final class DatasetWorkspaceController: ObservableObject {
         dispatch(.jumpToFrame(target.sourceFrameIndex))
     }
 
+    public func selectAnnotationQueueMode(
+        _ mode: DatasetAnnotationQueueMode
+    ) {
+        guard mode != annotationQueueMode else { return }
+        annotationQueueMode = mode
+        frameLoadGeneration += 1
+        isFrameLoading = false
+        refreshClipProgress()
+
+        guard let state = annotationState,
+              let truth = activePPointTruth,
+              let clip = selectedClip else {
+            return
+        }
+        let queue = Self.makeAnnotationQueue(
+            mode: mode,
+            truth: truth,
+            split: split(for: clip),
+            totalFrames: clip.media.frameCount
+        )
+        guard !queue.isEmpty else {
+            access = .readOnly(
+                reason: DatasetWorkspaceControllerError.emptyAnnotationQueue
+                    .localizedDescription
+            )
+            return
+        }
+        let targetFrame = Self.firstPendingFrame(
+            in: queue,
+            decisions: state.decisions
+        ) ?? queue[0].sourceFrameIndex
+        annotationState = DatasetAnnotationState(
+            predictionRun: state.predictionRun,
+            parentPredictionRunID: state.parentPredictionRunID,
+            mediaFrameCount: state.mediaFrameCount,
+            annotationQueue: queue,
+            currentSourceFrameIndex: targetFrame,
+            decisions: state.decisions,
+            annotatorID: state.annotatorID,
+            revisionID: state.revisionID
+        )
+        updateActiveClipProgress()
+        persistSession()
+        if activeMediaAccess != nil {
+            Task { await self.loadExactCurrentFrame() }
+        }
+    }
+
     public func dispatch(_ action: DatasetAnnotationAction) {
         guard case .editable = access, let state = annotationState else { return }
         if case .acceptUnresolvedFrame(let decidedAt) = action {
@@ -864,6 +915,7 @@ public final class DatasetWorkspaceController: ObservableObject {
                 continue
             }
             let queue = Self.makeAnnotationQueue(
+                mode: annotationQueueMode,
                 truth: truth,
                 split: split,
                 totalFrames: clip.media.frameCount
@@ -906,22 +958,16 @@ public final class DatasetWorkspaceController: ObservableObject {
     }
 
     private static func makeAnnotationQueue(
+        mode: DatasetAnnotationQueueMode,
         truth: GolfPPointTruthDocument,
         split: GolfDatasetSplit,
         totalFrames: Int
     ) -> [GolfAnnotationQueueItem] {
-        GolfAnnotationFrameQueueBuilder.build(
-            input: GolfAnnotationQueueInput(
-                split: split,
-                p1: truth.frame(for: .p1),
-                p5: truth.frame(for: .p5),
-                p6: truth.frame(for: .p6),
-                p8: truth.frame(for: .p8),
-                totalFrames: totalFrames,
-                anomalyFrames: [],
-                preSwingNegativeSamples: [],
-                postSwingNegativeSamples: []
-            )
+        DatasetAnnotationQueueFactory.make(
+            mode: mode,
+            truth: truth,
+            split: split,
+            totalFrames: totalFrames
         )
     }
 
