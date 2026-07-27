@@ -124,11 +124,15 @@ struct DatasetKeypointInspector: View {
 
     private var acceptFrameSection: some View {
         VStack(spacing: 8) {
-            Button("接受当前帧", action: onAcceptFrame)
+            Button("接受本帧全部预测", action: onAcceptFrame)
                 .buttonStyle(.borderedProminent)
                 .disabled(!isFrameEditable || !canAcceptFrame)
                 .controlSize(.large).frame(maxWidth: .infinity)
-            if !canAcceptFrame {
+            if !allowsPredictionAcceptance {
+                Text("当前无预测，需人工标注")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            } else if !canAcceptFrame {
                 Text("存在既无预测也无明确决定的关键点").font(.caption2).foregroundColor(.secondary)
             }
         }

@@ -4,6 +4,7 @@ import Foundation
 struct MacDatasetWorkspaceSourceSmoke {
     static func main() throws {
         let paths = [
+            "SwingArcDataset/Models/DatasetAnnotationQueueMode.swift",
             "SwingArcDataset/Views/DatasetWorkspaceView.swift",
             "SwingArcDataset/Views/DatasetClipSidebar.swift",
             "SwingArcDataset/Views/DatasetFrameCanvas.swift",
@@ -19,7 +20,10 @@ struct MacDatasetWorkspaceSourceSmoke {
         let source = try paths.map { try String(contentsOfFile: $0, encoding: .utf8) }.joined(separator: "\n")
         for token in [
             "NavigationSplitView", "DatasetClipSidebar", "DatasetFrameCanvas", "DatasetKeypointInspector", "DatasetTimelineView",
-            "接受当前帧", "−5", "−1", "+1", "+5", "grip", "shaftStart", "shaftEnd", "clubhead", "ball",
+            "接受本帧全部预测", "当前无预测，需人工标注",
+            "P1–P8 首轮", "扩展训练队列",
+            "queueMode", "onQueueModeChange",
+            "−5", "−1", "+1", "+5", "grip", "shaftStart", "shaftEnd", "clubhead", "ball",
             "onCorrectPoint", "DragGesture", "aspectFitRect", "fullFramePointToROI", "roiPointToFullFrame",
             "predictionPoint", "fullFrameImage", "roiImage", "visionSkeleton", "trailPoints", "timelineStages",
             "DatasetSkeletonSegment", "displayedImage != nil", "!isLoading",
@@ -47,6 +51,8 @@ struct MacDatasetWorkspaceSourceSmoke {
             "loadPPointTruth", "makeAnnotationQueue",
             "annotationQueueMode", "selectAnnotationQueueMode",
             "DatasetAnnotationQueueFactory.make",
+            "controller.annotationQueueMode",
+            "controller.selectAnnotationQueueMode",
             "navigateAnnotationQueue", "navigateToNextPendingQueueFrame",
             "queuePosition:", "reviewedQueueCount:",
             "timelineStages: (controller.activePPointTruth"

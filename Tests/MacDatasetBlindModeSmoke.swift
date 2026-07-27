@@ -456,7 +456,7 @@ struct MacDatasetBlindModeSmoke {
         sessions.save(
             DatasetWorkspaceSessionRecord(
                 clipID: held.clipID,
-                currentSourceFrameIndex: 4,
+                currentSourceFrameIndex: 9,
                 filter: .p6p8,
                 activeRevisionID: "revision-a"
             )
@@ -473,7 +473,11 @@ struct MacDatasetBlindModeSmoke {
         precondition(restored.annotationQueueMode == .pPointFirstPass)
         precondition(restored.annotationState?.annotationQueue.count == 8)
         precondition(restored.selectedClipID == held.clipID)
-        precondition(restored.annotationState?.currentSourceFrameIndex == 4)
+        precondition(
+            restored.annotationState?.currentSourceFrameIndex == 0,
+            "a restored frame outside the first-pass queue must fall back "
+                + "to its first incomplete P-point frame"
+        )
         precondition(restored.selectedFilter == .p6p8)
         precondition(restored.activeRevisionID == "revision-a")
         precondition(
@@ -481,7 +485,7 @@ struct MacDatasetBlindModeSmoke {
                 URL(fileURLWithPath: "/tmp/fixture-video.mov"),
             "Expected active video URL, got \(String(describing: restored.selectedVideoURL))"
         )
-        precondition(restoredMediaFactory.recorder.requestedFrames == [4])
+        precondition(restoredMediaFactory.recorder.requestedFrames == [0])
         precondition(
             store.predictionLoads == 0,
             "held-out restore must not load prediction content"

@@ -16,18 +16,37 @@ struct DatasetTimelineView: View {
     let queuePosition: Int?
     let queueCount: Int
     let reviewedQueueCount: Int
+    let queueMode: DatasetAnnotationQueueMode
     let onStep: (Int) -> Void
     let onQueueStep: (Int) -> Void
     let onNextPending: () -> Void
+    let onQueueModeChange: (DatasetAnnotationQueueMode) -> Void
 
     var body: some View {
         VStack(spacing: 8) {
+            Picker(
+                "标注范围",
+                selection: Binding(
+                    get: { queueMode },
+                    set: onQueueModeChange
+                )
+            ) {
+                ForEach(
+                    DatasetAnnotationQueueMode.allCases,
+                    id: \.self
+                ) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
             HStack(spacing: 10) {
                 queueButton("上一标注帧", enabled: queueCount > 0) {
                     onQueueStep(-1)
                 }
                 Text(
-                    "队列 \(queuePosition.map { String($0 + 1) } ?? "—")/\(queueCount)"
+                    "\(queueMode.displayName) · 队列 "
+                        + "\(queuePosition.map { String($0 + 1) } ?? "—")/\(queueCount)"
                         + " · 已完成 \(reviewedQueueCount)/\(queueCount)"
                 )
                 .font(.caption.monospacedDigit())
@@ -160,10 +179,12 @@ private struct Triangle: Shape {
         queuePosition: 20,
         queueCount: 86,
         reviewedQueueCount: 12,
+        queueMode: .pPointFirstPass,
         onStep: { _ in },
         onQueueStep: { _ in },
-        onNextPending: {}
+        onNextPending: {},
+        onQueueModeChange: { _ in }
     )
-    .frame(height: 80)
+    .frame(height: 120)
     .padding()
 }

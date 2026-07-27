@@ -492,7 +492,12 @@ public final class DatasetWorkspaceController: ObservableObject {
             guard !queue.isEmpty else {
                 throw DatasetWorkspaceControllerError.emptyAnnotationQueue
             }
-            let initialFrame = preferredFrame
+            let preferredQueueFrame = preferredFrame.flatMap { frame in
+                queue.contains { $0.sourceFrameIndex == frame }
+                    ? frame
+                    : nil
+            }
+            let initialFrame = preferredQueueFrame
                 ?? Self.firstPendingFrame(
                     in: queue,
                     decisions: Self.decisionMap(from: revision)
