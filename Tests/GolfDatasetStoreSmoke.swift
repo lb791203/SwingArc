@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 @main
@@ -41,6 +42,42 @@ struct GolfDatasetStoreSmoke {
         let loadedClip = try store.loadClip(clipID: "clip-001")
         precondition(loadedClip == clip, "Clip round-trip failed")
 
+        let truth = GolfPPointTruthDocument(
+            media: GolfPPointTruthMedia(
+                sha256: media.sha256,
+                timelineSHA256: media.timelineSHA256,
+                frameCount: media.frameCount
+            ),
+            view: .downTheLine,
+            stages: GolfPPointStageCode.allCases.enumerated().map {
+                GolfPPointTruthStage(
+                    code: $0.element,
+                    sourceFrameIndex: 100 + $0.offset
+                )
+            }
+        )
+        let truthData = try JSONEncoder().encode(truth)
+        let truthSHA = SHA256.hash(data: truthData)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let truthClip = GolfClipIdentity(
+            clipID: "clip-truth",
+            golferID: "golfer-A",
+            media: media,
+            view: .downTheLine,
+            handedness: .right,
+            authorization: .trainingAllowed,
+            pPointTruthSHA256: truthSHA
+        )
+        try store.saveClip(truthClip)
+        try store.savePPointTruthData(truthData, clipID: truthClip.clipID)
+        try store.savePPointTruthData(truthData, clipID: truthClip.clipID)
+        let loadedTruth = try store.loadPPointTruth(clipID: truthClip.clipID)
+        precondition(
+            loadedTruth == truth,
+            "P1-P8 truth round-trip failed"
+        )
+
         // 3. Prediction append
         let prediction = makePrediction(id: "pred-run-1", clipID: "clip-001")
         try store.appendPrediction(prediction)
@@ -81,7 +118,7 @@ struct GolfDatasetStoreSmoke {
         // 7. Snapshot reads all four record types
         let snapshot = try store.loadSnapshot()
         precondition(snapshot.registry == withGolfer)
-        precondition(snapshot.clips.count == 1)
+        precondition(snapshot.clips.count == 2)
         precondition(snapshot.clips.first?.clipID == "clip-001")
         precondition(snapshot.predictions.count == 1)
         precondition(snapshot.predictions.first?.predictionRunID == "pred-run-1")

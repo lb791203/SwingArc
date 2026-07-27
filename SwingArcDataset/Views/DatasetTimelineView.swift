@@ -13,10 +13,34 @@ struct DatasetTimelineView: View {
     let totalFrames: Int
     let currentFrame: Int
     let stages: [TimelineStageMarker]
+    let queuePosition: Int?
+    let queueCount: Int
+    let reviewedQueueCount: Int
     let onStep: (Int) -> Void
+    let onQueueStep: (Int) -> Void
+    let onNextPending: () -> Void
 
     var body: some View {
         VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                queueButton("上一标注帧", enabled: queueCount > 0) {
+                    onQueueStep(-1)
+                }
+                Text(
+                    "队列 \(queuePosition.map { String($0 + 1) } ?? "—")/\(queueCount)"
+                        + " · 已完成 \(reviewedQueueCount)/\(queueCount)"
+                )
+                .font(.caption.monospacedDigit())
+                .foregroundColor(.secondary)
+                Spacer()
+                queueButton("下一待标", enabled: reviewedQueueCount < queueCount) {
+                    onNextPending()
+                }
+                queueButton("下一标注帧", enabled: queueCount > 0) {
+                    onQueueStep(1)
+                }
+            }
+
             // Navigation buttons
             HStack(spacing: 12) {
                 stepButton(amount: -5, label: "−5")
@@ -80,6 +104,17 @@ struct DatasetTimelineView: View {
         .padding(.vertical, 4)
     }
 
+    private func queueButton(
+        _ title: String,
+        enabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(!enabled)
+    }
+
     @ViewBuilder
     private func stepButton(amount: Int, label: String) -> some View {
         Button {
@@ -122,7 +157,12 @@ private struct Triangle: Shape {
             TimelineStageMarker(id: "P7", label: "P7", sourceFrameIndex: 310, isConfirmed: false),
             TimelineStageMarker(id: "P8", label: "P8", sourceFrameIndex: 340, isConfirmed: false),
         ],
-        onStep: { _ in }
+        queuePosition: 20,
+        queueCount: 86,
+        reviewedQueueCount: 12,
+        onStep: { _ in },
+        onQueueStep: { _ in },
+        onNextPending: {}
     )
     .frame(height: 80)
     .padding()

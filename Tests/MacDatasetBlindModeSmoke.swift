@@ -132,6 +132,25 @@ private final class SpyStore: DatasetWorkspaceStore {
         )
     }
 
+    func loadPPointTruth(
+        clipID: String
+    ) throws -> GolfPPointTruthDocument {
+        GolfPPointTruthDocument(
+            media: GolfPPointTruthMedia(
+                sha256: shaA,
+                timelineSHA256: shaB,
+                frameCount: 10
+            ),
+            view: .downTheLine,
+            stages: GolfPPointStageCode.allCases.enumerated().map {
+                GolfPPointTruthStage(
+                    code: $0.element,
+                    sourceFrameIndex: $0.offset
+                )
+            }
+        )
+    }
+
     func loadRevisions(clipID: String) throws -> [GolfAnnotationRevision] {
         if failRevisionLoad { throw CocoaError(.fileReadCorruptFile) }
         return revisions.filter { $0.clipID == clipID }

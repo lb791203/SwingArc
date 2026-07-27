@@ -12,7 +12,8 @@ private func fixtureMedia() -> DatasetVerifiedMedia {
             sourceTimescale: 600
         ),
         pPointTruthSHA256: String(repeating: "c", count: 64),
-        pPointTruthView: .downTheLine
+        pPointTruthView: .downTheLine,
+        pPointTruthData: Data("fixture-p-point-truth".utf8)
     )
 }
 

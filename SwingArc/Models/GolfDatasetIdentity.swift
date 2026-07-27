@@ -150,3 +150,58 @@ public struct GolfClipIdentity: Codable, Equatable, Sendable {
         self.pPointTruthSHA256 = pPointTruthSHA256
     }
 }
+
+public enum GolfPPointStageCode: String, Codable, Equatable, CaseIterable, Sendable {
+    case p1 = "P1"
+    case p2 = "P2"
+    case p3 = "P3"
+    case p4 = "P4"
+    case p5 = "P5"
+    case p6 = "P6"
+    case p7 = "P7"
+    case p8 = "P8"
+}
+
+public struct GolfPPointTruthMedia: Codable, Equatable, Sendable {
+    public let sha256: String
+    public let timelineSHA256: String
+    public let frameCount: Int
+
+    public init(sha256: String, timelineSHA256: String, frameCount: Int) {
+        self.sha256 = sha256
+        self.timelineSHA256 = timelineSHA256
+        self.frameCount = frameCount
+    }
+}
+
+public struct GolfPPointTruthStage: Codable, Equatable, Sendable {
+    public let code: GolfPPointStageCode
+    public let sourceFrameIndex: Int
+
+    public init(code: GolfPPointStageCode, sourceFrameIndex: Int) {
+        self.code = code
+        self.sourceFrameIndex = sourceFrameIndex
+    }
+}
+
+/// The narrow P1–P8 payload required to build an annotation queue. Additional
+/// export metadata remains in the immutable source JSON and is ignored here.
+public struct GolfPPointTruthDocument: Codable, Equatable, Sendable {
+    public let media: GolfPPointTruthMedia
+    public let view: GolfDatasetView
+    public let stages: [GolfPPointTruthStage]
+
+    public init(
+        media: GolfPPointTruthMedia,
+        view: GolfDatasetView,
+        stages: [GolfPPointTruthStage]
+    ) {
+        self.media = media
+        self.view = view
+        self.stages = stages
+    }
+
+    public func frame(for code: GolfPPointStageCode) -> Int? {
+        stages.first { $0.code == code }?.sourceFrameIndex
+    }
+}

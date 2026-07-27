@@ -167,7 +167,8 @@ enum DatasetImportController {
             DatasetVerifiedMedia(
                 media: media,
                 pPointTruthSHA256: sha256(truthData),
-                pPointTruthView: truthView
+                pPointTruthView: truthView,
+                pPointTruthData: truthData
             ),
             bookmark
         )
@@ -181,11 +182,16 @@ enum DatasetImportController {
         let clip = try state.makeClip(clipID: clipID)
         guard let registry = state.registry,
               let split = state.split,
-              let bookmark = state.securityScopedBookmark else {
+              let bookmark = state.securityScopedBookmark,
+              let verifiedMedia = state.verifiedMedia else {
             throw DatasetImportIssue.incompleteIdentity
         }
         try store.saveRegistry(registry)
         try store.saveClip(clip)
+        try store.savePPointTruthData(
+            verifiedMedia.pPointTruthData,
+            clipID: clip.clipID
+        )
         return DatasetImportReceipt(
             clip: clip,
             split: split,

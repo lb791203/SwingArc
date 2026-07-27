@@ -4,15 +4,18 @@ struct DatasetVerifiedMedia: Equatable, Sendable {
     let media: GolfMediaIdentity
     let pPointTruthSHA256: String
     let pPointTruthView: GolfDatasetView
+    let pPointTruthData: Data
 
     init(
         media: GolfMediaIdentity,
         pPointTruthSHA256: String,
-        pPointTruthView: GolfDatasetView
+        pPointTruthView: GolfDatasetView,
+        pPointTruthData: Data
     ) {
         self.media = media
         self.pPointTruthSHA256 = pPointTruthSHA256
         self.pPointTruthView = pPointTruthView
+        self.pPointTruthData = pPointTruthData
     }
 }
 
@@ -61,6 +64,7 @@ struct DatasetImportState: Equatable, Sendable {
     var canImport: Bool {
         registry != nil
             && verifiedMedia != nil
+            && verifiedMedia?.pPointTruthData.isEmpty == false
             && securityScopedBookmark?.isEmpty == false
             && golferID != nil
             && split != nil

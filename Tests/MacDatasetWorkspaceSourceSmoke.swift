@@ -43,13 +43,21 @@ struct MacDatasetWorkspaceSourceSmoke {
             "withTaskCancellationHandler",
             "Task.checkCancellation()",
             "generationTask?.cancel()",
-            "@MainActor\npublic final class DatasetPredictionRunGenerator"
+            "@MainActor\npublic final class DatasetPredictionRunGenerator",
+            "loadPPointTruth", "makeAnnotationQueue",
+            "navigateAnnotationQueue", "navigateToNextPendingQueueFrame",
+            "queuePosition:", "reviewedQueueCount:",
+            "timelineStages: (controller.activePPointTruth"
         ] {
             precondition(source.contains(token), "Production anchor entry is not wired: \(token)")
         }
         precondition(
             !source.contains("registry: nil"),
             "Generator must not fabricate a registry-less validation snapshot"
+        )
+        precondition(
+            !source.contains("queue: []"),
+            "Production workspace must not discard the annotation queue"
         )
         print("All Mac workspace source contracts passed.")
     }

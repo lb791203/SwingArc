@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum GolfDatasetStoreError: Error, Equatable, CustomStringConvertible {
@@ -6,6 +7,7 @@ public enum GolfDatasetStoreError: Error, Equatable, CustomStringConvertible {
     case anchorAlreadyExists(String)
     case anchorNotFound(String)
     case anchorClipMismatch(expected: String, got: String)
+    case pPointTruthConflict(String)
     case invalidID(String)
     case pathTraversal
 
@@ -21,6 +23,8 @@ public enum GolfDatasetStoreError: Error, Equatable, CustomStringConvertible {
             return "Subject anchor '\(id)' not found"
         case .anchorClipMismatch(let expected, let got):
             return "Subject anchor clipID '\(got)' does not match directory clipID '\(expected)'"
+        case .pPointTruthConflict(let clipID):
+            return "P1-P8 truth for clip '\(clipID)' conflicts with the immutable stored payload"
         case .invalidID(let msg):
             return "Invalid ID or payload: \(msg)"
         case .pathTraversal:
@@ -101,6 +105,10 @@ public final class GolfDatasetStore: @unchecked Sendable {
 
     private func clipJSONURL(clipID: String) -> URL {
         clipDirectory(clipID: clipID).appendingPathComponent("clip.json")
+    }
+
+    private func pPointTruthJSONURL(clipID: String) -> URL {
+        clipDirectory(clipID: clipID).appendingPathComponent("p-point-truth.json")
     }
 
     private func predictionJSONURL(clipID: String, predictionRunID: String) -> URL {
@@ -196,6 +204,34 @@ public final class GolfDatasetStore: @unchecked Sendable {
         }
     }
 
+    private func atomicWriteImmutable(
+        data: Data,
+        to destination: URL,
+        conflict: @autoclosure () -> Error
+    ) throws {
+        let directory = destination.deletingLastPathComponent()
+        try fileManager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        if fileManager.fileExists(atPath: destination.path) {
+            guard try Data(contentsOf: destination) == data else {
+                throw conflict()
+            }
+            return
+        }
+        let temporary = directory.appendingPathComponent(
+            ".tmp-\(UUID().uuidString).json"
+        )
+        do {
+            try data.write(to: temporary, options: .atomic)
+            try fileManager.moveItem(at: temporary, to: destination)
+        } catch {
+            cleanupTmp(temporary)
+            throw error
+        }
+    }
+
     // MARK: - Registry
 
     public func saveRegistry(_ registry: GolferRegistry) throws {
@@ -237,6 +273,72 @@ public final class GolfDatasetStore: @unchecked Sendable {
                 return try Self.decoder().decode(GolfClipIdentity.self, from: Data(contentsOf: clipJSON))
             }
             .sorted { $0.clipID < $1.clipID }
+    }
+
+    public func savePPointTruthData(_ data: Data, clipID: String) throws {
+        try validateID(clipID)
+        try withLock {
+            let clip = try loadClip(clipID: clipID)
+            _ = try validatedPPointTruth(data: data, clip: clip)
+            try atomicWriteImmutable(
+                data: data,
+                to: pPointTruthJSONURL(clipID: clipID),
+                conflict: GolfDatasetStoreError.pPointTruthConflict(clipID)
+            )
+        }
+    }
+
+    public func loadPPointTruth(
+        clipID: String
+    ) throws -> GolfPPointTruthDocument {
+        try validateID(clipID)
+        let clip = try loadClip(clipID: clipID)
+        let data = try Data(contentsOf: pPointTruthJSONURL(clipID: clipID))
+        return try validatedPPointTruth(data: data, clip: clip)
+    }
+
+    private func validatedPPointTruth(
+        data: Data,
+        clip: GolfClipIdentity
+    ) throws -> GolfPPointTruthDocument {
+        let dataSHA256 = SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        guard dataSHA256 == clip.pPointTruthSHA256 else {
+            throw GolfDatasetStoreError.invalidID(
+                "P1-P8 truth SHA mismatch for \(clip.clipID)"
+            )
+        }
+        let truth = try Self.decoder().decode(
+            GolfPPointTruthDocument.self,
+            from: data
+        )
+        guard truth.media.sha256 == clip.media.sha256,
+              truth.media.timelineSHA256 == clip.media.timelineSHA256,
+              truth.media.frameCount == clip.media.frameCount,
+              truth.view == clip.view else {
+            throw GolfDatasetStoreError.invalidID(
+                "P1-P8 truth media identity mismatch for \(clip.clipID)"
+            )
+        }
+        let grouped = Dictionary(grouping: truth.stages, by: \.code)
+        guard truth.stages.count == GolfPPointStageCode.allCases.count,
+              Set(grouped.keys) == Set(GolfPPointStageCode.allCases),
+              grouped.values.allSatisfy({ $0.count == 1 }) else {
+            throw GolfDatasetStoreError.invalidID(
+                "P1-P8 truth is incomplete for \(clip.clipID)"
+            )
+        }
+        let frames = GolfPPointStageCode.allCases.compactMap {
+            truth.frame(for: $0)
+        }
+        guard frames.allSatisfy({ (0..<clip.media.frameCount).contains($0) }),
+              zip(frames, frames.dropFirst()).allSatisfy(<) else {
+            throw GolfDatasetStoreError.invalidID(
+                "P1-P8 truth frames are invalid for \(clip.clipID)"
+            )
+        }
+        return truth
     }
 
     public func loadRevisions(clipID: String) throws -> [GolfAnnotationRevision] {

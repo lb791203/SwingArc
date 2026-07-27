@@ -22,6 +22,8 @@ struct DatasetWorkspaceView: View {
     let onSelectClip: (String) -> Void
     let onSelectFilter: (DatasetSidebarFilter) -> Void
     let onStep: (Int) -> Void
+    let onQueueStep: (Int) -> Void
+    let onNextPending: () -> Void
     let onToggleROI: () -> Void
     let onAcceptPrediction: (GolfLandmark) -> Void
     let onCorrectPoint: (GolfLandmark, GolfNormalizedPoint) -> Void
@@ -92,7 +94,13 @@ struct DatasetWorkspaceView: View {
                     totalFrames: annotationState?.frameCount ?? 0,
                     currentFrame: annotationState?.currentSourceFrameIndex ?? 0,
                     stages: timelineStages,
-                    onStep: onStep
+                    queuePosition: annotationState?.currentQueuePosition,
+                    queueCount: annotationState?.annotationQueue.count ?? 0,
+                    reviewedQueueCount:
+                        annotationState?.reviewedQueueFrameCount ?? 0,
+                    onStep: onStep,
+                    onQueueStep: onQueueStep,
+                    onNextPending: onNextPending
                 )
                 .padding(.horizontal, 8).padding(.vertical, 4)
             }
@@ -205,7 +213,9 @@ struct DatasetWorkspaceView: View {
         fullFrameImage: nil, roiImage: nil,
         fullFrameImageSize: CGSize(width: 1920, height: 1080), roiImageSize: CGSize(width: 512, height: 512),
         visionSkeleton: [], trailPoints: [:], timelineStages: [], isFrameLoading: false, showsROI: false, currentSourceTime: nil, workspaceAccess: .readOnly(reason: "预览"),
-        onSelectClip: { _ in }, onSelectFilter: { _ in }, onStep: { _ in }, onToggleROI: {}, onAcceptPrediction: { _ in },
+        onSelectClip: { _ in }, onSelectFilter: { _ in }, onStep: { _ in },
+        onQueueStep: { _ in }, onNextPending: {}, onToggleROI: {},
+        onAcceptPrediction: { _ in },
         onCorrectPoint: { _, _ in }, onSetOccluded: { _ in }, onSetOutOfFrame: { _ in }, onSetUnresolved: { _ in }, onAcceptFrame: {}
     )
     .frame(minWidth: 1000, minHeight: 600)
@@ -220,19 +230,40 @@ struct DatasetWorkspaceHostView: View {
     var body: some View {
         DatasetWorkspaceView(
             clips: controller.clips.map { clip in
-                DatasetClipRowModel(id: clip.clipID, golferID: clip.golferID, view: clip.view.rawValue,
-                                    split: controller.split(for: clip).rawValue, completionProgress: 0,
-                                    pendingReviewCount: 0, hasP6P8Issues: false, hasTrackingBreaks: false,
-                                    hasLowConfidence: false, hasROIOOB: false)
+                let progress = controller.clipProgress[clip.clipID]
+                return DatasetClipRowModel(
+                    id: clip.clipID,
+                    golferID: clip.golferID,
+                    view: clip.view.rawValue,
+                    split: controller.split(for: clip).rawValue,
+                    completionProgress: progress?.fraction ?? 0,
+                    pendingReviewCount: progress?.pending ?? 0,
+                    hasP6P8Issues: false,
+                    hasTrackingBreaks: false,
+                    hasLowConfidence: false,
+                    hasROIOOB: false
+                )
             }, selectedClipID: controller.selectedClipID, selectedFilter: controller.selectedFilter,
             annotationState: controller.annotationState, fullFrameImage: controller.fullFrameImage, roiImage: nil,
             fullFrameImageSize: controller.fullFrameImageSize, roiImageSize: CGSize(width: 512, height: 512),
-            visionSkeleton: [], trailPoints: [:], timelineStages: [], isFrameLoading: controller.isFrameLoading, showsROI: false,
+            visionSkeleton: [], trailPoints: [:],
+            timelineStages: (controller.activePPointTruth?.stages ?? []).map {
+                TimelineStageMarker(
+                    id: $0.code.rawValue,
+                    label: $0.code.rawValue,
+                    sourceFrameIndex: $0.sourceFrameIndex,
+                    isConfirmed: true
+                )
+            },
+            isFrameLoading: controller.isFrameLoading, showsROI: false,
             currentSourceTime: controller.currentSourceTime, workspaceAccess: controller.access,
             onSelectClip: { clipID in
                 Task { await controller.selectClip(clipID) }
             }, onSelectFilter: controller.selectFilter,
-            onStep: { controller.dispatch(.step($0)) }, onToggleROI: {},
+            onStep: { controller.dispatch(.step($0)) },
+            onQueueStep: controller.navigateAnnotationQueue,
+            onNextPending: controller.navigateToNextPendingQueueFrame,
+            onToggleROI: {},
             onAcceptPrediction: { controller.dispatch(.acceptPrediction($0, decidedAt: Date())) },
             onCorrectPoint: { controller.dispatch(.correctPoint($0, $1, decidedAt: Date())) },
             onSetOccluded: { controller.dispatch(.setOccluded($0, decidedAt: Date())) },

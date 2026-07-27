@@ -230,6 +230,28 @@ private func testManualBootstrapDisablesPredictionAcceptance() {
     print("  ✓ manualBootstrap disables prediction acceptance")
 }
 
+private func testQueueProgressAndExactJump() {
+    let queue = [100, 220, 542].map {
+        GolfAnnotationQueueItem(
+            sourceFrameIndex: $0,
+            reasons: [.sparseP1P5],
+            isProtected: false
+        )
+    }
+    var value = state(queue: queue)
+    precondition(value.currentQueuePosition == 2)
+    precondition(value.reviewedQueueFrameCount == 0)
+    precondition(value.annotationQueue.count == 3)
+
+    value = reduce(value, .jumpToFrame(100))
+    precondition(value.currentSourceFrameIndex == 100)
+    precondition(value.currentQueuePosition == 0)
+    value = allPredictions(value)
+    precondition(value.reviewedQueueFrameCount == 1)
+    precondition(value.pendingQueueFrameCount == 2)
+    print("  ✓ queue progress and exact jump")
+}
+
 @main
 struct MacDatasetAnnotationStateSmoke {
     static func main() {
@@ -242,6 +264,7 @@ struct MacDatasetAnnotationStateSmoke {
         testPredictionRemainsImmutableAndPresentationIsPredictionFirst()
         testROIRoundTripAndInvalidTransformRejection()
         testManualBootstrapDisablesPredictionAcceptance()
+        testQueueProgressAndExactJump()
         print("All DatasetAnnotationState tests passed.")
     }
 }

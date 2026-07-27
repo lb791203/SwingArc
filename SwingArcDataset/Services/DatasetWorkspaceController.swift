@@ -47,6 +47,8 @@ public enum DatasetWorkspaceAccess: Equatable, Sendable {
 private enum DatasetWorkspaceControllerError: LocalizedError {
     case missingRevision(String)
     case unreadableRevisionHistory(String)
+    case unreadablePPointTruth(String)
+    case emptyAnnotationQueue
 
     var errorDescription: String? {
         switch self {
@@ -54,6 +56,10 @@ private enum DatasetWorkspaceControllerError: LocalizedError {
             return "上次活动修订 \(revisionID) 已不存在，已停止恢复。"
         case .unreadableRevisionHistory(let reason):
             return "无法读取标注修订历史：\(reason)"
+        case .unreadablePPointTruth(let reason):
+            return "无法读取或核验 P1–P8 真值：\(reason)"
+        case .emptyAnnotationQueue:
+            return "P1–P8 真值未能生成有效标注队列。"
         }
     }
 }
@@ -175,6 +181,7 @@ public final class InMemoryDatasetWorkspaceBookmarkPersistence:
 public protocol DatasetWorkspaceStore: AnyObject {
     func loadClips() throws -> [GolfClipIdentity]
     func loadRegistry() throws -> GolferRegistry
+    func loadPPointTruth(clipID: String) throws -> GolfPPointTruthDocument
     func loadRevisions(clipID: String) throws -> [GolfAnnotationRevision]
     func listPredictionRunIDs(clipID: String) throws -> [String]
     func loadPrediction(
@@ -185,6 +192,25 @@ public protocol DatasetWorkspaceStore: AnyObject {
 }
 
 extension GolfDatasetStore: DatasetWorkspaceStore {}
+
+public struct DatasetClipAnnotationProgress: Equatable, Sendable {
+    public let reviewed: Int
+    public let total: Int
+
+    public init(reviewed: Int, total: Int) {
+        self.reviewed = max(0, reviewed)
+        self.total = max(0, total)
+    }
+
+    public var fraction: Double {
+        guard total > 0 else { return 0 }
+        return min(1, Double(reviewed) / Double(total))
+    }
+
+    public var pending: Int {
+        max(0, total - reviewed)
+    }
+}
 
 public struct DatasetWorkspaceMediaMetadata: Equatable, Sendable {
     public let mediaSHA256: String
@@ -322,6 +348,8 @@ public final class DatasetWorkspaceController: ObservableObject {
     @Published public private(set) var currentSourceTime: Double?
     @Published public private(set) var isFrameLoading = false
     @Published public private(set) var selectedVideoURL: URL?
+    @Published public private(set) var activePPointTruth: GolfPPointTruthDocument?
+    @Published public private(set) var clipProgress: [String: DatasetClipAnnotationProgress] = [:]
 
     public init(
         store: DatasetWorkspaceStore,
@@ -358,6 +386,7 @@ public final class DatasetWorkspaceController: ObservableObject {
 
     public func reloadClipList() {
         clips = (try? store.loadClips()) ?? []
+        refreshClipProgress()
     }
 
     public func rememberBookmark(_ bookmark: Data, for clipID: String) {
@@ -421,6 +450,7 @@ public final class DatasetWorkspaceController: ObservableObject {
         activeMediaAccess?.close()
         activeMediaAccess = nil
         selectedVideoURL = nil
+        activePPointTruth = nil
 
         guard let bookmark = bookmarkPersistence.loadBookmark(for: clipID),
               !bookmark.isEmpty else {
@@ -442,6 +472,29 @@ public final class DatasetWorkspaceController: ObservableObject {
                 for: clipID,
                 preferredID: preferredRevisionID
             )
+            let truth: GolfPPointTruthDocument
+            do {
+                truth = try store.loadPPointTruth(clipID: clipID)
+            } catch {
+                throw DatasetWorkspaceControllerError.unreadablePPointTruth(
+                    error.localizedDescription
+                )
+            }
+            let clipSplit = split(for: clip)
+            let queue = Self.makeAnnotationQueue(
+                truth: truth,
+                split: clipSplit,
+                totalFrames: clip.media.frameCount
+            )
+            guard !queue.isEmpty else {
+                throw DatasetWorkspaceControllerError.emptyAnnotationQueue
+            }
+            let initialFrame = preferredFrame
+                ?? Self.firstPendingFrame(
+                    in: queue,
+                    decisions: Self.decisionMap(from: revision)
+                )
+                ?? queue[0].sourceFrameIndex
             let predictionRunIDs = try store.listPredictionRunIDs(
                 clipID: clipID
             )
@@ -468,18 +521,19 @@ public final class DatasetWorkspaceController: ObservableObject {
             }
             try openVerifiedClip(
                 clip: clip,
-                split: split(for: clip),
+                split: clipSplit,
                 parentPredictionRunID: parentPredictionRunID,
                 metadata: metadata,
-                queue: [],
+                queue: queue,
                 preferredRevisionID: revision?.revisionID,
-                preferredFrame: preferredFrame
+                preferredFrame: initialFrame
             )
             guard case .editable = access else {
                 if parentPredictionRunID.isEmpty,
                    Self.mediaIdentityMatches(clip: clip, metadata: metadata) {
                     activeMediaAccess = candidateMediaAccess
                     selectedVideoURL = candidateMediaAccess.activeURL
+                    activePPointTruth = truth
                     return
                 }
                 candidateMediaAccess.close()
@@ -487,6 +541,7 @@ public final class DatasetWorkspaceController: ObservableObject {
             }
             activeMediaAccess = candidateMediaAccess
             selectedVideoURL = candidateMediaAccess.activeURL
+            activePPointTruth = truth
             await loadExactCurrentFrame()
         } catch let error as DatasetWorkspaceControllerError {
             candidateMediaAccess.close()
@@ -494,6 +549,7 @@ public final class DatasetWorkspaceController: ObservableObject {
             activeMediaAccess?.close()
             activeMediaAccess = nil
             selectedVideoURL = nil
+            activePPointTruth = nil
             access = .readOnly(reason: error.localizedDescription)
         } catch {
             candidateMediaAccess.close()
@@ -501,6 +557,7 @@ public final class DatasetWorkspaceController: ObservableObject {
             activeMediaAccess?.close()
             activeMediaAccess = nil
             selectedVideoURL = nil
+            activePPointTruth = nil
             access = .readOnly(
                 reason: "无法打开或核验视频书签：\(error.localizedDescription)"
             )
@@ -582,6 +639,44 @@ public final class DatasetWorkspaceController: ObservableObject {
         persistSession()
     }
 
+    public func navigateAnnotationQueue(by offset: Int) {
+        guard offset != 0,
+              case .editable = access,
+              let state = annotationState,
+              !state.annotationQueue.isEmpty else {
+            return
+        }
+        let frames = state.annotationQueue.map(\.sourceFrameIndex)
+        let targetIndex: Int
+        if let current = state.currentQueuePosition {
+            targetIndex = max(0, min(frames.count - 1, current + offset))
+        } else if offset > 0 {
+            targetIndex = frames.firstIndex {
+                $0 > state.currentSourceFrameIndex
+            } ?? (frames.count - 1)
+        } else {
+            targetIndex = frames.lastIndex {
+                $0 < state.currentSourceFrameIndex
+            } ?? 0
+        }
+        dispatch(.jumpToFrame(frames[targetIndex]))
+    }
+
+    public func navigateToNextPendingQueueFrame() {
+        guard case .editable = access,
+              let state = annotationState else {
+            return
+        }
+        let pending = state.annotationQueue.filter {
+            !state.frameIsReviewed($0.sourceFrameIndex)
+        }
+        guard !pending.isEmpty else { return }
+        let target = pending.first {
+            $0.sourceFrameIndex > state.currentSourceFrameIndex
+        } ?? pending[0]
+        dispatch(.jumpToFrame(target.sourceFrameIndex))
+    }
+
     public func dispatch(_ action: DatasetAnnotationAction) {
         guard case .editable = access, let state = annotationState else { return }
         if case .acceptUnresolvedFrame(let decidedAt) = action {
@@ -597,7 +692,14 @@ public final class DatasetWorkspaceController: ObservableObject {
         }
 
         let next = DatasetAnnotationReducer.reduce(state, action)
-        if case .step = action {
+        let isNavigation: Bool
+        switch action {
+        case .step, .jumpToFrame:
+            isNavigation = true
+        default:
+            isNavigation = false
+        }
+        if isNavigation {
             annotationState = next
             persistSession()
             if activeMediaAccess != nil {
@@ -683,6 +785,7 @@ public final class DatasetWorkspaceController: ObservableObject {
                 annotatorID: state.annotatorID,
                 revisionID: revisionID
             )
+            updateActiveClipProgress()
         } catch {
             access = .readOnly(
                 reason: "无法原子保存标注修订：\(error.localizedDescription)"
@@ -744,7 +847,98 @@ public final class DatasetWorkspaceController: ObservableObject {
         currentSourceTime = nil
         isFrameLoading = false
         selectedVideoURL = nil
+        activePPointTruth = nil
         access = .readOnly(reason: reason)
+    }
+
+    private func refreshClipProgress() {
+        var next: [String: DatasetClipAnnotationProgress] = [:]
+        let registry = try? store.loadRegistry()
+        for clip in clips {
+            guard let truth = try? store.loadPPointTruth(clipID: clip.clipID),
+                  let split = registry?.split(for: clip.golferID) else {
+                next[clip.clipID] = DatasetClipAnnotationProgress(
+                    reviewed: 0,
+                    total: 0
+                )
+                continue
+            }
+            let queue = Self.makeAnnotationQueue(
+                truth: truth,
+                split: split,
+                totalFrames: clip.media.frameCount
+            )
+            let revision = (try? store.loadRevisions(clipID: clip.clipID))?
+                .max {
+                    ($0.createdAt, $0.revisionID)
+                        < ($1.createdAt, $1.revisionID)
+                }
+            let decisions = Self.decisionMap(from: revision)
+            let reviewed = queue.reduce(into: 0) { count, item in
+                let decided = Set(
+                    decisions.compactMap { key, decision in
+                        key.frameIndex == item.sourceFrameIndex
+                            ? decision.landmark
+                            : nil
+                    }
+                )
+                if GolfLandmark.allCases.allSatisfy(decided.contains) {
+                    count += 1
+                }
+            }
+            next[clip.clipID] = DatasetClipAnnotationProgress(
+                reviewed: reviewed,
+                total: queue.count
+            )
+        }
+        clipProgress = next
+    }
+
+    private func updateActiveClipProgress() {
+        guard let clipID = selectedClipID,
+              let state = annotationState else {
+            return
+        }
+        clipProgress[clipID] = DatasetClipAnnotationProgress(
+            reviewed: state.reviewedQueueFrameCount,
+            total: state.annotationQueue.count
+        )
+    }
+
+    private static func makeAnnotationQueue(
+        truth: GolfPPointTruthDocument,
+        split: GolfDatasetSplit,
+        totalFrames: Int
+    ) -> [GolfAnnotationQueueItem] {
+        GolfAnnotationFrameQueueBuilder.build(
+            input: GolfAnnotationQueueInput(
+                split: split,
+                p1: truth.frame(for: .p1),
+                p5: truth.frame(for: .p5),
+                p6: truth.frame(for: .p6),
+                p8: truth.frame(for: .p8),
+                totalFrames: totalFrames,
+                anomalyFrames: [],
+                preSwingNegativeSamples: [],
+                postSwingNegativeSamples: []
+            )
+        )
+    }
+
+    private static func firstPendingFrame(
+        in queue: [GolfAnnotationQueueItem],
+        decisions: [AnnotationDecisionKey: GolfAnnotationDecision]
+    ) -> Int? {
+        queue.first { item in
+            let decided = Set(
+                decisions.compactMap { key, decision in
+                    key.frameIndex == item.sourceFrameIndex
+                        ? decision.landmark
+                        : nil
+                }
+            )
+            return !GolfLandmark.allCases.allSatisfy(decided.contains)
+        }?.sourceFrameIndex
     }
 
     private static func decisionMap(

@@ -2,6 +2,7 @@ import Foundation
 
 public enum DatasetAnnotationAction: Equatable, Sendable {
     case step(Int)
+    case jumpToFrame(Int)
     case acceptPrediction(GolfLandmark, decidedAt: Date)
     case correctPoint(GolfLandmark, GolfNormalizedPoint, decidedAt: Date)
     case setOccluded(GolfLandmark, decidedAt: Date)
@@ -65,6 +66,33 @@ public struct DatasetAnnotationState: Equatable, Sendable {
     }
 
     public var frameCount: Int { mediaFrameCount }
+
+    public var currentQueuePosition: Int? {
+        annotationQueue.firstIndex {
+            $0.sourceFrameIndex == currentSourceFrameIndex
+        }
+    }
+
+    public var reviewedQueueFrameCount: Int {
+        annotationQueue.reduce(into: 0) { count, item in
+            if frameIsReviewed(item.sourceFrameIndex) {
+                count += 1
+            }
+        }
+    }
+
+    public var pendingQueueFrameCount: Int {
+        max(0, annotationQueue.count - reviewedQueueFrameCount)
+    }
+
+    public func frameIsReviewed(_ sourceFrameIndex: Int) -> Bool {
+        let decided = Set(
+            decisions.compactMap { key, decision in
+                key.frameIndex == sourceFrameIndex ? decision.landmark : nil
+            }
+        )
+        return GolfLandmark.allCases.allSatisfy { decided.contains($0) }
+    }
 
     public var decisionsForCurrentFrame: [GolfAnnotationDecision] {
         decisions.filter { $0.key.frameIndex == currentSourceFrameIndex }
@@ -221,6 +249,11 @@ public enum DatasetAnnotationReducer {
         case .step(let delta):
             next.currentSourceFrameIndex = DatasetAnnotationState.clamped(
                 next.currentSourceFrameIndex + delta,
+                mediaFrameCount: next.mediaFrameCount
+            )
+        case .jumpToFrame(let sourceFrameIndex):
+            next.currentSourceFrameIndex = DatasetAnnotationState.clamped(
+                sourceFrameIndex,
                 mediaFrameCount: next.mediaFrameCount
             )
         case .acceptPrediction(let landmark, let decidedAt):
