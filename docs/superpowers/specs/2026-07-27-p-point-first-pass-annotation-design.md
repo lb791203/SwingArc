@@ -49,6 +49,12 @@ The sidebar shows progress for the active queue mode. Existing decisions on
 frames outside the active queue remain stored and reappear when expanded mode
 is selected.
 
+The existing `接受当前帧` action is a prediction bulk-accept action, not a save
+or completion button. Rename it to `接受本帧全部预测`. When the active
+manual-bootstrap run has no point predictions, keep the action disabled and
+show `当前无预测，需人工标注`. Manual point/status decisions continue to save
+automatically.
+
 ## Queue Construction
 
 Add a small queue-mode type owned by the dataset workspace:
