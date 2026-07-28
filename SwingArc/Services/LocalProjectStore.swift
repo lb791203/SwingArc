@@ -16,8 +16,8 @@ struct LocalAnalysisProject: Codable, Equatable {
     /// They are optional in stored payloads so projects saved before this
     /// feature continue to decode unchanged.
     var stageCorrections: [StageCorrection]
-    /// Decoded only so projects saved by the removed configuration UI remain
-    /// readable. New saves omit this field and the value never affects analysis.
+    /// Opaque compatibility data from the removed configuration UI. It never
+    /// affects public analysis, but an existing value must survive public edits.
     private(set) var legacyFeedbackConfiguration: FeedbackConfiguration?
 
     init(
@@ -29,7 +29,8 @@ struct LocalAnalysisProject: Codable, Equatable {
         showSpineAngle: Bool,
         showGrid: Bool,
         practiceCameraView: PracticeCameraView? = nil,
-        stageCorrections: [StageCorrection] = []
+        stageCorrections: [StageCorrection] = [],
+        legacyFeedbackConfiguration: FeedbackConfiguration? = nil
     ) {
         self.drawings = drawings
         self.keyframes = keyframes
@@ -40,7 +41,7 @@ struct LocalAnalysisProject: Codable, Equatable {
         self.showGrid = showGrid
         self.practiceCameraView = practiceCameraView
         self.stageCorrections = stageCorrections
-        self.legacyFeedbackConfiguration = nil
+        self.legacyFeedbackConfiguration = legacyFeedbackConfiguration
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -89,7 +90,10 @@ struct LocalAnalysisProject: Codable, Equatable {
         try container.encode(showGrid, forKey: .showGrid)
         try container.encodeIfPresent(practiceCameraView, forKey: .practiceCameraView)
         try container.encode(stageCorrections, forKey: .stageCorrections)
-        // Intentionally omit the legacy feedbackConfiguration key.
+        try container.encodeIfPresent(
+            legacyFeedbackConfiguration,
+            forKey: .feedbackConfiguration
+        )
     }
 }
 

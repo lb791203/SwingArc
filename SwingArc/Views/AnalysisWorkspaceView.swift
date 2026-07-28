@@ -170,7 +170,9 @@ struct AnalysisWorkspaceView: View {
                 if let adjustmentStage {
                     StageAdjustmentBar(
                         stage: adjustmentStage,
-                        detection: presentation.detection(for: adjustmentStage),
+                        marker: keyframes.first {
+                            $0.stage == adjustmentStage.rawValue
+                        },
                         playbackManager: playbackManager,
                         onCancel: { self.adjustmentStage = nil },
                         onSetCurrentFrame: {
@@ -359,6 +361,11 @@ struct AnalysisWorkspaceView: View {
     private var mobileReplayOverlayControls: some View {
         VStack(spacing: 14) {
             mobileReplayActionRow
+
+            CompactPlaybackControlsView(
+                playbackManager: playbackManager,
+                interactionMode: $interactionMode
+            )
 
             MobileReplayTimelineView(
                 playbackManager: playbackManager,

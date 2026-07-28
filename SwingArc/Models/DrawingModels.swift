@@ -120,25 +120,64 @@ enum KeyframeSource: String, Codable, Equatable {
     case manual
 }
 
+enum KeyframeAutomaticStatus: String, Codable, Equatable {
+    case confirmed
+    case lowConfidence
+}
+
+enum KeyframeEvidenceSource: String, Codable, Hashable {
+    case bodyPose
+    case grip
+    case shaft
+    case clubhead
+    case ball
+    case temporalTransition
+    case manual
+}
+
+struct KeyframeEvidenceSnapshot: Codable, Equatable {
+    let sources: Set<KeyframeEvidenceSource>
+    let detectedPointCount: Int
+    let estimatedPointCount: Int
+    let hasClubEvidence: Bool
+    let hasBallEvidence: Bool
+    let hasBallChangeEvidence: Bool
+}
+
 struct KeyframeMarker: Identifiable, Codable, Equatable {
     let id: UUID
     let time: Double // 视频时间（秒）
     let stage: String // SwingStage rawValue
     let source: KeyframeSource
     let sourceFrameIndex: Int?
+    let automaticStatus: KeyframeAutomaticStatus?
+    let automaticConfidence: Double?
+    let automaticEvidence: KeyframeEvidenceSnapshot?
     
     init(
         id: UUID = UUID(),
         time: Double,
         stage: SwingStage,
         source: KeyframeSource = .automatic,
-        sourceFrameIndex: Int? = nil
+        sourceFrameIndex: Int? = nil,
+        automaticStatus: KeyframeAutomaticStatus? = nil,
+        automaticConfidence: Double? = nil,
+        automaticEvidence: KeyframeEvidenceSnapshot? = nil
     ) {
         self.id = id
         self.time = time
         self.stage = stage.rawValue
         self.source = source
         self.sourceFrameIndex = sourceFrameIndex
+        if source == .automatic {
+            self.automaticStatus = automaticStatus ?? .lowConfidence
+            self.automaticConfidence = automaticConfidence
+            self.automaticEvidence = automaticEvidence
+        } else {
+            self.automaticStatus = nil
+            self.automaticConfidence = nil
+            self.automaticEvidence = nil
+        }
     }
 
     var isLocked: Bool { source == .manual }
@@ -149,6 +188,9 @@ struct KeyframeMarker: Identifiable, Codable, Equatable {
         case stage
         case source
         case sourceFrameIndex
+        case automaticStatus
+        case automaticConfidence
+        case automaticEvidence
     }
 
     init(from decoder: Decoder) throws {
@@ -161,6 +203,24 @@ struct KeyframeMarker: Identifiable, Codable, Equatable {
             Int.self,
             forKey: .sourceFrameIndex
         )
+        if source == .automatic {
+            automaticStatus = try container.decodeIfPresent(
+                KeyframeAutomaticStatus.self,
+                forKey: .automaticStatus
+            ) ?? .lowConfidence
+            automaticConfidence = try container.decodeIfPresent(
+                Double.self,
+                forKey: .automaticConfidence
+            )
+            automaticEvidence = try container.decodeIfPresent(
+                KeyframeEvidenceSnapshot.self,
+                forKey: .automaticEvidence
+            )
+        } else {
+            automaticStatus = nil
+            automaticConfidence = nil
+            automaticEvidence = nil
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -172,6 +232,15 @@ struct KeyframeMarker: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(
             sourceFrameIndex,
             forKey: .sourceFrameIndex
+        )
+        try container.encodeIfPresent(automaticStatus, forKey: .automaticStatus)
+        try container.encodeIfPresent(
+            automaticConfidence,
+            forKey: .automaticConfidence
+        )
+        try container.encodeIfPresent(
+            automaticEvidence,
+            forKey: .automaticEvidence
         )
     }
 }

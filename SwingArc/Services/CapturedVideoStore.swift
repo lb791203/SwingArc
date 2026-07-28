@@ -6,8 +6,116 @@ enum CapturedVideoStoreError: Error, Equatable {
     case emptyFile
     case invalidDuration
     case missingVideoTrack
+    case unplayable
     case copyFailed
     case finalizeFailed
+}
+
+enum VideoAssetValidationError: Error, Equatable {
+    case invalidDuration
+    case missingVideoTrack
+    case unplayable
+}
+
+struct VideoAssetMetadata: Equatable {
+    let duration: Double
+    let videoTrackCount: Int
+}
+
+enum VideoAssetValidator {
+    static func validate(url: URL) async throws -> VideoAssetMetadata {
+        let asset = AVURLAsset(url: url)
+        let isPlayable: Bool
+        do {
+            isPlayable = try await asset.load(.isPlayable)
+        } catch {
+            throw VideoAssetValidationError.unplayable
+        }
+        guard isPlayable else {
+            throw VideoAssetValidationError.unplayable
+        }
+
+        let duration: CMTime
+        do {
+            duration = try await asset.load(.duration)
+        } catch {
+            throw VideoAssetValidationError.invalidDuration
+        }
+        let seconds = CMTimeGetSeconds(duration)
+        guard duration.isNumeric, seconds.isFinite, seconds > 0 else {
+            throw VideoAssetValidationError.invalidDuration
+        }
+
+        let videoTracks: [AVAssetTrack]
+        do {
+            videoTracks = try await asset.loadTracks(withMediaType: .video)
+        } catch {
+            throw VideoAssetValidationError.missingVideoTrack
+        }
+        guard !videoTracks.isEmpty else {
+            throw VideoAssetValidationError.missingVideoTrack
+        }
+        return VideoAssetMetadata(
+            duration: seconds,
+            videoTrackCount: videoTracks.count
+        )
+    }
+}
+
+enum ImportedVideoStoreError: Error, Equatable {
+    case emptyFile
+    case writeFailed
+    case invalidVideo
+    case finalizeFailed
+}
+
+struct ImportedVideoStore {
+    let destinationDirectory: URL
+    private let fileManager: FileManager
+
+    init(
+        destinationDirectory: URL,
+        fileManager: FileManager = .default
+    ) {
+        self.destinationDirectory = destinationDirectory
+        self.fileManager = fileManager
+    }
+
+    func persist(data: Data) async throws -> URL {
+        guard !data.isEmpty else { throw ImportedVideoStoreError.emptyFile }
+        do {
+            try fileManager.createDirectory(
+                at: destinationDirectory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            throw ImportedVideoStoreError.writeFailed
+        }
+
+        let identifier = UUID().uuidString
+        let partialURL = destinationDirectory
+            .appendingPathComponent("\(identifier).partial.mp4")
+        let finalURL = destinationDirectory
+            .appendingPathComponent("imported-\(identifier).mp4")
+        defer { try? fileManager.removeItem(at: partialURL) }
+
+        do {
+            try data.write(to: partialURL, options: .atomic)
+        } catch {
+            throw ImportedVideoStoreError.writeFailed
+        }
+        do {
+            _ = try await VideoAssetValidator.validate(url: partialURL)
+        } catch {
+            throw ImportedVideoStoreError.invalidVideo
+        }
+        do {
+            try fileManager.moveItem(at: partialURL, to: finalURL)
+        } catch {
+            throw ImportedVideoStoreError.finalizeFailed
+        }
+        return finalURL
+    }
 }
 
 /// Turns an AVFoundation-owned temporary recording into validated app media.
@@ -71,26 +179,19 @@ struct CapturedVideoStore {
             throw CapturedVideoStoreError.emptyFile
         }
 
-        let asset = AVURLAsset(url: partialURL)
-        let duration: CMTime
         do {
-            duration = try await asset.load(.duration)
+            _ = try await VideoAssetValidator.validate(url: partialURL)
+        } catch let error as VideoAssetValidationError {
+            switch error {
+            case .invalidDuration:
+                throw CapturedVideoStoreError.invalidDuration
+            case .missingVideoTrack:
+                throw CapturedVideoStoreError.missingVideoTrack
+            case .unplayable:
+                throw CapturedVideoStoreError.unplayable
+            }
         } catch {
-            throw CapturedVideoStoreError.invalidDuration
-        }
-        let seconds = CMTimeGetSeconds(duration)
-        guard duration.isNumeric, seconds.isFinite, seconds > 0 else {
-            throw CapturedVideoStoreError.invalidDuration
-        }
-
-        let videoTracks: [AVAssetTrack]
-        do {
-            videoTracks = try await asset.loadTracks(withMediaType: .video)
-        } catch {
-            throw CapturedVideoStoreError.missingVideoTrack
-        }
-        guard !videoTracks.isEmpty else {
-            throw CapturedVideoStoreError.missingVideoTrack
+            throw CapturedVideoStoreError.unplayable
         }
 
         do {

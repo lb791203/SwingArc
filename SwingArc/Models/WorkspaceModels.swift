@@ -325,6 +325,28 @@ enum StageResultState: Equatable {
     case manual
 }
 
+enum StageResultPolicy {
+    static func state(for marker: KeyframeMarker?) -> StageResultState {
+        guard let marker else { return .unresolved }
+        if marker.isLocked { return .manual }
+        return marker.automaticStatus == .confirmed ? .confirmed : .review
+    }
+}
+
+enum StageResultPresentation {
+    static func label(for state: StageResultState) -> String {
+        switch state {
+        case .confirmed, .manual: return "已识别"
+        case .review: return "待核对"
+        case .unresolved: return "未识别"
+        }
+    }
+
+    static func detailLabel(for state: StageResultState) -> String {
+        state == .manual ? "已识别（人工修正）" : label(for: state)
+    }
+}
+
 enum StageStripIndicator: String, Equatable {
     case filledCircle = "circle.fill"
     case hollowCircle = "circle"

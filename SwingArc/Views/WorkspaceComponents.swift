@@ -198,6 +198,7 @@ struct MobileReplayTimelineView: View {
             HStack(spacing: 0) {
                 ForEach(SwingStage.allCases) { stage in
                     let marker = keyframes.first { $0.stage == stage.rawValue }
+                    let resultState = StageResultPolicy.state(for: marker)
                     Button {
                         guard let marker else { return }
                         playbackManager.pause()
@@ -212,7 +213,7 @@ struct MobileReplayTimelineView: View {
 
                             SwingStagePoseGlyph(
                                 stage: stage,
-                                isResolved: marker != nil
+                                resultState: resultState
                             )
                             .frame(width: 40, height: 48)
                         }
@@ -222,10 +223,10 @@ struct MobileReplayTimelineView: View {
                     .buttonStyle(.plain)
                     .allowsHitTesting(marker != nil)
                     .accessibilityLabel(
-                        marker == nil
-                            ? "\(stage.pNumber)，\(SwingStagePoseCue.description(for: stage))，尚未识别"
-                            : "\(stage.pNumber)，\(SwingStagePoseCue.description(for: stage))，跳到该阶段"
+                        "\(stage.pNumber)，\(SwingStagePoseCue.description(for: stage))，"
+                            + StageResultPresentation.detailLabel(for: resultState)
                     )
+                    .accessibilityHint(marker == nil ? "打开人工设置" : "跳到该阶段")
                 }
             }
         }
@@ -249,13 +250,28 @@ struct MobileReplayTimelineView: View {
 /// heavier than the club so a golfer can read the movement at phone size.
 private struct SwingStagePoseGlyph: View {
     let stage: SwingStage
-    let isResolved: Bool
+    let resultState: StageResultState
 
     var body: some View {
         Canvas { context, size in
             let pose = SwingStagePoseLibrary.pose(for: stage)
-            let bodyColor = isResolved ? Color.white : Color.white.opacity(0.40)
-            let clubColor = isResolved ? Color.white.opacity(0.88) : Color.white.opacity(0.30)
+            let bodyColor: Color
+            let clubColor: Color
+            let ballColor: Color
+            switch resultState {
+            case .confirmed, .manual:
+                bodyColor = .white
+                clubColor = .white.opacity(0.88)
+                ballColor = AnalysisTheme.proTourSignal
+            case .review:
+                bodyColor = AnalysisTheme.current
+                clubColor = AnalysisTheme.current.opacity(0.82)
+                ballColor = AnalysisTheme.current
+            case .unresolved:
+                bodyColor = .white.opacity(0.40)
+                clubColor = .white.opacity(0.30)
+                ballColor = .white.opacity(0.35)
+            }
             let bodyLineWidth = max(2.25, min(size.width, size.height) * 0.065)
             let clubLineWidth = max(1.25, bodyLineWidth * 0.56)
 
@@ -312,7 +328,7 @@ private struct SwingStagePoseGlyph: View {
                 )
                 context.fill(
                     Path(ellipseIn: rect),
-                    with: .color(isResolved ? AnalysisTheme.proTourSignal : Color.white.opacity(0.35))
+                    with: .color(ballColor)
                 )
             }
         }
@@ -517,6 +533,103 @@ private enum SwingStagePoseLibrary {
                 ball: nil
             )
         }
+    }
+}
+
+struct CompactPlaybackControlsView: View {
+    @ObservedObject var playbackManager: VideoPlaybackManager
+    @Binding var interactionMode: WorkspaceInteractionMode
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Menu {
+                ForEach(PlaybackRate.allCases) { rate in
+                    Button(rate.label) {
+                        perform(.selectRate(rate.value))
+                    }
+                }
+            } label: {
+                Text(speedLabel)
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .frame(
+                        minWidth: CompactPlaybackPolicy.minimumTouchTarget,
+                        minHeight: CompactPlaybackPolicy.minimumTouchTarget
+                    )
+                    .background(.black.opacity(0.46), in: Capsule())
+            }
+            .accessibilityLabel("播放速度，当前 \(speedLabel)")
+
+            compactButton(
+                systemImage: "backward.frame.fill",
+                label: "前一帧"
+            ) {
+                perform(.previousFrame)
+            }
+
+            compactButton(
+                systemImage: playbackManager.isPlaying ? "pause.fill" : "play.fill",
+                label: playbackManager.isPlaying ? "暂停" : "播放",
+                emphasized: true
+            ) {
+                perform(.togglePlayback)
+            }
+
+            compactButton(
+                systemImage: "forward.frame.fill",
+                label: "后一帧"
+            ) {
+                perform(.nextFrame)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .foregroundStyle(.white)
+    }
+
+    private var speedLabel: String {
+        PlaybackRate.allCases.first {
+            abs($0.value - playbackManager.playbackSpeed) < 0.001
+        }?.label ?? String(format: "%.2g×", playbackManager.playbackSpeed)
+    }
+
+    private func perform(_ action: CompactPlaybackAction) {
+        CompactPlaybackInteraction.perform(
+            action,
+            isPlaying: playbackManager.isPlaying,
+            play: {
+                interactionMode = .idle
+                playbackManager.play()
+            },
+            pause: playbackManager.pause,
+            stepFrame: { playbackManager.stepFrame(forward: $0) },
+            setRate: playbackManager.setSpeed
+        )
+    }
+
+    private func compactButton(
+        systemImage: String,
+        label: String,
+        emphasized: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: emphasized ? 18 : 15, weight: .bold))
+                .frame(
+                    width: emphasized ? 50 : CompactPlaybackPolicy.minimumTouchTarget,
+                    height: emphasized ? 50 : CompactPlaybackPolicy.minimumTouchTarget
+                )
+                .background(
+                    emphasized
+                        ? AnalysisTheme.proTourSignal
+                        : .black.opacity(0.46),
+                    in: Circle()
+                )
+                .foregroundStyle(
+                    emphasized ? AnalysisTheme.proTourBackground : .white
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 }
 
@@ -883,7 +996,7 @@ struct StageInspectorView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("阶段结果")
                     .font(.headline)
-                Text("已确认 \(summary.confirmed) · 待核对 \(summary.review) · 未确定 \(summary.unresolved)")
+                Text("已识别 \(summary.confirmed) · 待核对 \(summary.review) · 未识别 \(summary.unresolved)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -961,7 +1074,7 @@ struct WorkspaceInspectorView: View {
 
 struct StageAdjustmentBar: View {
     let stage: SwingStage
-    let detection: SwingStageDetection?
+    let marker: KeyframeMarker?
     @ObservedObject var playbackManager: VideoPlaybackManager
     let onCancel: () -> Void
     let onSetCurrentFrame: () -> Void
@@ -1017,18 +1130,16 @@ struct StageAdjustmentBar: View {
     }
 
     private var confidenceLabel: String {
-        switch detection?.status {
-        case .confirmed: return "已确认"
-        case .lowConfidence: return "待核对"
-        case .unresolved, nil: return "未确定"
-        }
+        StageResultPresentation.label(
+            for: StageResultPolicy.state(for: marker)
+        )
     }
 
     private var confidenceColor: Color {
-        switch detection?.status {
-        case .confirmed: return AnalysisTheme.confirmed
-        case .lowConfidence: return AnalysisTheme.current
-        case .unresolved, nil: return .white.opacity(0.55)
+        switch StageResultPolicy.state(for: marker) {
+        case .confirmed, .manual: return AnalysisTheme.confirmed
+        case .review: return AnalysisTheme.current
+        case .unresolved: return .white.opacity(0.55)
         }
     }
 
@@ -1261,10 +1372,7 @@ private struct StageDisplayDescriptor {
     }
 
     var resultState: StageResultState {
-        if marker?.isLocked == true { return .manual }
-        if detection?.status == .lowConfidence { return .review }
-        if marker != nil { return .confirmed }
-        return .unresolved
+        StageResultPolicy.state(for: marker)
     }
 
     var stageStripColor: Color {
@@ -1287,12 +1395,7 @@ private struct StageDisplayDescriptor {
 
     var shortStatus: String {
         if isCurrent { return "当前" }
-        switch resultState {
-        case .confirmed: return "已确认"
-        case .manual: return "已锁定"
-        case .review: return "待核对"
-        case .unresolved: return "未确定"
-        }
+        return StageResultPresentation.detailLabel(for: resultState)
     }
 
     var foregroundColor: Color {
@@ -1334,13 +1437,22 @@ private struct StageDisplayDescriptor {
             "第 \(frame) 帧",
             shortStatus
         ]
+        if let confidence = detection?.confidence ?? marker.automaticConfidence {
+            parts.append("置信度 \(Int((confidence * 100).rounded()))%")
+        }
         if let detection {
-            parts.append("置信度 \(Int((detection.confidence * 100).rounded()))%")
             if stage == .takeaway || stage == .impact {
                 parts.append(detection.hasClubEvidence ? "有杆身" : "无杆身")
             }
             if stage == .impact {
                 parts.append(detection.hasBallEvidence ? "有球位" : "无球位")
+            }
+        } else if let evidence = marker.automaticEvidence {
+            if stage == .takeaway || stage == .impact {
+                parts.append(evidence.hasClubEvidence ? "有杆身" : "无杆身")
+            }
+            if stage == .impact {
+                parts.append(evidence.hasBallEvidence ? "有球位" : "无球位")
             }
         }
         return parts.joined(separator: " · ")

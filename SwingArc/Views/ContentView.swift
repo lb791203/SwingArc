@@ -21,6 +21,7 @@ struct ContentView: View {
     @State private var activeProject: LocalProjectSummary?
     @State private var currentProjectURL: URL?
     @State private var practiceCameraView: PracticeCameraView?
+    @State private var legacyFeedbackConfiguration: FeedbackConfiguration?
     @State private var saveStatus: WorkspaceSaveStatus = .idle
 
     @State private var drawings: [DrawingElement] = []
@@ -210,6 +211,7 @@ struct ContentView: View {
         activeProject = nil
         currentProjectURL = nil
         practiceCameraView = nil
+        legacyFeedbackConfiguration = nil
         stageCorrections = []
         saveStatus = .idle
         projects = LocalProjectStore.projects()
@@ -219,18 +221,18 @@ struct ContentView: View {
         pickerItem.loadTransferable(type: Data.self) { result in
             switch result {
             case .success(let data?):
-                let videoURL = LocalProjectStore.videoDirectory()
-                    .appendingPathComponent("imported-\(UUID().uuidString).mp4")
-                do {
-                    try data.write(to: videoURL, options: .atomic)
-                    DispatchQueue.main.async {
+                Task { @MainActor in
+                    isExporting = true
+                    do {
+                        let videoURL = try await ImportedVideoStore(
+                            destinationDirectory: LocalProjectStore.videoDirectory()
+                        ).persist(data: data)
                         loadVideoFromURL(videoURL, origin: .importCompleted)
-                    }
-                } catch {
-                    DispatchQueue.main.async {
+                    } catch {
                         showsSettingsAction = false
-                        statusMessage = "视频导入失败：\(error.localizedDescription)"
+                        statusMessage = "所选文件不是可播放的视频，请重新选择。"
                     }
+                    isExporting = false
                 }
             case .failure(let error):
                 DispatchQueue.main.async {
@@ -275,6 +277,7 @@ struct ContentView: View {
         drawings = []
         keyframes = []
         stageCorrections = []
+        legacyFeedbackConfiguration = nil
         isKeyframeMode = false
         showPoseSkeleton = false
         showHeadStability = false
@@ -294,6 +297,7 @@ struct ContentView: View {
             showGrid = saved.showGrid
             self.practiceCameraView = practiceView ?? saved.practiceCameraView
             stageCorrections = saved.stageCorrections
+            legacyFeedbackConfiguration = saved.legacyFeedbackConfiguration
         } else {
             self.practiceCameraView = practiceView
         }
@@ -341,7 +345,8 @@ struct ContentView: View {
                 showSpineAngle: showSpineAngle,
                 showGrid: showGrid,
                 practiceCameraView: practiceCameraView,
-                stageCorrections: stageCorrections
+                stageCorrections: stageCorrections,
+                legacyFeedbackConfiguration: legacyFeedbackConfiguration
             ),
             for: videoURL
         )

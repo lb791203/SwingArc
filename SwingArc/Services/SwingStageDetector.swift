@@ -2422,7 +2422,24 @@ struct SwingStageDetection: Equatable {
 
     var marker: KeyframeMarker? {
         guard let time, status != .unresolved else { return nil }
-        return KeyframeMarker(time: time, stage: stage, source: .automatic)
+        return KeyframeMarker(
+            time: time,
+            stage: stage,
+            source: .automatic,
+            sourceFrameIndex: sourceFrameIndex,
+            automaticStatus: status == .confirmed ? .confirmed : .lowConfidence,
+            automaticConfidence: confidence,
+            automaticEvidence: KeyframeEvidenceSnapshot(
+                sources: Set(evidence.sources.compactMap {
+                    KeyframeEvidenceSource(rawValue: $0.rawValue)
+                }),
+                detectedPointCount: evidence.detectedPointCount,
+                estimatedPointCount: evidence.estimatedPointCount,
+                hasClubEvidence: hasClubEvidence,
+                hasBallEvidence: hasBallEvidence,
+                hasBallChangeEvidence: hasBallChangeEvidence
+            )
+        )
     }
 }
 

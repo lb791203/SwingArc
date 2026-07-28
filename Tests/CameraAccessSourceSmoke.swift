@@ -66,11 +66,21 @@ struct CameraAccessSourceSmoke {
         )
         precondition(outputFailure.contains("accessState = .unavailable"))
         precondition(outputFailure.contains("session.commitConfiguration()"))
-        guard let ready = configuredSession.range(of: "accessState = .ready"),
-              let startsSession = configuredSession.range(of: "startSessionIfNeeded()") else {
-            preconditionFailure("Only a ready recording session may be started")
+        precondition(!configuredSession.contains("accessState = .ready"))
+        precondition(configuredSession.contains("startSessionIfNeeded()"))
+        let sessionStart = try section(
+            of: camera,
+            from: "private func startSessionIfNeeded()",
+            to: "func stopSession()"
+        )
+        guard let startsRunning = sessionStart.range(of: "session.startRunning()"),
+              let publishesReadiness = sessionStart.range(
+                  of: "publishRecordableReadiness()"
+              ) else {
+            preconditionFailure("Running-session readiness publication is required")
         }
-        precondition(ready.lowerBound < startsSession.lowerBound)
+        precondition(startsRunning.lowerBound < publishesReadiness.lowerBound)
+        precondition(sessionStart.contains("CameraRecordingReadiness.isRecordable"))
 
         precondition(content.contains("showsSettingsAction"))
         precondition(content.contains("MediaExportError.photoPermissionDenied"))
@@ -95,7 +105,7 @@ struct CameraAccessSourceSmoke {
         precondition(mediaAction.contains("showsSettingsAction = false"))
         precondition(mediaAction.contains("guard let asset = playbackManager.currentAsset else"))
         for unrelatedStatus in [
-            "视频导入失败：",
+            "所选文件不是可播放的视频，请重新选择。",
             "无法读取所选视频：",
             "录像已经完成，但保存失败。",
             "已有 P 点修正未能迁移，原数据仍保留。",

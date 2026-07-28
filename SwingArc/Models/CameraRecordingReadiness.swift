@@ -5,12 +5,74 @@ import Foundation
 /// Objective-C exception for that invalid transition, so it cannot be handled
 /// by Swift's `do` / `catch`.
 enum CameraRecordingReadiness {
+    static func isRecordable(
+        sessionIsRunning: Bool,
+        hasActiveVideoConnection: Bool
+    ) -> Bool {
+        sessionIsRunning && hasActiveVideoConnection
+    }
+
     static func canStart(
         sessionIsRunning: Bool,
         hasActiveVideoConnection: Bool,
         isAlreadyRecording: Bool
     ) -> Bool {
-        sessionIsRunning && hasActiveVideoConnection && !isAlreadyRecording
+        isRecordable(
+            sessionIsRunning: sessionIsRunning,
+            hasActiveVideoConnection: hasActiveVideoConnection
+        ) && !isAlreadyRecording
+    }
+}
+
+enum ManualCaptureLifecycleState: Equatable {
+    case idle
+    case starting
+    case recording
+    case failed
+}
+
+struct ManualCaptureLifecycle: Equatable {
+    private(set) var state: ManualCaptureLifecycleState = .idle
+
+    var shouldScheduleAutomaticStop: Bool {
+        state == .recording
+    }
+
+    @discardableResult
+    mutating func requestStart() -> Bool {
+        guard state == .idle || state == .failed else { return false }
+        state = .starting
+        return true
+    }
+
+    mutating func didStart() {
+        guard state == .starting else { return }
+        state = .recording
+    }
+
+    mutating func didFail() {
+        state = .failed
+    }
+
+    mutating func didFinish() {
+        state = .idle
+    }
+}
+
+enum CameraRecordingStartError: LocalizedError, Equatable {
+    case notReady
+    case rejected
+    case interrupted
+
+    var errorDescription: String? {
+        switch self {
+        case .notReady:
+            return "相机尚未准备好，请稍候后重试。"
+        case .rejected:
+            return "录像未能开始，请重试。"
+        case .interrupted:
+            return "录像被系统中断，请确认相机可用后重试。"
+        }
     }
 }
 
