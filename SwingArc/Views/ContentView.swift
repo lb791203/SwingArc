@@ -30,7 +30,6 @@ struct ContentView: View {
     @State private var showSpineAngle = false
     @State private var showGrid = false
 
-    @State private var selectedPracticeView: PracticeCameraView?
     @State private var showProjectLibrary = false
     @State private var showVideoPicker = false
     @State private var showManualCapture = false
@@ -45,10 +44,6 @@ struct ContentView: View {
     init() {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if PracticePreviewConfiguration.importPath(for: arguments) == nil,
-           let previewView = PracticePreviewConfiguration.view(for: arguments) {
-            _selectedPracticeView = State(initialValue: previewView)
-        }
         if PracticePreviewConfiguration.showsLibrary(for: arguments) {
             _showProjectLibrary = State(initialValue: true)
         }
@@ -95,7 +90,6 @@ struct ContentView: View {
                 )
             } else {
                 PracticeHomeView(
-                    onStartPractice: { selectedPracticeView = $0 },
                     onManualCapture: { showManualCapture = true },
                     onImport: { showVideoPicker = true },
                     onOpenLibrary: { showProjectLibrary = true }
@@ -133,23 +127,6 @@ struct ContentView: View {
         .onChange(of: showSpineAngle) { _, _ in persistCurrentProject() }
         .onChange(of: showGrid) { _, _ in persistCurrentProject() }
         .onChange(of: practiceCameraView) { _, _ in persistCurrentProject() }
-        .fullScreenCover(item: $selectedPracticeView) { practiceView in
-            PracticeSessionView(
-                view: practiceView,
-                onClose: {
-                    selectedPracticeView = nil
-                    projects = LocalProjectStore.projects()
-                },
-                onOpenLastClip: { clipURL in
-                    selectedPracticeView = nil
-                    loadVideoFromURL(
-                        clipURL,
-                        practiceView: practiceView,
-                        origin: .capturedClipSaved
-                    )
-                }
-            )
-        }
         .fullScreenCover(isPresented: $showManualCapture) {
             CameraView { temporaryURL in
                 persistCapturedVideo(temporaryURL)

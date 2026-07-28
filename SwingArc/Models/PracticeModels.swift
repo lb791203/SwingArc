@@ -10,7 +10,8 @@ enum PracticeHomeAction: Equatable {
 
 enum PracticeHomePresentation {
     static let modeOrder: [PracticeHomeAction] = [
-        .downTheLine, .faceOn, .manualCapture, .importVideo
+        .manualCapture,
+        .importVideo
     ]
     static let secondaryActions: [PracticeHomeAction] = []
 }

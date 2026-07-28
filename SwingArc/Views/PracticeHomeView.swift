@@ -4,7 +4,6 @@ import SwiftUI
 /// library: when the phone is on a tripod, the golfer should only have to
 /// recognise an angle and make one large tap.
 struct PracticeHomeView: View {
-    let onStartPractice: (PracticeCameraView) -> Void
     let onManualCapture: () -> Void
     let onImport: () -> Void
     let onOpenLibrary: () -> Void
@@ -22,13 +21,13 @@ struct PracticeHomeView: View {
                         header
                             .padding(.top, metrics.headerTopPadding)
 
-                        Text("TRAINING MODE")
+                        Text("SWING ANALYSIS")
                             .font(.system(size: 13, weight: .bold, design: .monospaced))
                             .tracking(1.8)
                             .foregroundStyle(AnalysisTheme.proTourSignal)
                             .padding(.top, metrics.trainingTopPadding)
 
-                        Text("选择机位")
+                        Text("挥杆视频分析")
                             .font(
                                 .system(
                                     size: metrics.mainTitleSize,
@@ -39,7 +38,7 @@ struct PracticeHomeView: View {
                             .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                             .padding(.top, 6)
 
-                        Text("单机位自动练习 · 架好手机后再开始")
+                        Text("录制或导入视频，开始 P1–P8 识别与画线")
                             .font(.system(size: metrics.cardDetailSize + 2, weight: .medium))
                             .foregroundStyle(AnalysisTheme.proTourSecondaryText)
                             .padding(.top, 4)
@@ -99,51 +98,29 @@ struct PracticeHomeView: View {
         metrics: PracticeHomeMetrics
     ) -> some View {
         switch action {
-        case .downTheLine:
-            PracticeModeSelector(
-                index: "01",
-                eyebrow: "DOWN THE LINE",
-                title: "正后方 · DTL",
-                detail: "下杆路径 · 脊柱稳定",
-                systemImage: "figure.golf",
-                surfaceOpacity: 0.85,
-                metrics: metrics,
-                action: { onStartPractice(.downTheLine) }
-            )
-        case .faceOn:
-            PracticeModeSelector(
-                index: "02",
-                eyebrow: "FACE-ON",
-                title: "正面 · FACE-ON",
-                detail: "送杆动作 · 重心移动",
-                systemImage: "viewfinder",
-                surfaceOpacity: 0.70,
-                metrics: metrics,
-                action: { onStartPractice(.faceOn) }
-            )
-        case .importVideo:
-            PracticeModeSelector(
-                index: "04",
-                eyebrow: "IMPORT VIDEO",
-                title: "导入视频",
-                detail: "从相册选择 · 自动 AI 分析",
-                systemImage: "photo.on.rectangle",
-                surfaceOpacity: 0.40,
-                metrics: metrics,
-                action: onImport
-            )
         case .manualCapture:
             PracticeModeSelector(
-                index: "03",
+                index: "01",
                 eyebrow: "MANUAL CAPTURE",
                 title: "手动录像",
                 detail: "点击即录 · 最长 15 秒",
                 systemImage: "record.circle",
-                surfaceOpacity: 0.55,
+                surfaceOpacity: 0.70,
                 metrics: metrics,
                 action: onManualCapture
             )
-        case .history:
+        case .importVideo:
+            PracticeModeSelector(
+                index: "02",
+                eyebrow: "IMPORT VIDEO",
+                title: "导入视频",
+                detail: "从相册选择 · 自动定位 P1–P8",
+                systemImage: "photo.on.rectangle",
+                surfaceOpacity: 0.50,
+                metrics: metrics,
+                action: onImport
+            )
+        case .downTheLine, .faceOn, .history:
             EmptyView()
         }
     }
@@ -261,7 +238,7 @@ private struct PracticeModeSelector: View {
             )
         }
         .buttonStyle(ProTourPressStyle())
-        .accessibilityLabel("开始\(title)练习")
+        .accessibilityLabel(title)
     }
 
     private var modeAccent: Color {
