@@ -60,8 +60,7 @@ with shapes `[3, 512, 512]`, `[5, 128, 128]`, `[5]`, and `[5]`.
 python3 -m venv .venv-golf-keypoints
 .venv-golf-keypoints/bin/python -m pip install -r Training/golf_keypoints/requirements-lock.txt
 .venv-golf-keypoints/bin/pytest \
-  Training/golf_keypoints/test_dataset_heatmaps.py \
-  Training/golf_keypoints/test_contract.py -q
+  Training/golf_keypoints -q
 ```
 
 ## Load a frozen export
@@ -77,8 +76,43 @@ dataset = GolfHeatmapDataset(
 )
 ```
 
-## Legacy train and evaluate commands
+## Train a development checkpoint
 
-`train.py`, `evaluate.py`, and Core ML export still implement the legacy
-coordinate-regression stages. Tasks 2–5 replace those stages; do not use them
-with the new five-value dataset item until that work is complete.
+`train.py` consumes the five-value heatmap dataset item and requires the
+out-of-band expected manifest SHA-256:
+
+```bash
+.venv-golf-keypoints/bin/python Training/golf_keypoints/train.py \
+  --manifest /path/to/frozen-export/manifest.json \
+  --expected-manifest-sha256 "<64 lowercase hex characters>" \
+  --video-root /path/to/immutable-media \
+  --output /path/to/development-candidate.pt \
+  --epochs 20 \
+  --batch-size 8 \
+  --learning-rate 0.0001 \
+  --seed 1729
+```
+
+Training automatically computes inverse-frequency three-class visibility
+weights from the complete training split and refuses a split with zero examples
+for any class. Heatmap supervision balances foreground and background per
+visible landmark; unresolved points have no coordinate or visibility gradient.
+Every non-finite loss, gradient, or updated parameter fails immediately with
+the clip, source-frame, and P-stage identities for the affected batch.
+
+The checkpoint is a development training artifact, not a promoted production
+package. It stores model weights and audit metadata, but no optimizer state;
+`resumeSupported` is therefore false. `--max-steps` is only a smoke-test limit
+and is recorded distinctly from requested and completed epochs. A completed
+epoch means the DataLoader was fully exhausted: a mid-epoch limit records
+`partialEpoch=true` and `partialEpochSteps`, while `epochRecords` includes the
+partial history record without inflating `completedEpochs`.
+
+CPU training enables PyTorch deterministic algorithms. MPS is selected when
+available and records `determinismMode=seeded-best-effort`: with PyTorch 2.13,
+short runs using the same seed reproduced locally, but the complete MPS graph
+does not support a strict deterministic-algorithms claim.
+
+`evaluate.py` and `export_coreml.py` still implement legacy coordinate-model
+stages. Do not use them with this heatmap checkpoint until Tasks 4 and 5 migrate
+those commands.

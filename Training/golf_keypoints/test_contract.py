@@ -10,9 +10,9 @@ from contracts import (
 from dataset import GolfHeatmapDataset, ReviewedTrainingLabelsRequired
 from evaluate import build_evaluation_report, promotion_passed
 from export_coreml import assert_report_passes, file_sha256
+from losses import golf_keypoint_loss
 from model import GolfHeatmapNet
 from test_dataset_heatmaps import _write_export
-from train import masked_keypoint_loss
 
 
 def test_output_contract():
@@ -62,14 +62,31 @@ def test_dataset_requires_authorized_reviewed_labels(tmp_path):
     assert metadata["manifest_sha256"] == manifest_sha
 
 
-def test_masked_coordinate_loss_ignores_hidden_points():
-    predicted = torch.tensor([[[0.2, 0.2], [0.9, 0.9]]])
-    target = torch.tensor([[[0.1, 0.1], [0.0, 0.0]]])
-    visibility = torch.tensor([[1.0, 0.0]])
-    visibility_logits = torch.zeros(1, 2)
-    first = masked_keypoint_loss(predicted, visibility_logits, target, visibility)
-    predicted[:, 1, :] = 0.1
-    second = masked_keypoint_loss(predicted, visibility_logits, target, visibility)
+def test_masked_heatmap_loss_ignores_hidden_points():
+    predicted = torch.zeros(1, len(LANDMARK_NAMES), 2, 2)
+    predicted[:, 0] = 0.2
+    predicted[:, 1] = 0.9
+    target = torch.zeros_like(predicted)
+    coordinate_mask = torch.tensor([[1, 0, 0, 0, 0]], dtype=torch.bool)
+    visibility_targets = torch.tensor([[0, 1, -100, -100, -100]])
+    visibility_logits = torch.zeros(
+        1, len(LANDMARK_NAMES), len(VISIBILITY_NAMES)
+    )
+    first = golf_keypoint_loss(
+        predicted,
+        visibility_logits,
+        target,
+        visibility_targets,
+        coordinate_mask,
+    )["total"]
+    predicted[:, 1] = 0.1
+    second = golf_keypoint_loss(
+        predicted,
+        visibility_logits,
+        target,
+        visibility_targets,
+        coordinate_mask,
+    )["total"]
     assert torch.allclose(first, second)
 
 
