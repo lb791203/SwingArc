@@ -119,22 +119,39 @@ end
 
 def forbidden_claim(clause)
   [[CHINESE_CLAIMS, :chinese], [ENGLISH_CLAIMS, :english]].each do |pattern, language|
+    previous_match = nil
+    previous_negated = false
     clause.to_enum(:scan, pattern).each do
       match = Regexp.last_match
-      negated = language == :chinese ? chinese_negated?(clause, match.begin(0), match.end(0)) : english_negated?(clause, match.begin(0), match.end(0))
+      directly_negated = language == :chinese ? chinese_negated?(clause, match.begin(0), match.end(0)) : english_negated?(clause, match.begin(0), match.end(0))
+      between = previous_match ? clause[previous_match.end(0)...match.begin(0)] : ""
+      coordinated = language == :chinese ? between.match?(/\A\s*[或和及、]\s*\z/) : between.match?(/\A\s*(?:or|and)\s*\z/i)
+      negated = directly_negated || (previous_negated && coordinated)
       return match[0] unless negated
+      previous_match = match
+      previous_negated = negated
     end
   end
   nil
 end
 
+def scanner_rejects?(text)
+  clauses(text).any? { |clause| forbidden_claim(clause) || clause.match?(ACCURACY_CLAIMS) }
+end
+
 fixtures = {
   'No login is needed. Coaching is included.' => true,
   'SwingArc 不提供自动练习。' => false,
-  'SwingArc never offers coaching.' => false
+  'SwingArc never offers coaching.' => false,
+  'SwingArc 不提供自动练习或技术评分。' => false,
+  'SwingArc offers no coaching or scoring.' => false,
+  'No coaching or scoring is included.' => false,
+  'SwingArc offers coaching and scoring.' => true,
+  'Analysis accuracy is 99%.' => true,
+  'Version 1.0, effective July 28, 2026.' => false
 }
 fixtures.each do |text, should_reject|
-  rejected = clauses(text).any? { |clause| forbidden_claim(clause) }
+  rejected = scanner_rejects?(text)
   abort "Claim-scanner fixture failed for: #{text}" unless rejected == should_reject
 end
 
