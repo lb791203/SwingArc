@@ -7,6 +7,7 @@ import UIKit
 struct CameraView: View {
     @Environment(\.presentationMode) var presentationMode
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     let onRecordCompleted: (URL) -> Void
 
     @State private var isRecording = false
@@ -93,6 +94,11 @@ struct CameraView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             cameraState.setupSession()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                cameraState.setupSession()
+            }
         }
         .onDisappear {
             pendingAutomaticStop?.cancel()
@@ -291,7 +297,7 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
     func setupSession() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
-            accessState = .ready
+            accessState = .checking
             configureSessionIfNeeded()
         case .notDetermined:
             accessState = .checking
@@ -299,22 +305,34 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
                 DispatchQueue.main.async {
                     guard let self else { return }
                     if granted {
-                        self.accessState = .ready
+                        self.accessState = .checking
                         self.configureSessionIfNeeded()
                     } else {
                         self.accessState = .denied
+                        self.stopSession()
                     }
                 }
             }
         case .denied, .restricted:
             accessState = .denied
+            stopSession()
         @unknown default:
             accessState = .unavailable
+            stopSession()
         }
     }
 
     private func configureSessionIfNeeded() {
-        guard session.inputs.isEmpty else { return }
+        guard session.inputs.isEmpty else {
+            guard activeVideoInput != nil,
+                  session.outputs.contains(where: { $0 === movieOutput }) else {
+                accessState = .unavailable
+                return
+            }
+            accessState = .ready
+            startSessionIfNeeded()
+            return
+        }
 
         session.beginConfiguration()
         session.sessionPreset = .high
@@ -331,23 +349,36 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
 
         do {
             let input = try AVCaptureDeviceInput(device: camera)
-            if session.canAddInput(input) {
-                session.addInput(input)
-                activeVideoInput = input
+            guard session.canAddInput(input) else {
+                session.commitConfiguration()
+                accessState = .unavailable
+                return
             }
+            session.addInput(input)
+            activeVideoInput = input
             configureHighFrameRate(for: camera)
-            if session.canAddOutput(movieOutput) {
-                session.addOutput(movieOutput)
+            guard session.canAddOutput(movieOutput) else {
+                session.removeInput(input)
+                activeVideoInput = nil
+                session.commitConfiguration()
+                accessState = .unavailable
+                return
             }
+            session.addOutput(movieOutput)
             configureVisualOutput()
             session.commitConfiguration()
-            sessionQueue.async { [weak self] in
-                guard let self, !self.session.isRunning else { return }
-                self.session.startRunning()
-            }
+            accessState = .ready
+            startSessionIfNeeded()
         } catch {
             session.commitConfiguration()
             accessState = .unavailable
+        }
+    }
+
+    private func startSessionIfNeeded() {
+        sessionQueue.async { [weak self] in
+            guard let self, !self.session.isRunning else { return }
+            self.session.startRunning()
         }
     }
     
