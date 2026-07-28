@@ -31,6 +31,7 @@ struct ContentView: View {
     @State private var showGrid = false
 
     @State private var showProjectLibrary = false
+    @State private var showAboutPrivacy = false
     @State private var showVideoPicker = false
     @State private var showManualCapture = false
     @State private var showPPointCorrection = false
@@ -92,7 +93,8 @@ struct ContentView: View {
                 PracticeHomeView(
                     onManualCapture: { showManualCapture = true },
                     onImport: { showVideoPicker = true },
-                    onOpenLibrary: { showProjectLibrary = true }
+                    onOpenLibrary: { showProjectLibrary = true },
+                    onOpenAbout: { showAboutPrivacy = true }
                 )
             }
         }
@@ -149,6 +151,9 @@ struct ContentView: View {
         }
         .sheet(item: $sharePayload) { payload in
             ShareSheet(items: [payload.url])
+        }
+        .sheet(isPresented: $showAboutPrivacy) {
+            AboutPrivacyView()
         }
         .confirmationDialog("导出", isPresented: $showExportActions, titleVisibility: .visible) {
             Button("保存当前标注帧") { performMediaAction(.save, kind: .frame) }

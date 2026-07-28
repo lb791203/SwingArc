@@ -7,6 +7,7 @@ struct PracticeHomeView: View {
     let onManualCapture: () -> Void
     let onImport: () -> Void
     let onOpenLibrary: () -> Void
+    let onOpenAbout: () -> Void
 
     var body: some View {
         NavigationStack {
@@ -89,6 +90,15 @@ struct PracticeHomeView: View {
             .buttonStyle(.plain)
             .frame(minWidth: 44, minHeight: 44)
             .accessibilityLabel("打开挥杆记录")
+
+            Button(action: onOpenAbout) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 17, weight: .bold))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+            .accessibilityLabel("关于与隐私")
         }
     }
 
