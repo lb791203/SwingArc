@@ -1,10 +1,12 @@
 import SwiftUI
 import AVFoundation
 import Combine
+import UIKit
 
 /// 摄像头录制回调
 struct CameraView: View {
     @Environment(\.presentationMode) var presentationMode
+    @Environment(\.openURL) private var openURL
     let onRecordCompleted: (URL) -> Void
 
     @State private var isRecording = false
@@ -30,6 +32,51 @@ struct CameraView: View {
             )
             .ignoresSafeArea()
             .allowsHitTesting(false)
+
+            if cameraState.accessState != .ready {
+                Color.black.opacity(0.72).ignoresSafeArea()
+                VStack(spacing: 16) {
+                    if cameraState.accessState == .checking {
+                        ProgressView()
+                            .tint(AnalysisTheme.proTourSignal)
+                    } else {
+                        Image(systemName: "camera.fill")
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundStyle(AnalysisTheme.proTourSignal)
+                    }
+
+                    Text(CameraAccessPresentation.title(for: cameraState.accessState))
+                        .font(.title2.bold())
+                        .accessibilityLabel(
+                            cameraState.accessState == .denied
+                                ? "需要相机权限"
+                                : CameraAccessPresentation.title(for: cameraState.accessState)
+                        )
+
+                    Text(CameraAccessPresentation.detail(for: cameraState.accessState))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+
+                    if cameraState.accessState == .denied {
+                        Button("打开设置") {
+                            guard let url = URL(
+                                string: UIApplication.openSettingsURLString
+                            ) else { return }
+                            openURL(url)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AnalysisTheme.proTourSignal)
+                    }
+                }
+                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                .padding(28)
+                .background(
+                    AnalysisTheme.proTourSurface,
+                    in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+                )
+                .padding(24)
+                .zIndex(10)
+            }
 
             captureGuide
 
@@ -190,9 +237,13 @@ struct CameraView: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(!CameraAccessPresentation.canRecord(cameraState.accessState))
     }
     
     private func startRecording() {
+        guard CameraAccessPresentation.canRecord(cameraState.accessState) else {
+            return
+        }
         isRecording = true
         cameraState.startRecording()
 
@@ -219,6 +270,7 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
     @Published var session = AVCaptureSession()
     @Published var recordedVideoURL: URL? = nil
     @Published private(set) var captureFrameRate: Double = 30
+    @Published private(set) var accessState: CameraAccessState = .checking
     
     private var movieOutput = AVCaptureMovieFileOutput()
     private var activeVideoInput: AVCaptureDeviceInput?
@@ -237,46 +289,65 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
     private var discardsNextRecording = false
     
     func setupSession() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            accessState = .ready
+            configureSessionIfNeeded()
+        case .notDetermined:
+            accessState = .checking
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if granted {
+                        self.accessState = .ready
+                        self.configureSessionIfNeeded()
+                    } else {
+                        self.accessState = .denied
+                    }
+                }
+            }
+        case .denied, .restricted:
+            accessState = .denied
+        @unknown default:
+            accessState = .unavailable
+        }
+    }
+
+    private func configureSessionIfNeeded() {
         guard session.inputs.isEmpty else { return }
-        
+
         session.beginConfiguration()
-        
-        // 预设高分辨率视频输入
         session.sessionPreset = .high
-        
-        // 默认获取后置广角镜头
-        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-            print("Failed to get back camera")
+
+        guard let camera = AVCaptureDevice.default(
+            .builtInWideAngleCamera,
+            for: .video,
+            position: .back
+        ) else {
             session.commitConfiguration()
+            accessState = .unavailable
             return
         }
-        
+
         do {
             let input = try AVCaptureDeviceInput(device: camera)
             if session.canAddInput(input) {
                 session.addInput(input)
                 activeVideoInput = input
             }
-            
-            // 尝试配置 120 FPS 高帧率
             configureHighFrameRate(for: camera)
-            
             if session.canAddOutput(movieOutput) {
                 session.addOutput(movieOutput)
             }
             configureVisualOutput()
-            
             session.commitConfiguration()
-            
-            // Session startup and recording requests share one queue. FIFO
-            // ordering prevents a fast tap from racing `startRunning()`.
             sessionQueue.async { [weak self] in
                 guard let self, !self.session.isRunning else { return }
                 self.session.startRunning()
             }
         } catch {
-            print("Camera session setup error: \(error)")
             session.commitConfiguration()
+            accessState = .unavailable
         }
     }
     

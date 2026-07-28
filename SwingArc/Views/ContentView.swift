@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import Foundation
+import UIKit
 
 private enum MediaAction {
     case save
@@ -13,6 +14,7 @@ private struct SharePayload: Identifiable {
 }
 
 struct ContentView: View {
+    @Environment(\.openURL) private var openURL
     @StateObject private var playbackManager = VideoPlaybackManager()
 
     @State private var projects = LocalProjectStore.projects()
@@ -40,6 +42,7 @@ struct ContentView: View {
     @State private var sharePayload: SharePayload?
     @State private var isExporting = false
     @State private var statusMessage: String?
+    @State private var showsSettingsAction = false
     @State private var didLoadPreviewImport = false
 
     init() {
@@ -159,9 +162,24 @@ struct ContentView: View {
         }
         .alert("SwingArc", isPresented: Binding(
             get: { statusMessage != nil },
-            set: { if !$0 { statusMessage = nil } }
+            set: {
+                if !$0 {
+                    statusMessage = nil
+                    showsSettingsAction = false
+                }
+            }
         )) {
-            Button("好", role: .cancel) {}
+            if showsSettingsAction {
+                Button("打开设置") {
+                    guard let url = URL(
+                        string: UIApplication.openSettingsURLString
+                    ) else { return }
+                    openURL(url)
+                }
+            }
+            Button("好", role: .cancel) {
+                showsSettingsAction = false
+            }
         } message: {
             Text(statusMessage ?? "")
         }
@@ -210,11 +228,13 @@ struct ContentView: View {
                     }
                 } catch {
                     DispatchQueue.main.async {
+                        showsSettingsAction = false
                         statusMessage = "视频导入失败：\(error.localizedDescription)"
                     }
                 }
             case .failure(let error):
                 DispatchQueue.main.async {
+                    showsSettingsAction = false
                     statusMessage = "无法读取所选视频：\(error.localizedDescription)"
                 }
             default:
@@ -237,6 +257,7 @@ struct ContentView: View {
                 showManualCapture = false
                 loadVideoFromURL(clip.url, origin: .capturedClipSaved)
             } catch {
+                showsSettingsAction = false
                 statusMessage = "录像已经完成，但保存失败。请检查本机储存空间后重试。"
             }
             isExporting = false
@@ -400,6 +421,7 @@ struct ContentView: View {
                 )
             } catch {
                 guard currentProjectURL == videoURL else { return }
+                showsSettingsAction = false
                 statusMessage = "已有 P 点修正未能迁移，原数据仍保留。"
             }
         }
@@ -506,6 +528,7 @@ struct ContentView: View {
 
     private func performMediaAction(_ action: MediaAction, kind: MediaExportKind) {
         guard let asset = playbackManager.currentAsset else {
+            showsSettingsAction = false
             statusMessage = "没有可导出的视频。"
             return
         }
@@ -527,11 +550,17 @@ struct ContentView: View {
                 switch action {
                 case .save:
                     try await MediaExportService.saveToPhotoLibrary(exportURL, kind: kind)
+                    showsSettingsAction = false
                     statusMessage = kind == .frame ? "当前帧已保存到相册。" : "标注视频已保存到相册。"
                 case .share:
                     sharePayload = SharePayload(url: exportURL)
                 }
             } catch {
+                if case MediaExportError.photoPermissionDenied = error {
+                    showsSettingsAction = true
+                } else {
+                    showsSettingsAction = false
+                }
                 statusMessage = error.localizedDescription
             }
             isExporting = false
