@@ -113,6 +113,63 @@ available and records `determinismMode=seeded-best-effort`: with PyTorch 2.13,
 short runs using the same seed reproduced locally, but the complete MPS graph
 does not support a strict deterministic-algorithms claim.
 
-`evaluate.py` and `export_coreml.py` still implement legacy coordinate-model
-stages. Do not use them with this heatmap checkpoint until Tasks 4 and 5 migrate
-those commands.
+## Evaluate a development checkpoint
+
+`evaluate.py` accepts only a provenance-matched `GolfHeatmapNet` checkpoint and
+the same immutable manifest used for training:
+
+```bash
+.venv-golf-keypoints/bin/python Training/golf_keypoints/evaluate.py \
+  --checkpoint /path/to/development-candidate.pt \
+  --manifest /path/to/frozen-export/manifest.json \
+  --expected-manifest-sha256 "<64 lowercase hex characters>" \
+  --video-root /path/to/immutable-media \
+  --split validation \
+  --output /path/to/validation-report.json
+```
+
+The command verifies the checkpoint architecture, manifest, input-transform,
+landmark and visibility orders, and input/output shapes before scoring. Heatmaps
+are decoded on the 512-square canvas, then each point is transformed back to
+oriented source-normalized and source-pixel coordinates. Location error is
+source-pixel Euclidean distance divided by the oriented-frame diagonal.
+
+Every DTL/Face-on × landmark row is gated independently: hit rate at 0.02,
+median/P90 error at 0.01/0.02, visible recall at 0.95, false-visible rate at
+0.05, and longest visibility gap at two frames. Source-pixel median/P90 errors
+are reported alongside diagonal-normalized errors. A decoded point is checked
+against the closed aspect-fit content rectangle (maximum numerical tolerance
+`1e-9`) before inversion. A black-padding prediction is never clamped or
+converted to a source coordinate: it makes the hit false, nulls aggregate
+location-error percentiles, and adds explicit padding failures.
+
+Longest gap is available only for samples whose `queueReasons` contain
+`validation-dense`. Every declared dense clip must contain at least three
+source frames with unique, consecutive `sourceFrameIndex` values. A miss is a
+true-visible frame whose prediction is invisible, in padding, or beyond the
+0.02 hit threshold; a true-non-visible frame and a clip boundary reset the
+run. Sparse P1–P8 observations never masquerade as a multi-frame gap. Missing
+or non-contiguous dense coverage writes `longestVisibleGap: null`,
+`denseGapSufficient: false`, and blocks promotion.
+
+A landmark row needs at least 30
+true-visible and 10 true-non-visible samples. Below either count all six derived
+metrics are written as JSON `null`, `sufficientSamples` is false, and aggregate
+performance cannot rescue the gate. P6 and P8 shaft angles are computed in
+source-pixel geometry only when both true endpoints and both predicted
+endpoints are visible; circular median/P90 limits are 3°/7°. The denominator is
+every true-double-visible P6/P8 frame, independently by view/stage. Each row
+needs 30 eligible frames and 95% predicted-double-visible coverage. Padding or
+zero-length shaft vectors are invalid geometry, never successful abstentions.
+
+The report binds checkpoint and manifest SHA-256 values, split, architecture,
+input transform, decoder, sample/view counts, and one structured row for every
+failed threshold. Split identity is part of the pure report: only
+`split: validation` can set `developmentPromotionPassed` true, so a training
+report cannot be promoted by a caller rewriting the final boolean. The current
+two-golfer 48/16 development split is expected to
+report insufficient samples (including no Face-on validation clips); that is a
+pipeline result, not a promoted accuracy claim.
+
+`export_coreml.py` remains a legacy Task 5 surface. Do not use it with this
+heatmap checkpoint until its separate Core ML parity migration is complete.

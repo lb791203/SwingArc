@@ -8,7 +8,7 @@ from contracts import (
     VISIBILITY_NAMES,
 )
 from dataset import GolfHeatmapDataset, ReviewedTrainingLabelsRequired
-from evaluate import build_evaluation_report, promotion_passed
+from evaluate import promotion_passed
 from export_coreml import assert_report_passes, file_sha256
 from losses import golf_keypoint_loss
 from model import GolfHeatmapNet
@@ -90,17 +90,22 @@ def test_masked_heatmap_loss_ignores_hidden_points():
     assert torch.allclose(first, second)
 
 
-def test_evaluation_and_promotion_gate():
-    predicted = torch.zeros(2, 5, 2)
-    target = torch.zeros(2, 5, 2)
-    visibility = torch.ones(2, 5)
-    report = build_evaluation_report(predicted, target, visibility)
-    assert report["landmarks"]["clubhead"]["visibleFrameHitRate"] == 1.0
-    assert report["landmarks"]["clubhead"]["diagonalNormalizedError"] == 0.0
-    assert promotion_passed(report)
-
-    report["landmarks"]["clubhead"]["visibleFrameHitRate"] = 0.89
+def test_legacy_clubhead_only_report_cannot_pass_complete_gate():
+    report = {
+        "landmarks": {
+            "clubhead": {
+                "visibleFrameHitRate": 1.0,
+                "diagonalNormalizedError": 0.0,
+            }
+        }
+    }
     assert not promotion_passed(report)
+    report.update({
+        "split": "validation",
+        "developmentPromotionPassed": True,
+        "failedThresholds": [],
+    })
+    assert promotion_passed(report)
 
 
 def test_export_requires_matching_manifest_hash(tmp_path):
@@ -112,6 +117,8 @@ def test_export_requires_matching_manifest_hash(tmp_path):
             "checkpointSHA256": file_sha256(checkpoint),
             "manifestSHA256": "manifest-b",
             "split": "validation",
+            "developmentPromotionPassed": True,
+            "failedThresholds": [],
             "landmarks": {
                 "clubhead": {
                     "visibleFrameHitRate": 0.95,
