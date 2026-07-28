@@ -539,7 +539,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
 				INFOPLIST_KEY_NSCameraUsageDescription = "SwingArc 需要使用相机录制您的高尔夫挥杆，并在设备本地进行动作分析。";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "SwingArc 需要将您主动导出的标注挥杆视频保存到照片图库。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "SwingArc 需要将您主动导出的标注图片和视频保存到照片图库。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "SwingArc 需要让您从照片图库选择挥杆视频进行本地分析。";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -588,7 +588,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
 				INFOPLIST_KEY_NSCameraUsageDescription = "SwingArc 需要使用相机录制您的高尔夫挥杆，并在设备本地进行动作分析。";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "SwingArc 需要将您主动导出的标注挥杆视频保存到照片图库。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "SwingArc 需要将您主动导出的标注图片和视频保存到照片图库。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "SwingArc 需要让您从照片图库选择挥杆视频进行本地分析。";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
