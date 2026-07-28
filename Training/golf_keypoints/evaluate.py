@@ -1,12 +1,15 @@
 import argparse
 import hashlib
 import json
+import os
 import re
+import tempfile
 from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader, default_collate
 
+from artifact_hashes import model_state_sha256
 from contracts import (
     HEATMAP_SIZE,
     IGNORE_VISIBILITY,
@@ -68,6 +71,33 @@ def build_argument_parser():
 
 def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def write_evaluation_report(report, output_path):
+    """Atomically replace the mutable evaluation-report snapshot."""
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output.parent,
+            prefix=f".{output.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(
+                json.dumps(report, indent=2, sort_keys=True) + "\n"
+            )
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, output)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def _target_canvas_point(metadata, landmark_name):
@@ -821,7 +851,7 @@ def main(argv=None):
         checkpoint = torch.load(
             args.checkpoint,
             map_location="cpu",
-            weights_only=False,
+            weights_only=True,
         )
         validate_checkpoint_contract(checkpoint, expected_hash)
         model = GolfHeatmapNet(pretrained=False)
@@ -833,6 +863,7 @@ def main(argv=None):
         )
         report.update({
             "checkpointSHA256": sha256(args.checkpoint),
+            "modelSHA256": model_state_sha256(checkpoint["model"]),
             "manifestSHA256": current_manifest_hash,
             "architecture": checkpoint["architecture"],
             "inputTransformVersion": checkpoint[
@@ -842,22 +873,19 @@ def main(argv=None):
             "visibilityClasses": checkpoint["visibilityClasses"],
             "modelOutput": {
                 "heatmaps": [
+                    1,
                     len(LANDMARK_NAMES),
                     HEATMAP_SIZE,
                     HEATMAP_SIZE,
                 ],
                 "visibilityLogits": [
+                    1,
                     len(LANDMARK_NAMES),
                     len(VISIBILITY_NAMES),
                 ],
             },
         })
-        output = Path(args.output)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(
-            json.dumps(report, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        write_evaluation_report(report, args.output)
     except (
         ReviewedTrainingLabelsRequired,
         OSError,

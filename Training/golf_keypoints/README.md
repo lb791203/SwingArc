@@ -162,7 +162,8 @@ every true-double-visible P6/P8 frame, independently by view/stage. Each row
 needs 30 eligible frames and 95% predicted-double-visible coverage. Padding or
 zero-length shaft vectors are invalid geometry, never successful abstentions.
 
-The report binds checkpoint and manifest SHA-256 values, split, architecture,
+The report binds checkpoint, stable tensor-state model, and manifest SHA-256
+values, split, architecture,
 input transform, decoder, sample/view counts, and one structured row for every
 failed threshold. Split identity is part of the pure report: only
 `split: validation` can set `developmentPromotionPassed` true, so a training
@@ -171,5 +172,63 @@ two-golfer 48/16 development split is expected to
 report insufficient samples (including no Face-on validation clips); that is a
 pipeline result, not a promoted accuracy claim.
 
-`export_coreml.py` remains a legacy Task 5 surface. Do not use it with this
-heatmap checkpoint until its separate Core ML parity migration is complete.
+## Export a development Core ML package
+
+`export_coreml.py` converts only a fully gated development checkpoint. It
+reloads the checkpoint with `torch.load(..., weights_only=True)` and independently
+recomputes every DTL/Face-on × five-landmark gate and every P6/P8 shaft gate.
+It does not trust `developmentPromotionPassed` by itself. The evaluation must
+bind the exact checkpoint, model-state, manifest, architecture, input
+transform, landmark/visibility order, and output sizes by SHA-256 and contract
+fields.
+
+```bash
+.venv-golf-keypoints/bin/python Training/golf_keypoints/export_coreml.py \
+  --checkpoint /path/to/development-candidate.pt \
+  --evaluation /path/to/validation-report.json \
+  --manifest /path/to/frozen-export/manifest.json \
+  --expected-manifest-sha256 "<64 lowercase hex characters>" \
+  --video-root /path/to/immutable-media \
+  --output /path/to/GolfKeypoints.export
+```
+
+Conversion traces the static `GolfHeatmapNet` contract at
+`[1, 3, 512, 512]`, uses an RGB Core ML image input with scale `1/255`, and
+emits named `heatmaps [1, 5, 128, 128]` and
+`visibility [1, 5, 3]` outputs as an iOS 17 `mlprogram`.
+
+`--output` is one new, non-existing export bundle directory. Its fixed contents
+are `GolfKeypoints.mlpackage`, `coreml-parity.json`, `export-manifest.json`, and
+`_SUCCESS`; callers cannot publish the package and sidecar to unrelated paths.
+The exporter refuses to begin conversion if the bundle path already exists.
+It first saves the converted package inside a hidden same-parent staging
+directory, reloads that saved package with
+`coremltools`, and only then runs predictions on fixed validation samples in
+immutable dataset order: at least ten DTL and ten Face-on frames. PyTorch and
+Core ML both
+run real predictions on the same aspect-fit, black-padded image (the Core ML
+side receives the corresponding PIL RGB image). Heatmaps are soft-argmax
+decoded on the 512-square input canvas. Export is blocked if the maximum
+decoded distance exceeds one input pixel, any visibility argmax differs, or
+either runtime classifies a point differently with respect to the content
+rectangle. The parity JSON records sample/view counts, the deterministic
+sample-set and input-tensor hashes, and checkpoint, model, manifest, evaluation,
+and deterministic-protobuf Core ML spec hashes.
+
+After real parity passes, the exporter hashes the saved package tree, binds
+that hash plus checkpoint/model/manifest/evaluation/spec hashes, fixed parity
+configuration, sample-set hash, and input-tensor hash into the schema-versioned
+sidecar, then validates the entire staged bundle and completion marker. The
+complete directory is published once with an atomic no-replace rename.
+Conversion, parity, hashing, crashes, or a competing destination cannot expose
+a formal half-bundle; an abrupt kill can leave only a hidden staging directory.
+Package metadata records
+the stable `exportProvenanceHash` and source contract hashes, but deliberately
+does not contain the self-referential package-tree hash. It always sets
+`promotionStatus=development`; every other status, including `release`, is
+rejected fail-closed.
+
+The current two-golfer 48/16 report is expected to fail before conversion
+because Face-on validation has zero samples and the complete promotion matrix
+does not pass. A non-zero export exit in that state is the required behavior;
+it must not be described as a model-quality success or release result.
