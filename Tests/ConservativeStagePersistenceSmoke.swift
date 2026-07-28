@@ -21,16 +21,31 @@ struct ConservativeStagePersistenceSmoke {
         )
         let lowConfidence = KeyframeMarker(
             time: 1.25,
-            stage: .followThrough,
+            stage: .takeaway,
             source: .automatic,
             sourceFrameIndex: 75,
             automaticStatus: .lowConfidence,
             automaticConfidence: 0.48,
             automaticEvidence: evidence
         )
+        let confirmed = KeyframeMarker(
+            time: 0.75,
+            stage: .address,
+            source: .automatic,
+            sourceFrameIndex: 45,
+            automaticStatus: .confirmed,
+            automaticConfidence: 0.91,
+            automaticEvidence: evidence
+        )
+        let persistedManual = KeyframeMarker(
+            time: 1.75,
+            stage: .leadArmParallelBackswing,
+            source: .manual,
+            sourceFrameIndex: 105
+        )
         let project = LocalAnalysisProject(
             drawings: [],
-            keyframes: [lowConfidence],
+            keyframes: [lowConfidence, confirmed, persistedManual],
             isKeyframeMode: false,
             showPoseSkeleton: false,
             showHeadStability: false,
@@ -48,6 +63,53 @@ struct ConservativeStagePersistenceSmoke {
         precondition(reopenedMarker.automaticEvidence == evidence)
         precondition(StageResultPolicy.state(for: reopenedMarker) == .review)
         precondition(StageResultPresentation.label(for: .review) == "待核对")
+        precondition(
+            !AutomaticAnalysisPolicy.shouldAnalyze(event: .projectReopened),
+            "Reopening a persisted project must not trigger automatic reanalysis"
+        )
+
+        var predictedFrames: [PPointCode: Int] = [:]
+        var suggestedFrames: [PPointCode: Int] = [:]
+        var manualFrames: [PPointCode: Int] = [:]
+        for marker in reopened.keyframes {
+            guard let stage = SwingStage(rawValue: marker.stage),
+                  let stageIndex = SwingStage.pStages.firstIndex(of: stage),
+                  let frame = marker.sourceFrameIndex else {
+                preconditionFailure("Persisted correction markers need exact frames")
+            }
+            let kind = PPointCorrectionMarkerPolicy.kind(
+                isManual: marker.source == .manual,
+                automaticIsConfirmed: marker.automaticStatus == .confirmed
+            )
+            PPointCorrectionMarkerPolicy.apply(
+                code: PPointCode.allCases[stageIndex],
+                frame: frame,
+                kind: kind,
+                predictedFrames: &predictedFrames,
+                suggestedFrames: &suggestedFrames,
+                manualFrames: &manualFrames
+            )
+        }
+        let correction = PPointCorrectionState(
+            frameCount: 180,
+            predictedFrames: predictedFrames,
+            suggestedFrames: suggestedFrames,
+            manualFrames: manualFrames
+        )
+        precondition(correction.selection(for: .p1).source == .automatic)
+        precondition(correction.selection(for: .p1).sourceFrameIndex == 45)
+        precondition(correction.selection(for: .p2).source == .review)
+        precondition(correction.selection(for: .p2).sourceFrameIndex == nil)
+        precondition(
+            correction.selection(for: .p2).suggestedSourceFrameIndex == 75
+        )
+        precondition(
+            PPointSelectionPresentation.label(
+                for: correction.selection(for: .p2).source
+            ) == "待核对"
+        )
+        precondition(correction.selection(for: .p3).source == .manual)
+        precondition(correction.selection(for: .p3).sourceFrameIndex == 105)
 
         let legacyAutomaticJSON = """
         {

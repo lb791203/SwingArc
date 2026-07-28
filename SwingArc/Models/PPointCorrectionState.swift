@@ -20,7 +20,59 @@ enum PPointCode: String, CaseIterable, Codable, Equatable, Hashable, Identifiabl
 enum PPointSelectionSource: String, Codable, Equatable {
     case automatic
     case manual
+    case review
     case unresolved
+}
+
+enum PPointSelectionPresentation {
+    static func label(for source: PPointSelectionSource) -> String {
+        switch source {
+        case .automatic: return "自动识别"
+        case .manual: return "人工修正"
+        case .review: return "待核对"
+        case .unresolved: return "待修正"
+        }
+    }
+}
+
+enum PPointPersistedMarkerKind: Equatable {
+    case automaticConfirmed
+    case automaticReview
+    case manual
+}
+
+enum PPointCorrectionMarkerPolicy {
+    static func kind(
+        isManual: Bool,
+        automaticIsConfirmed: Bool
+    ) -> PPointPersistedMarkerKind {
+        if isManual { return .manual }
+        return automaticIsConfirmed
+            ? .automaticConfirmed
+            : .automaticReview
+    }
+
+    static func apply(
+        code: PPointCode,
+        frame: Int,
+        kind: PPointPersistedMarkerKind,
+        predictedFrames: inout [PPointCode: Int],
+        suggestedFrames: inout [PPointCode: Int],
+        manualFrames: inout [PPointCode: Int]
+    ) {
+        switch kind {
+        case .manual:
+            manualFrames[code] = frame
+        case .automaticConfirmed:
+            guard manualFrames[code] == nil else { return }
+            predictedFrames[code] = frame
+            suggestedFrames[code] = frame
+        case .automaticReview:
+            guard manualFrames[code] == nil else { return }
+            predictedFrames.removeValue(forKey: code)
+            suggestedFrames[code] = frame
+        }
+    }
 }
 
 struct PPointSelection: Codable, Equatable {
@@ -63,14 +115,15 @@ struct PPointCorrectionState: Equatable {
                     source: .automatic
                 )
             }
+            let suggested = Self.validFrame(
+                suggestedFrames[code],
+                frameCount: frameCount
+            )
             return PPointSelection(
                 code: code,
                 sourceFrameIndex: nil,
-                suggestedSourceFrameIndex: Self.validFrame(
-                    suggestedFrames[code],
-                    frameCount: frameCount
-                ),
-                source: .unresolved
+                suggestedSourceFrameIndex: suggested,
+                source: suggested == nil ? .unresolved : .review
             )
         }
 

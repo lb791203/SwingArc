@@ -13,8 +13,58 @@ struct PPointCorrectionStateSmoke {
         precondition(state.selection(for: .p1).source == .automatic)
         precondition(state.selection(for: .p2).source == .manual)
         precondition(state.selection(for: .p2).sourceFrameIndex == 22)
-        precondition(state.selection(for: .p5).source == .unresolved)
+        precondition(state.selection(for: .p5).source == .review)
         precondition(state.selection(for: .p5).suggestedSourceFrameIndex == 50)
+        precondition(
+            PPointSelectionPresentation.label(for: .review) == "待核对"
+        )
+        precondition(state.selection(for: .p6).source == .unresolved)
+        precondition(
+            PPointSelectionPresentation.label(for: .unresolved) == "待修正"
+        )
+
+        var persistedPredicted: [PPointCode: Int] = [.p1: 11, .p2: 21]
+        var persistedSuggested: [PPointCode: Int] = [:]
+        var persistedManual: [PPointCode: Int] = [:]
+        PPointCorrectionMarkerPolicy.apply(
+            code: .p1,
+            frame: 12,
+            kind: .automaticConfirmed,
+            predictedFrames: &persistedPredicted,
+            suggestedFrames: &persistedSuggested,
+            manualFrames: &persistedManual
+        )
+        PPointCorrectionMarkerPolicy.apply(
+            code: .p2,
+            frame: 22,
+            kind: .automaticReview,
+            predictedFrames: &persistedPredicted,
+            suggestedFrames: &persistedSuggested,
+            manualFrames: &persistedManual
+        )
+        PPointCorrectionMarkerPolicy.apply(
+            code: .p3,
+            frame: 32,
+            kind: .manual,
+            predictedFrames: &persistedPredicted,
+            suggestedFrames: &persistedSuggested,
+            manualFrames: &persistedManual
+        )
+        let persistedState = PPointCorrectionState(
+            frameCount: 100,
+            predictedFrames: persistedPredicted,
+            suggestedFrames: persistedSuggested,
+            manualFrames: persistedManual
+        )
+        precondition(persistedState.selection(for: .p1).source == .automatic)
+        precondition(persistedState.selection(for: .p1).sourceFrameIndex == 12)
+        precondition(persistedState.selection(for: .p2).source == .review)
+        precondition(persistedState.selection(for: .p2).sourceFrameIndex == nil)
+        precondition(
+            persistedState.selection(for: .p2).suggestedSourceFrameIndex == 22
+        )
+        precondition(persistedState.selection(for: .p3).source == .manual)
+        precondition(persistedState.selection(for: .p3).sourceFrameIndex == 32)
 
         PPointCorrectionReducer.reduce(state: &state, action: .select(.p2))
         precondition(state.currentSourceFrameIndex == 22)

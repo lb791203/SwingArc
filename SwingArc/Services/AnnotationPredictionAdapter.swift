@@ -29,7 +29,7 @@ enum AnnotationPredictionAdapter {
 
             let needsShaft = ["P2", "P6", "P8"].contains(code)
             let needsImpact = code == "P7"
-            let isResolvedDetection = detection.status != .unresolved
+            let isResolvedDetection = detection.status == .confirmed
                 && detection.sourceFrameIndex != nil
             let evidenceSatisfied = isResolvedDetection
                 && (!needsShaft

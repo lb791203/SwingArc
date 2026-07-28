@@ -31,6 +31,21 @@ struct StageStatusPresentationSourceSmoke {
         precondition(adjustment.contains("StageResultPolicy.state(for: marker)"))
         precondition(adjustment.contains("StageResultPresentation.label"))
 
+        let descriptor = try section(
+            of: components,
+            from: "private struct StageDisplayDescriptor",
+            to: "private extension SwingStage"
+        )
+        precondition(
+            descriptor.contains(
+                """
+                let frame = detection?.sourceFrameIndex
+                            ?? marker.sourceFrameIndex
+                """
+            ),
+            "Persisted exact source frame must precede the computed time fallback"
+        )
+
         for deprecatedLabel in ["已确认", "未确定", "尚未识别"] {
             precondition(
                 !components.contains(deprecatedLabel),

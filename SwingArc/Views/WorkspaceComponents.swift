@@ -168,11 +168,12 @@ struct StageTimelineView: View {
 }
 
 /// Compact review controls stay visible on iPhone. Each P-stage is represented
-/// by its own swing silhouette, while unresolved positions remain visible but
-/// cannot be tapped until the analysis has evidence for them.
+/// by its own swing silhouette. Unresolved positions open the existing precise
+/// P-point correction workspace instead of presenting a disabled action.
 struct MobileReplayTimelineView: View {
     @ObservedObject var playbackManager: VideoPlaybackManager
     let keyframes: [KeyframeMarker]
+    let onCorrectPPoints: () -> Void
 
     var body: some View {
         VStack(spacing: 14) {
@@ -200,9 +201,12 @@ struct MobileReplayTimelineView: View {
                     let marker = keyframes.first { $0.stage == stage.rawValue }
                     let resultState = StageResultPolicy.state(for: marker)
                     Button {
-                        guard let marker else { return }
                         playbackManager.pause()
-                        playbackManager.seek(to: marker.time)
+                        if let marker {
+                            playbackManager.seek(to: marker.time)
+                        } else {
+                            onCorrectPPoints()
+                        }
                     } label: {
                         ZStack {
                             if isCurrent(marker) {
@@ -221,12 +225,11 @@ struct MobileReplayTimelineView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .allowsHitTesting(marker != nil)
                     .accessibilityLabel(
                         "\(stage.pNumber)，\(SwingStagePoseCue.description(for: stage))，"
                             + StageResultPresentation.detailLabel(for: resultState)
                     )
-                    .accessibilityHint(marker == nil ? "打开人工设置" : "跳到该阶段")
+                    .accessibilityHint(marker == nil ? "打开 P 点修正" : "跳到该阶段")
                 }
             }
         }
@@ -1431,6 +1434,7 @@ private struct StageDisplayDescriptor {
     func detailText(sourceFrameRate: Double) -> String {
         guard let marker else { return shortStatus }
         let frame = detection?.sourceFrameIndex
+            ?? marker.sourceFrameIndex
             ?? Int((marker.time * max(sourceFrameRate, 1)).rounded())
         var parts = [
             String(format: "%.3f 秒", marker.time),

@@ -141,7 +141,7 @@ struct ContentView: View {
                         detections: playbackManager.analysisOutput?.result.detections ?? [],
                         frames: playbackManager.analysisOutput?.observationFrames ?? []
                     ),
-                    manualMarkers: keyframes,
+                    markers: keyframes,
                     initialTime: playbackManager.currentTime,
                     onClose: { showPPointCorrection = false },
                     onSave: savePPointCorrection

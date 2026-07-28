@@ -4,7 +4,7 @@ import SwiftUI
 struct PPointCorrectionWorkspace: View {
     let videoURL: URL
     let prediction: AnnotationPredictionSnapshot
-    let manualMarkers: [KeyframeMarker]
+    let markers: [KeyframeMarker]
     let initialTime: Double
     let onClose: () -> Void
     let onSave: (PPointCode, Int, Double, CGImage) -> Void
@@ -253,7 +253,7 @@ struct PPointCorrectionWorkspace: View {
             return
         }
 
-        let predicted: [PPointCode: Int] = Dictionary(
+        var predicted: [PPointCode: Int] = Dictionary(
             uniqueKeysWithValues: prediction.stages.compactMap { selection in
                 guard let code = PPointCode(rawValue: selection.stage),
                       let frame = selection.sourceFrameIndex else {
@@ -262,7 +262,7 @@ struct PPointCorrectionWorkspace: View {
                 return (code, frame)
             }
         )
-        let suggested: [PPointCode: Int] = Dictionary(
+        var suggested: [PPointCode: Int] = Dictionary(
             uniqueKeysWithValues: prediction.stages.compactMap { selection in
                 guard let code = PPointCode(rawValue: selection.stage),
                       let frame = selection.suggestedSourceFrameIndex else {
@@ -272,7 +272,7 @@ struct PPointCorrectionWorkspace: View {
             }
         )
         var manual: [PPointCode: Int] = [:]
-        for marker in manualMarkers where marker.source == .manual {
+        for marker in markers {
             guard let code = Self.code(for: marker.stage) else {
                 continue
             }
@@ -286,7 +286,18 @@ struct PPointCorrectionWorkspace: View {
                 )
             }
             guard let frame else { continue }
-            manual[code] = frame
+            PPointCorrectionMarkerPolicy.apply(
+                code: code,
+                frame: frame,
+                kind: PPointCorrectionMarkerPolicy.kind(
+                    isManual: marker.source == .manual,
+                    automaticIsConfirmed:
+                        marker.automaticStatus == .confirmed
+                ),
+                predictedFrames: &predicted,
+                suggestedFrames: &suggested,
+                manualFrames: &manual
+            )
         }
 
         var initial = PPointCorrectionState(
@@ -359,6 +370,8 @@ struct PPointCorrectionWorkspace: View {
             return AnalysisTheme.proTourSignal
         case .automatic:
             return AnalysisTheme.proTourPrimaryText
+        case .review:
+            return AnalysisTheme.current
         case .unresolved:
             return AnalysisTheme.proTourPaused
         }
@@ -367,11 +380,7 @@ struct PPointCorrectionWorkspace: View {
     private func statusLabel(
         _ source: PPointSelectionSource
     ) -> String {
-        switch source {
-        case .manual: return "人工修正"
-        case .automatic: return "自动识别"
-        case .unresolved: return "待修正"
-        }
+        PPointSelectionPresentation.label(for: source)
     }
 
     private static func code(for stageRawValue: String) -> PPointCode? {

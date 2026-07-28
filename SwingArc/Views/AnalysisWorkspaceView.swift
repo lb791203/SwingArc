@@ -369,7 +369,8 @@ struct AnalysisWorkspaceView: View {
 
             MobileReplayTimelineView(
                 playbackManager: playbackManager,
-                keyframes: keyframes
+                keyframes: keyframes,
+                onCorrectPPoints: onCorrectPPoints
             )
         }
         .padding(.top, 34)

@@ -24,6 +24,16 @@ struct AnnotationIntegrationSmoke {
                     hasClubEvidence: false,
                     hasBallEvidence: false,
                     hasBallChangeEvidence: false
+                ),
+                .init(
+                    stage: .leadArmParallelBackswing,
+                    time: 3,
+                    sourceFrameIndex: 300,
+                    confidence: 0.72,
+                    status: .lowConfidence,
+                    hasClubEvidence: true,
+                    hasBallEvidence: false,
+                    hasBallChangeEvidence: false
                 )
             ],
             frames: []
@@ -43,6 +53,22 @@ struct AnnotationIntegrationSmoke {
             prediction.stages.first {
                 $0.stage == "P2"
             }?.suggestedSourceFrameIndex == 200
+        )
+        precondition(
+            prediction.stages.first {
+                $0.stage == "P3"
+            }?.status == .unresolved,
+            "Low-confidence automatic output must remain a review candidate"
+        )
+        precondition(
+            prediction.stages.first {
+                $0.stage == "P3"
+            }?.sourceFrameIndex == nil
+        )
+        precondition(
+            prediction.stages.first {
+                $0.stage == "P3"
+            }?.suggestedSourceFrameIndex == 300
         )
 
         let arguments = CommandLine.arguments
