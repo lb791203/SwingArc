@@ -1,28 +1,27 @@
 # App Review Notes — SwingArc 1.0
 
-SwingArc is an account-free, iPhone-only golf swing recording and analysis app. No login, subscription, external hardware, or network connection is required.
+SwingArc is an account-free, iPhone-only golf swing recording and analysis app. The app uses no login, subscription, IAP, external hardware, microphone, analytics, tracking, or in-App network service.
 
 ## Recommended review path
 
-1. Launch the app. The four home actions are DTL automatic practice, FACE-ON automatic practice, manual recording, and video import.
-2. To test without performing a golf swing, choose **手动录像** (Manual Capture), grant camera access, tap **开始录像**, then stop the recording. The resulting local clip opens in the analysis workspace.
-3. Alternatively, choose **导入视频** (Import Video) and select any locally available human-motion video from Photos.
-4. In the workspace, use playback, the stage timeline, drawing tools, and the local AI analysis action.
-5. Open **记录** (Records) from the top-right home action to reopen or delete local projects.
-
-## Camera-based automatic practice
-
-DTL and FACE-ON practice use on-device Vision processing to detect a visible person and swing motion. The app does not use impact audio and does not request microphone access. A complete automatic-capture test requires a full body to be visible and a golf-like swing motion in frame.
+1. Launch SwingArc.
+2. Choose **手动录像** (Manual Recording), grant camera access, record a short clip, and stop; or choose **导入视频** (Import Video) and select a human-motion or golf-swing video from Photos.
+3. The local P1–P8 analysis starts automatically.
+4. Use the P1–P8 strip to inspect recognized and unresolved stages.
+5. Tap **修正 P 点** to choose an exact source frame for a stage.
+6. Tap **画线**, create a line or circle, switch to **选择**, and move the annotation.
+7. Use **导出** to save/share an annotated frame or video.
+8. Return home, open **记录**, reopen the project, and verify the correction and drawing remain; the project can also be deleted there.
 
 ## Privacy and connectivity
 
-- All videos, pose analysis, stage detection, projects, and annotations remain on device.
+- All videos, P1–P8 stage detection, projects, and annotations remain on device.
 - The app contains no account system, advertising, analytics, tracking, or third-party SDKs.
-- The app makes no network requests.
+- The app has no in-App network service.
 - Camera access records user-initiated clips. Photo access imports a user-selected video or saves a user-requested export.
 
 ## AI result limitations
 
-Analysis is presented as sports-training guidance, not medical advice. The interface reports low-confidence or unresolved stages when evidence is insufficient and allows manual correction.
+P1–P8 stage detection is presented as a sports reference, not medical advice. The interface reports unresolved stages when evidence is insufficient and allows manual correction.
 
 Contact: LiangBo — liang.ctp@gmail.com

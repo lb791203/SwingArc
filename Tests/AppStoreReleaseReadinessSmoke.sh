@@ -8,12 +8,20 @@ icons="$root/SwingArc/Assets.xcassets/AppIcon.appiconset"
 metadata="$root/docs/app-store/metadata/zh-Hans.md"
 privacy_page="$root/docs/app-store/privacy/index.html"
 support_page="$root/docs/app-store/support/index.html"
+about_model="$root/SwingArc/Models/AppInformation.swift"
+about_view="$root/SwingArc/Views/AboutPrivacyView.swift"
+review_notes="$root/docs/app-store/metadata/review-notes.md"
+checklist="$root/docs/app-store/submission-checklist.md"
 
 test -f "$project"
 test -f "$privacy"
 test -f "$metadata"
 test -f "$privacy_page"
 test -f "$support_page"
+test -f "$about_model"
+test -f "$about_view"
+test -f "$review_notes"
+test -f "$checklist"
 plutil -lint "$project" "$privacy" >/dev/null
 
 grep -q 'PrivacyInfo.xcprivacy in Resources' "$project"
@@ -24,6 +32,22 @@ grep -q 'INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription' "$project"
 grep -q 'TARGETED_DEVICE_FAMILY = 1;' "$project"
 grep -q 'SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;' "$project"
 grep -q 'SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;' "$project"
+grep -q 'MARKETING_VERSION = 1.0;' "$project"
+grep -q 'CURRENT_PROJECT_VERSION = 1;' "$project"
+grep -q 'PRODUCT_BUNDLE_IDENTIFIER = com.liangbo.swingarc;' "$project"
+grep -q 'IPHONEOS_DEPLOYMENT_TARGET = 17.0;' "$project"
+grep -q 'INFOPLIST_KEY_CFBundleDisplayName = SwingArc;' "$project"
+grep -q 'https://lb791203.github.io/SwingArc/app-store/privacy/' "$about_model"
+grep -q 'https://lb791203.github.io/SwingArc/app-store/support/' "$about_model"
+grep -q 'AboutPrivacyView.swift in Sources' "$project"
+grep -q 'AppInformation.swift in Sources' "$project"
+grep -q '手动录像' "$metadata"
+grep -q 'P1–P8' "$metadata"
+grep -q '专业画线' "$metadata"
+grep -q '人工修正' "$metadata"
+grep -q '免费' "$checklist"
+grep -q 'ICP' "$checklist"
+grep -q 'DSA' "$checklist"
 
 if grep -q 'NSMicrophoneUsageDescription' "$project"; then
   echo "Release project must not declare microphone access." >&2
@@ -41,6 +65,21 @@ for icon in "$icons"/*.png; do
   test "$(sips -g pixelWidth "$icon" 2>/dev/null | awk '/pixelWidth/ {print $2}')" = "1024"
   test "$(sips -g pixelHeight "$icon" 2>/dev/null | awk '/pixelHeight/ {print $2}')" = "1024"
   test "$(sips -g hasAlpha "$icon" 2>/dev/null | awk '/hasAlpha/ {print $2}')" = "no"
+done
+
+for file in "$metadata" "$review_notes" "$privacy_page" "$support_page"; do
+  for forbidden in \
+    '自动练习' \
+    '技术评分' \
+    '练习建议' \
+    '挥杆轨迹' \
+    '动作反馈' \
+    '语音反馈'; do
+    if grep -q "$forbidden" "$file"; then
+      echo "Deferred feature claim '$forbidden' remains in $file" >&2
+      exit 1
+    fi
+  done
 done
 
 ruby - "$metadata" <<'RUBY'
