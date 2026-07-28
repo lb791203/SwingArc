@@ -24,15 +24,19 @@ struct PhoneCorrectionIntegrationSourceSmoke {
         precondition(content.contains("manualMarkers: keyframes"))
         precondition(content.contains("sourceFrameIndex: sourceFrameIndex"))
         precondition(!content.contains("AnnotationWorkspaceView("))
-        precondition(workspace.contains("let onCorrectPPoints: () -> Void"))
-        precondition(workspace.contains("Text(\"修正 P 点\")"))
-        precondition(workspace.contains("Text(\"画线\")"))
-        precondition(workspace.contains("Text(\"选择拍摄视角\")"))
-        precondition(workspace.contains("title: \"正后方 DTL\""))
-        precondition(workspace.contains("title: \"正面 Face-on\""))
-        precondition(workspace.contains("view: .downTheLine"))
-        precondition(workspace.contains("view: .faceOn"))
-        precondition(workspace.contains("practiceCameraView = view"))
+        let fullscreenStart = workspace.range(
+            of: "struct FullscreenVideoPlaybackView"
+        )!.lowerBound
+        let publicWorkspace = String(workspace[..<fullscreenStart])
+
+        precondition(publicWorkspace.contains("let onCorrectPPoints: () -> Void"))
+        precondition(publicWorkspace.contains("Text(\"修正 P 点\")"))
+        precondition(publicWorkspace.contains("Text(\"画线\")"))
+        precondition(!publicWorkspace.contains("选择拍摄视角"))
+        precondition(!publicWorkspace.contains("title: \"正后方 DTL\""))
+        precondition(!publicWorkspace.contains("title: \"正面 Face-on\""))
+        precondition(!publicWorkspace.contains("SimplifiedSwingFeedbackView("))
+        precondition(!publicWorkspace.contains("trajectoryCategory:"))
         precondition(components.contains("let onCorrectPPoints: () -> Void"))
         precondition(components.contains("Text(\"修正 P 点\")"))
     }

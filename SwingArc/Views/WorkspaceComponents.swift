@@ -3,14 +3,12 @@ import SwiftUI
 struct WorkspaceHeaderView: View {
     let projectName: String
     let saveStatus: WorkspaceSaveStatus
-    let hasResults: Bool
     let isRegularLayout: Bool
     let showsProjectSidebar: Bool
     let showsInspector: Bool
     let onBack: () -> Void
     let onToggleProjectSidebar: () -> Void
     let onToggleInspector: () -> Void
-    let onShowResults: () -> Void
     let onCorrectPPoints: () -> Void
     let onExport: () -> Void
 
@@ -48,14 +46,6 @@ struct WorkspaceHeaderView: View {
             }
 
             Spacer(minLength: 4)
-
-            if hasResults {
-                Button(action: onShowResults) {
-                    Image(systemName: "list.bullet.rectangle")
-                        .frame(width: 44, height: 44)
-                }
-                .accessibilityLabel("查看分析结果")
-            }
 
             Button(action: onCorrectPPoints) {
                 Text("修正 P 点")
@@ -536,7 +526,6 @@ struct PlaybackControlsView: View {
     let hasResults: Bool
     let onToggleDrawing: () -> Void
     let onAnalyze: () -> Void
-    let onShowResults: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -587,13 +576,13 @@ struct PlaybackControlsView: View {
             }
             .accessibilityLabel(interactionMode == .drawing ? "结束画线" : "画线")
 
-            Button(action: hasResults ? onShowResults : onAnalyze) {
+            Button(action: onAnalyze) {
                 VStack(spacing: 1) {
-                    Image(systemName: hasResults ? "list.bullet.rectangle" : "sparkles")
-                    Text(hasResults ? "结果" : "分析")
+                    Image(systemName: hasResults ? "arrow.clockwise" : "sparkles")
+                    Text(hasResults ? "重新分析" : "分析")
                         .font(.caption2.weight(.semibold))
                 }
-                .frame(width: 50, height: 44)
+                .frame(width: 58, height: 44)
                 .background(
                     hasResults ? AnalysisTheme.proTourSurface : AnalysisTheme.proTourSignal,
                     in: RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -601,7 +590,7 @@ struct PlaybackControlsView: View {
                 .foregroundStyle(hasResults ? AnalysisTheme.proTourPrimaryText : AnalysisTheme.proTourBackground)
             }
             .disabled(playbackManager.isScanning)
-            .accessibilityLabel(hasResults ? "查看分析结果" : "开始 AI 分析")
+            .accessibilityLabel(hasResults ? "重新分析" : "开始 P1–P8 分析")
         }
         .frame(maxWidth: .infinity)
         .foregroundStyle(AnalysisTheme.proTourPrimaryText)
@@ -936,10 +925,6 @@ struct WorkspaceInspectorView: View {
     @ObservedObject var playbackManager: VideoPlaybackManager
     let presentation: AnalysisWorkspacePresentation
     let keyframes: [KeyframeMarker]
-    @Binding var showPoseSkeleton: Bool
-    @Binding var showHeadStability: Bool
-    @Binding var showSpineAngle: Bool
-    @Binding var showGrid: Bool
     let onCancelAnalysis: () -> Void
     let onSeek: (Double) -> Void
     let onAdjust: (SwingStage) -> Void
@@ -966,23 +951,6 @@ struct WorkspaceInspectorView: View {
                 AnalysisFailureBanner(failure: failure)
             }
 
-            Divider().overlay(.white.opacity(0.14))
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("叠层")
-                    .font(.headline)
-                Toggle("骨架", isOn: $showPoseSkeleton)
-                Toggle("头部轨迹", isOn: $showHeadStability)
-                Toggle("身体倾斜", isOn: $showSpineAngle)
-                Toggle("参考网格", isOn: $showGrid)
-            }
-            .disabled(!presentation.allowsPoseOverlays)
-
-            if !presentation.allowsPoseOverlays {
-                Text("分析完成后可开启人体叠层")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
             Spacer(minLength: 0)
         }
         .padding(14)

@@ -7,11 +7,6 @@ struct AnalysisWorkspaceView: View {
     @Binding var drawings: [DrawingElement]
     @Binding var keyframes: [KeyframeMarker]
     @Binding var isKeyframeMode: Bool
-    @Binding var showPoseSkeleton: Bool
-    @Binding var showHeadStability: Bool
-    @Binding var showSpineAngle: Bool
-    @Binding var showGrid: Bool
-    @Binding var practiceCameraView: PracticeCameraView?
     let saveStatus: WorkspaceSaveStatus
     let onBack: () -> Void
     let onSelectProject: (LocalProjectSummary) -> Void
@@ -28,37 +23,10 @@ struct AnalysisWorkspaceView: View {
     @State private var strokeWidth: CGFloat = 3
     @State private var showsProjectSidebar = true
     @State private var showsInspector = true
-    @State private var showsResultsSheet = false
     @State private var adjustmentStage: SwingStage?
-    @State private var expandedFeedbackCategory: SwingFeedbackCategory?
 
     private var presentation: AnalysisWorkspacePresentation {
         AnalysisWorkspacePresentation(state: playbackManager.analysisState)
-    }
-
-    private var simplifiedFeedback: SimplifiedSwingFeedback? {
-        #if DEBUG
-        let arguments = ProcessInfo.processInfo.arguments
-        if SimplifiedFeedbackPreview.isEnabled(arguments) {
-            return SimplifiedFeedbackPreview.feedback
-        }
-        #endif
-
-        return playbackManager.simplifiedFeedback(
-            view: practiceCameraView,
-            manualMarkers: keyframes
-        )
-    }
-
-    private var trajectoryStageTimes: [SwingTrajectoryStageTime] {
-        playbackManager.correctedDetections(manualMarkers: keyframes).compactMap {
-            guard let time = $0.time else { return nil }
-            return SwingTrajectoryStageTime(stage: $0.stage, time: time)
-        }
-    }
-
-    private var trajectoryFrames: [SwingFrameObservation] {
-        playbackManager.analysisOutput?.observationFrames ?? []
     }
 
     var body: some View {
@@ -84,10 +52,6 @@ struct AnalysisWorkspaceView: View {
                         playbackManager: playbackManager,
                         presentation: presentation,
                         keyframes: keyframes,
-                        showPoseSkeleton: $showPoseSkeleton,
-                        showHeadStability: $showHeadStability,
-                        showSpineAngle: $showSpineAngle,
-                        showGrid: $showGrid,
                         onCancelAnalysis: onCancelAnalysis,
                         onSeek: playbackManager.seek,
                         onAdjust: openAdjustment
@@ -107,85 +71,9 @@ struct AnalysisWorkspaceView: View {
             }
         }
         .ignoresSafeArea(edges: .bottom)
-        .sheet(isPresented: $showsResultsSheet) {
-            NavigationStack {
-                Group {
-                    if let simplifiedFeedback {
-                        SimplifiedSwingFeedbackView(
-                            feedback: simplifiedFeedback,
-                            expandedCategory: $expandedFeedbackCategory,
-                            onSelectStage: selectStage,
-                            onAdjustStage: openAdjustment
-                        )
-                    } else if practiceCameraView == nil,
-                              playbackManager.analysisOutput != nil {
-                        VStack(spacing: 18) {
-                            Spacer()
-
-                            Image(systemName: "camera.viewfinder")
-                                .font(.system(size: 34, weight: .semibold))
-                                .foregroundStyle(AnalysisTheme.proTourSignal)
-
-                            Text("选择拍摄视角")
-                                .font(.system(size: 24, weight: .bold, design: .rounded))
-                                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
-
-                            Text("用于正确解释动作，不会重新分析视频")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(AnalysisTheme.proTourSecondaryText)
-
-                            HStack(spacing: 12) {
-                                cameraViewButton(
-                                    title: "正后方 DTL",
-                                    view: .downTheLine
-                                )
-                                cameraViewButton(
-                                    title: "正面 Face-on",
-                                    view: .faceOn
-                                )
-                            }
-                            .padding(.horizontal, 20)
-
-                            Spacer()
-                        }
-                        .background(AnalysisTheme.proTourBackground)
-                    } else {
-                        ContentUnavailableView(
-                            "暂无动作反馈",
-                            systemImage: "figure.golf",
-                            description: Text(
-                                practiceCameraView == nil
-                                    ? "缺少拍摄视角，无法生成可靠的动作结论。"
-                                    : "请先完成视频分析。"
-                            )
-                        )
-                        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
-                        .background(AnalysisTheme.proTourBackground)
-                    }
-                }
-                .navigationTitle("分析结果")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("完成") { showsResultsSheet = false }
-                    }
-                }
-            }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-        }
         .task(id: project.id) {
             #if DEBUG
             let arguments = ProcessInfo.processInfo.arguments
-            if SimplifiedFeedbackPreview.isEnabled(arguments) {
-                if SimplifiedFeedbackPreview.expandsHandPath(arguments) {
-                    expandedFeedbackCategory = .handPath
-                }
-                try? await Task.sleep(for: .milliseconds(250))
-                showsResultsSheet = true
-                return
-            }
-
             guard PracticePreviewConfiguration.autoAnalyzes(
                 for: arguments
             ) else { return }
@@ -211,14 +99,12 @@ struct AnalysisWorkspaceView: View {
             WorkspaceHeaderView(
                 projectName: project.name,
                 saveStatus: saveStatus,
-                hasResults: playbackManager.analysisState.hasCompletedResult,
                 isRegularLayout: isRegularLayout,
                 showsProjectSidebar: showsProjectSidebar,
                 showsInspector: showsInspector,
                 onBack: onBack,
                 onToggleProjectSidebar: { showsProjectSidebar.toggle() },
                 onToggleInspector: { showsInspector.toggle() },
-                onShowResults: showResults(isRegularLayout: isRegularLayout),
                 onCorrectPPoints: onCorrectPPoints,
                 onExport: onExport
             )
@@ -231,16 +117,13 @@ struct AnalysisWorkspaceView: View {
                     selectedColor: $selectedColor,
                     strokeWidth: $strokeWidth,
                     isKeyframeMode: $isKeyframeMode,
-                    showPoseSkeleton: showPoseSkeleton,
-                    showHeadStability: showHeadStability,
-                    showSpineAngle: showSpineAngle,
-                    showGrid: showGrid,
+                    showPoseSkeleton: false,
+                    showHeadStability: false,
+                    showSpineAngle: false,
+                    showGrid: false,
                     interactionMode: interactionMode,
                     showsFullscreenButton: false,
-                    onEnterFullscreen: {},
-                    trajectoryCategory: expandedFeedbackCategory,
-                    trajectoryFrames: trajectoryFrames,
-                    trajectoryStageTimes: trajectoryStageTimes
+                    onEnterFullscreen: {}
                 )
 
                 if interactionMode == .idle, !isRegularLayout {
@@ -304,8 +187,7 @@ struct AnalysisWorkspaceView: View {
                         onAnalyze: {
                             interactionMode = .idle
                             onAnalyze()
-                        },
-                        onShowResults: showResults(isRegularLayout: isRegularLayout)
+                        }
                     )
                 }
             }
@@ -321,16 +203,13 @@ struct AnalysisWorkspaceView: View {
                 selectedColor: $selectedColor,
                 strokeWidth: $strokeWidth,
                 isKeyframeMode: $isKeyframeMode,
-                showPoseSkeleton: showPoseSkeleton,
-                showHeadStability: showHeadStability,
-                showSpineAngle: showSpineAngle,
-                showGrid: showGrid,
+                showPoseSkeleton: false,
+                showHeadStability: false,
+                showSpineAngle: false,
+                showGrid: false,
                 interactionMode: interactionMode,
                 showsFullscreenButton: false,
-                onEnterFullscreen: {},
-                trajectoryCategory: expandedFeedbackCategory,
-                trajectoryFrames: trajectoryFrames,
-                trajectoryStageTimes: trajectoryStageTimes
+                onEnterFullscreen: {}
             )
             .ignoresSafeArea()
 
@@ -503,15 +382,11 @@ struct AnalysisWorkspaceView: View {
         HStack {
             Button {
                 interactionMode = .idle
-                if playbackManager.analysisState.hasCompletedResult {
-                    showResults(isRegularLayout: false)()
-                } else {
-                    onAnalyze()
-                }
+                onAnalyze()
             } label: {
                 Image(
                     systemName: playbackManager.analysisState.hasCompletedResult
-                        ? "list.bullet"
+                        ? "arrow.clockwise"
                         : "sparkles"
                 )
                     .font(.system(size: 18, weight: .semibold))
@@ -526,8 +401,8 @@ struct AnalysisWorkspaceView: View {
             .disabled(playbackManager.isScanning)
             .accessibilityLabel(
                 playbackManager.analysisState.hasCompletedResult
-                    ? "查看分析结果"
-                    : "开始 AI 分析"
+                    ? "重新分析"
+                    : "开始 P1–P8 分析"
             )
 
             Spacer(minLength: 20)
@@ -616,49 +491,6 @@ struct AnalysisWorkspaceView: View {
         }
     }
 
-    private func showResults(isRegularLayout: Bool) -> () -> Void {
-        {
-            if isRegularLayout {
-                showsInspector = true
-            }
-            showsResultsSheet = true
-        }
-    }
-
-    private func selectStage(_ stage: SwingStage) {
-        playbackManager.pause()
-        if let marker = keyframes.first(where: { $0.stage == stage.rawValue }) {
-            playbackManager.seek(to: marker.time)
-        } else if let time = presentation.detection(for: stage)?.time {
-            playbackManager.seek(to: time)
-        }
-    }
-
-    private func cameraViewButton(
-        title: String,
-        view: PracticeCameraView
-    ) -> some View {
-        Button {
-            practiceCameraView = view
-        } label: {
-            Text(title)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundStyle(
-                    view == .faceOn
-                        ? Color.black
-                        : AnalysisTheme.proTourPrimaryText
-                )
-                .frame(maxWidth: .infinity, minHeight: 54)
-                .background(
-                    view == .faceOn
-                        ? AnalysisTheme.proTourSignal
-                        : AnalysisTheme.proTourSurface,
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                )
-        }
-        .buttonStyle(.plain)
-    }
-
     private func toggleDrawingMode() {
         if interactionMode == .drawing {
             interactionMode = WorkspaceModeTransition.finishDrawing.mode
@@ -677,7 +509,6 @@ struct AnalysisWorkspaceView: View {
         if let marker = keyframes.first(where: { $0.stage == stage.rawValue }) {
             playbackManager.seek(to: marker.time)
         }
-        showsResultsSheet = false
         adjustmentStage = stage
     }
 
