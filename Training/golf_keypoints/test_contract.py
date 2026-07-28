@@ -1,22 +1,48 @@
 import torch
 from PIL import Image
 
-from contracts import HEATMAP_SIZE, INPUT_SIZE, LANDMARK_NAMES
+from contracts import (
+    HEATMAP_SIZE,
+    INPUT_SIZE,
+    LANDMARK_NAMES,
+    VISIBILITY_NAMES,
+)
 from dataset import GolfHeatmapDataset, ReviewedTrainingLabelsRequired
 from evaluate import build_evaluation_report, promotion_passed
 from export_coreml import assert_report_passes, file_sha256
-from model import GolfKeypointNet
+from model import GolfHeatmapNet
 from test_dataset_heatmaps import _write_export
 from train import masked_keypoint_loss
 
 
 def test_output_contract():
-    coordinates, visibility = GolfKeypointNet(pretrained=False)(
-        torch.zeros(2, 3, 256, 256)
+    model = GolfHeatmapNet(pretrained=False).eval()
+    with torch.no_grad():
+        heatmaps, visibility = model(torch.zeros(2, 3, INPUT_SIZE, INPUT_SIZE))
+    assert heatmaps.shape == (
+        2,
+        len(LANDMARK_NAMES),
+        HEATMAP_SIZE,
+        HEATMAP_SIZE,
     )
-    assert coordinates.shape == (2, 5, 2)
-    assert visibility.shape == (2, 5)
-    assert torch.all((coordinates >= 0) & (coordinates <= 1))
+    assert visibility.shape == (
+        2,
+        len(LANDMARK_NAMES),
+        len(VISIBILITY_NAMES),
+    )
+    assert torch.all((heatmaps >= 0) & (heatmaps <= 1))
+
+
+def test_model_uses_canonical_label_order_and_builds_offline():
+    assert LANDMARK_NAMES == (
+        "grip",
+        "shaft_start",
+        "shaft_end",
+        "clubhead",
+        "ball",
+    )
+    assert VISIBILITY_NAMES == ("visible", "occluded", "out-of-frame")
+    assert isinstance(GolfHeatmapNet(pretrained=False), GolfHeatmapNet)
 
 
 def test_dataset_requires_authorized_reviewed_labels(tmp_path):
