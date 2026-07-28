@@ -46,6 +46,7 @@ printf '%s\n' "$sources_phase" | grep -Fq 'C90000000000000000000001 /* AppInform
 printf '%s\n' "$sources_phase" | grep -Fq 'C90000000000000000000003 /* AboutPrivacyView.swift in Sources */'
 
 grep -Fqx -- '- 副标题：`专业画线与P1–P8分析`' "$metadata"
+grep -Fqx -- '用 iPhone 录制或导入挥杆视频，逐帧查看 P1–P8，并用直线、箭头、圆圈、量角器和手绘完成专业标注。所有视频与分析均保留在设备本地。' "$metadata"
 for heading in \
   '• 手动录像与视频导入' \
   '• 慢动作与逐帧回放' \
@@ -70,9 +71,10 @@ grep -Fqx -- '    <li>照片图库用于选择您主动导入的视频，以及�
 grep -Fqx -- '    <li>The photo library lets you select videos to import and save annotated photos and videos you choose to export.</li>' "$privacy_page"
 grep -Fqx -- '  <p>您可以从系统照片选择器导入挥杆视频，并在主动选择导出时把标注图片和视频保存到照片图库。</p>' "$support_page"
 grep -Fqx -- '  <p lang="en">SwingArc supports manual recording, video import, playback, P1–P8 stage detection, and annotation locally on iPhone. It does not upload your videos or use the microphone. If camera access was denied, restore it in iOS Settings. Unresolved P points can be corrected by choosing an exact source frame. You can save annotated photos and videos you choose to export to Photos. For help, email <a href="mailto:liang.ctp@gmail.com">liang.ctp@gmail.com</a> with your iPhone model, iOS version, app version, and reproduction steps.</p>' "$support_page"
-grep -q '免费' "$checklist"
-grep -q 'ICP' "$checklist"
-grep -q 'DSA' "$checklist"
+grep -Fqx -- '`高尔夫,挥杆分析,慢动作,P1P8,画线,量角器,录像,逐帧`' "$metadata"
+grep -Fqx -- '- [x] 价格：免费；无内购、订阅或付费墙。' "$checklist"
+grep -Fqx -- '- [ ] 欧盟销售范围启用前，账号持有人已完成真实的 DSA trader / non-trader 声明。' "$checklist"
+grep -Fqx -- '- [ ] 中国大陆暂不启用：尚无有效 ICP 备案号；取得备案并核对简体中文元数据后再开放。' "$checklist"
 
 if grep -q 'NSMicrophoneUsageDescription' "$project"; then
   echo "Release project must not declare microphone access." >&2
@@ -92,21 +94,59 @@ for icon in "$icons"/*.png; do
   test "$(sips -g hasAlpha "$icon" 2>/dev/null | awk '/hasAlpha/ {print $2}')" = "no"
 done
 
-for file in "$metadata" "$review_notes" "$privacy_page" "$support_page"; do
-  if grep -Eiq '自动练习|自动捕捉|自动录制|技术评分|练习建议|挥杆轨迹|动作反馈|语音反馈|姿态辅助|姿态骨架|姿态叠加|教练建议|训练计划|练习计划|评分|语音指导|语音提示|轨迹指导' "$file"; then
-    echo "Deferred Chinese feature claim remains in $file" >&2
-    exit 1
-  fi
+ruby - "$metadata" "$review_notes" "$privacy_page" "$support_page" <<'RUBY'
+CHINESE_CLAIMS = /自动练习|自动捕捉|自动录制|技术评分|练习建议|挥杆轨迹|动作反馈|语音反馈|姿态辅助|姿态骨架|姿态叠加|教练建议|训练计划|练习计划|评分|语音指导|语音提示|轨迹指导/
+ENGLISH_CLAIMS = /automatic[ -](?:practice|capture)|DTL|FACE[- ]?ON|pose[ -]?(?:assistance|overlay)|coaching|drills?|scoring|speech[ -]feedback|voice[ -]feedback|trajectory[ -]coaching/i
+ACCURACY_CLAIMS = /准确率|精度|百分之|\baccuracy\b|\baccurate[ -]rate\b|\b\d+(?:\.\d+)?%\s*(?:accuracy|accurate)\b/i
 
-  while IFS= read -r line; do
-    if printf '%s\n' "$line" | grep -Eiq 'automatic[ -](practice|capture)|DTL|FACE[- ]?ON|pose (assistance|overlay)|coaching|drills?|scoring|speech feedback|voice feedback|trajectory coaching'; then
-      if ! printf '%s\n' "$line" | grep -Eiq '\b(no|not|without|does not|doesn.t)\b'; then
-        echo "Deferred English feature claim remains in $file: $line" >&2
-        exit 1
-      fi
-    fi
-  done < "$file"
-done
+def clauses(text)
+  text.split(/(?<=[。！？!?；;\n])/).reject(&:empty?)
+end
+
+def chinese_negated?(clause, begin_index, end_index)
+  before = clause[[begin_index - 32, 0].max...begin_index]
+  after = clause[end_index..] || ""
+  before.match?(/(?:不提供|不包含|没有|不会|无|未|不)\s*(?:任何)?\s*\z/) ||
+    after.match?(/\A\s*(?:功能)?\s*(?:未提供|不可用|没有|无)/)
+end
+
+def english_negated?(clause, begin_index, end_index)
+  before = clause[[begin_index - 64, 0].max...begin_index]
+  after = clause[end_index..] || ""
+  before.match?(/\b(?:no|not|never|without|does not|doesn't|do not|don't|is not|isn't|are not|aren't|will not|won't)(?:\s+(?:offers?|includes?|provides?|supports?|has|uses?|feature(?:s)?|any))*\s*\z/i) ||
+    after.match?(/\A\s+(?:is|are)\s+(?:not|never)\b/i)
+end
+
+def forbidden_claim(clause)
+  [[CHINESE_CLAIMS, :chinese], [ENGLISH_CLAIMS, :english]].each do |pattern, language|
+    clause.to_enum(:scan, pattern).each do
+      match = Regexp.last_match
+      negated = language == :chinese ? chinese_negated?(clause, match.begin(0), match.end(0)) : english_negated?(clause, match.begin(0), match.end(0))
+      return match[0] unless negated
+    end
+  end
+  nil
+end
+
+fixtures = {
+  'No login is needed. Coaching is included.' => true,
+  'SwingArc 不提供自动练习。' => false,
+  'SwingArc never offers coaching.' => false
+}
+fixtures.each do |text, should_reject|
+  rejected = clauses(text).any? { |clause| forbidden_claim(clause) }
+  abort "Claim-scanner fixture failed for: #{text}" unless rejected == should_reject
+end
+
+ARGV.each do |file|
+  text = File.read(file)
+  clauses(text).each do |clause|
+    claim = forbidden_claim(clause)
+    abort "Deferred feature claim '#{claim}' remains in #{file}: #{clause.strip}" if claim
+    abort "Unsupported accuracy claim remains in #{file}: #{clause.strip}" if clause.match?(ACCURACY_CLAIMS)
+  end
+end
+RUBY
 
 ruby - "$metadata" <<'RUBY'
 text = File.read(ARGV.fetch(0))
