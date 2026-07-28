@@ -10,14 +10,25 @@ struct FeedbackProfileSmoke {
             .takeaway,
             .leadArmParallelBackswing,
             .leadArmParallelDownswing,
+            .shaftParallelDownswing,
             .followThrough
         ])
+        precondition(dtl.metric(.swingPlane)?.evidence == .pose)
+        precondition(dtl.metric(.handPath)?.stages.contains(.shaftParallelDownswing) == true)
         precondition(dtl.metric(.spineStability)?.title == "脊柱稳定")
+        precondition(dtl.metric(.headPosition)?.stages == SwingStage.pStages)
 
         let faceOn = SwingFeedbackProfiles.profile(for: .faceOn)
         precondition(faceOn.metric(.spineTilt)?.title == "脊柱侧倾")
         precondition(faceOn.metric(.leadShoulder)?.stages == [.top, .impact])
         precondition(faceOn.metric(.clubRelease)?.title == "释放")
+        precondition(faceOn.metric(.clubRelease)?.stages == [
+            .leadArmParallelDownswing,
+            .shaftParallelDownswing,
+            .impact
+        ])
+        precondition(faceOn.metric(.clubRelease)?.evidence == .clubAndImpact)
+        precondition(faceOn.metric(.headPosition)?.stages == SwingStage.pStages)
 
         let configuration = FeedbackConfiguration.defaultValue(for: .faceOn)
         precondition(configuration.activeMetric == .spineTilt)

@@ -1,0 +1,651 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 90;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		6DB7E57F30086B6E00B7B98C /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DB7E57830086B6E00B7B98C /* CameraView.swift */; };
+		6DB7E58030086B6E00B7B98C /* AnalysisTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DB7E57230086B6E00B7B98C /* AnalysisTheme.swift */; };
+		6DB7E58130086B6E00B7B98C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DB7E57930086B6E00B7B98C /* ContentView.swift */; };
+		6DB7E58230086B6E00B7B98C /* DrawingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DB7E57430086B6E00B7B98C /* DrawingModels.swift */; };
+		6DB7E58330086B6E00B7B98C /* SwingArcApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DB7E57D30086B6E00B7B98C /* SwingArcApp.swift */; };
+		6DB7E58430086B6E00B7B98C /* DrawingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DB7E57B30086B6E00B7B98C /* DrawingOverlay.swift */; };
+		6DB7E58530086B6E00B7B98C /* VisionPoseDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DB7E57630086B6E00B7B98C /* VisionPoseDetector.swift */; };
+		6DB7E58630086B6E00B7B98C /* CustomVideoPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DB7E57A30086B6E00B7B98C /* CustomVideoPlayer.swift */; };
+		A10000000000000000000001 /* SwingStageDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* SwingStageDetector.swift */; };
+		A10000000000000000000003 /* MediaExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* MediaExportService.swift */; };
+		A10000000000000000000005 /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* ShareSheet.swift */; };
+		A10000000000000000000007 /* LocalProjectStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000008 /* LocalProjectStore.swift */; };
+		A20000000000000000000001 /* WorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* WorkspaceModels.swift */; };
+		A20000000000000000000003 /* ProjectLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* ProjectLibraryView.swift */; };
+		A20000000000000000000005 /* AnalysisWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* AnalysisWorkspaceView.swift */; };
+		A20000000000000000000007 /* WorkspaceComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* WorkspaceComponents.swift */; };
+		A30000000000000000000001 /* StageCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* StageCalibration.swift */; };
+		A30000000000000000000003 /* SwingTechniqueEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000004 /* SwingTechniqueEvaluator.swift */; };
+		A30000000000000000000005 /* PracticeSessionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000006 /* PracticeSessionEngine.swift */; };
+		A30000000000000000000007 /* PracticeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000008 /* PracticeModels.swift */; };
+		A3000000000000000000000B /* OnDevicePracticeAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000000C /* OnDevicePracticeAnalyzer.swift */; };
+		A3000000000000000000000D /* PracticeHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000000E /* PracticeHomeView.swift */; };
+		A3000000000000000000000F /* PracticeSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000010 /* PracticeSessionView.swift */; };
+		C40000000000000000000001 /* BrandMarkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C40000000000000000000002 /* BrandMarkView.swift */; };
+		B30000000000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000002 /* Assets.xcassets */; };
+		C50000000000000000000001 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = C50000000000000000000002 /* LaunchScreen.storyboard */; };
+		D60000000000000000000001 /* CameraRecordingReadiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = D60000000000000000000002 /* CameraRecordingReadiness.swift */; };
+		D60000000000000000000003 /* FrameExtractionTolerancePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D60000000000000000000004 /* FrameExtractionTolerancePolicy.swift */; };
+		D60000000000000000000005 /* LiveSwingCaptureModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D60000000000000000000006 /* LiveSwingCaptureModels.swift */; };
+		D60000000000000000000007 /* LiveSwingTriggerDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D60000000000000000000008 /* LiveSwingTriggerDetector.swift */; };
+		D60000000000000000000009 /* LivePoseSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6000000000000000000000A /* LivePoseSampler.swift */; };
+		D6000000000000000000000B /* CapturedVideoStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6000000000000000000000C /* CapturedVideoStore.swift */; };
+		D70000000000000000000001 /* CompactPlaybackPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D70000000000000000000002 /* CompactPlaybackPolicy.swift */; };
+		E70000000000000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E70000000000000000000002 /* PrivacyInfo.xcprivacy */; };
+		F80000000000000000000001 /* SwingObservationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000002 /* SwingObservationModels.swift */; };
+		F80000000000000000000003 /* SwingMetricModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000004 /* SwingMetricModels.swift */; };
+		F80000000000000000000005 /* SwingInputQualityEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000006 /* SwingInputQualityEvaluator.swift */; };
+		F80000000000000000000007 /* SwingPoseObservationAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000008 /* SwingPoseObservationAdapter.swift */; };
+		F80000000000000000000009 /* SwingTrajectoryTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000A /* SwingTrajectoryTracker.swift */; };
+		F8000000000000000000000B /* GolfObjectObservationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000C /* GolfObjectObservationProvider.swift */; };
+		F8000000000000000000000D /* CoreMLGolfObjectDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */; };
+		F8000000000000000000000F /* SwingMetricEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000010 /* SwingMetricEngine.swift */; };
+		F80000000000000000000011 /* SimplifiedSwingFeedbackModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000012 /* SimplifiedSwingFeedbackModels.swift */; };
+		F80000000000000000000013 /* SwingFeedbackAssembler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000014 /* SwingFeedbackAssembler.swift */; };
+		F80000000000000000000015 /* SwingAnalysisArtifactBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000016 /* SwingAnalysisArtifactBuilder.swift */; };
+		F80000000000000000000017 /* SwingFeedbackPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000018 /* SwingFeedbackPipeline.swift */; };
+		F80000000000000000000019 /* SwingTrajectoryOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000001A /* SwingTrajectoryOverlay.swift */; };
+		F8000000000000000000001B /* SimplifiedSwingFeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000001C /* SimplifiedSwingFeedbackView.swift */; };
+		A90000000000000000000001 /* AnnotationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000002 /* AnnotationModels.swift */; };
+		A90000000000000000000003 /* AnnotationWorkspaceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000004 /* AnnotationWorkspaceState.swift */; };
+		A90000000000000000000005 /* ExactVideoFrameProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000006 /* ExactVideoFrameProvider.swift */; };
+		A90000000000000000000007 /* AnnotationPackageValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000008 /* AnnotationPackageValidator.swift */; };
+		A90000000000000000000009 /* AnnotationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9000000000000000000000A /* AnnotationStore.swift */; };
+		A9000000000000000000000B /* AnnotationExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9000000000000000000000C /* AnnotationExportService.swift */; };
+		A9000000000000000000000D /* AnnotationFrameCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9000000000000000000000E /* AnnotationFrameCanvas.swift */; };
+		A9000000000000000000000F /* AnnotationWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000010 /* AnnotationWorkspaceView.swift */; };
+		A90000000000000000000011 /* AnnotationPredictionAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000012 /* AnnotationPredictionAdapter.swift */; };
+		B00000000000000000000001 /* PPointCorrectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* PPointCorrectionState.swift */; };
+		B00000000000000000000003 /* PPointCorrectionWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000004 /* PPointCorrectionWorkspace.swift */; };
+		B00000000000000000000005 /* LegacyAnnotationMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000006 /* LegacyAnnotationMigration.swift */; };
+		C90000000000000000000001 /* AppInformation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C90000000000000000000002 /* AppInformation.swift */; };
+		C90000000000000000000003 /* AboutPrivacyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C90000000000000000000004 /* AboutPrivacyView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		000000000000000000000120 /* SwingArcProject.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwingArcProject.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6DB7E57230086B6E00B7B98C /* AnalysisTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisTheme.swift; sourceTree = "<group>"; };
+		6DB7E57430086B6E00B7B98C /* DrawingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingModels.swift; sourceTree = "<group>"; };
+		6DB7E57630086B6E00B7B98C /* VisionPoseDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionPoseDetector.swift; sourceTree = "<group>"; };
+		6DB7E57830086B6E00B7B98C /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
+		6DB7E57930086B6E00B7B98C /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		6DB7E57A30086B6E00B7B98C /* CustomVideoPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomVideoPlayer.swift; sourceTree = "<group>"; };
+		6DB7E57B30086B6E00B7B98C /* DrawingOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingOverlay.swift; sourceTree = "<group>"; };
+		6DB7E57D30086B6E00B7B98C /* SwingArcApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingArcApp.swift; sourceTree = "<group>"; };
+		A10000000000000000000002 /* SwingStageDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingStageDetector.swift; sourceTree = "<group>"; };
+		A10000000000000000000004 /* MediaExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaExportService.swift; sourceTree = "<group>"; };
+		A10000000000000000000006 /* ShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheet.swift; sourceTree = "<group>"; };
+		A10000000000000000000008 /* LocalProjectStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalProjectStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* WorkspaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceModels.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* ProjectLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectLibraryView.swift; sourceTree = "<group>"; };
+		A20000000000000000000006 /* AnalysisWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisWorkspaceView.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 /* WorkspaceComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceComponents.swift; sourceTree = "<group>"; };
+		A30000000000000000000002 /* StageCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StageCalibration.swift; sourceTree = "<group>"; };
+		A30000000000000000000004 /* SwingTechniqueEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingTechniqueEvaluator.swift; sourceTree = "<group>"; };
+		A30000000000000000000006 /* PracticeSessionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PracticeSessionEngine.swift; sourceTree = "<group>"; };
+		A30000000000000000000008 /* PracticeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PracticeModels.swift; sourceTree = "<group>"; };
+		A3000000000000000000000C /* OnDevicePracticeAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnDevicePracticeAnalyzer.swift; sourceTree = "<group>"; };
+		A3000000000000000000000E /* PracticeHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PracticeHomeView.swift; sourceTree = "<group>"; };
+		A30000000000000000000010 /* PracticeSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PracticeSessionView.swift; sourceTree = "<group>"; };
+		C40000000000000000000002 /* BrandMarkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandMarkView.swift; sourceTree = "<group>"; };
+		B30000000000000000000002 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C50000000000000000000002 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		D60000000000000000000002 /* CameraRecordingReadiness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraRecordingReadiness.swift; sourceTree = "<group>"; };
+		D60000000000000000000004 /* FrameExtractionTolerancePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameExtractionTolerancePolicy.swift; sourceTree = "<group>"; };
+		D60000000000000000000006 /* LiveSwingCaptureModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSwingCaptureModels.swift; sourceTree = "<group>"; };
+		D60000000000000000000008 /* LiveSwingTriggerDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSwingTriggerDetector.swift; sourceTree = "<group>"; };
+		D6000000000000000000000A /* LivePoseSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePoseSampler.swift; sourceTree = "<group>"; };
+		D6000000000000000000000C /* CapturedVideoStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturedVideoStore.swift; sourceTree = "<group>"; };
+		D70000000000000000000002 /* CompactPlaybackPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactPlaybackPolicy.swift; sourceTree = "<group>"; };
+		E70000000000000000000002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		F80000000000000000000002 /* SwingObservationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingObservationModels.swift; sourceTree = "<group>"; };
+		F80000000000000000000004 /* SwingMetricModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingMetricModels.swift; sourceTree = "<group>"; };
+		F80000000000000000000006 /* SwingInputQualityEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingInputQualityEvaluator.swift; sourceTree = "<group>"; };
+		F80000000000000000000008 /* SwingPoseObservationAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingPoseObservationAdapter.swift; sourceTree = "<group>"; };
+		F8000000000000000000000A /* SwingTrajectoryTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingTrajectoryTracker.swift; sourceTree = "<group>"; };
+		F8000000000000000000000C /* GolfObjectObservationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GolfObjectObservationProvider.swift; sourceTree = "<group>"; };
+		F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreMLGolfObjectDetector.swift; sourceTree = "<group>"; };
+		F80000000000000000000010 /* SwingMetricEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingMetricEngine.swift; sourceTree = "<group>"; };
+		F80000000000000000000012 /* SimplifiedSwingFeedbackModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimplifiedSwingFeedbackModels.swift; sourceTree = "<group>"; };
+		F80000000000000000000014 /* SwingFeedbackAssembler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingFeedbackAssembler.swift; sourceTree = "<group>"; };
+		F80000000000000000000016 /* SwingAnalysisArtifactBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingAnalysisArtifactBuilder.swift; sourceTree = "<group>"; };
+		F80000000000000000000018 /* SwingFeedbackPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingFeedbackPipeline.swift; sourceTree = "<group>"; };
+		F8000000000000000000001A /* SwingTrajectoryOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingTrajectoryOverlay.swift; sourceTree = "<group>"; };
+		F8000000000000000000001C /* SimplifiedSwingFeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimplifiedSwingFeedbackView.swift; sourceTree = "<group>"; };
+		A90000000000000000000002 /* AnnotationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationModels.swift; sourceTree = "<group>"; };
+		A90000000000000000000004 /* AnnotationWorkspaceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationWorkspaceState.swift; sourceTree = "<group>"; };
+		A90000000000000000000006 /* ExactVideoFrameProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExactVideoFrameProvider.swift; sourceTree = "<group>"; };
+		A90000000000000000000008 /* AnnotationPackageValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationPackageValidator.swift; sourceTree = "<group>"; };
+		A9000000000000000000000A /* AnnotationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationStore.swift; sourceTree = "<group>"; };
+		A9000000000000000000000C /* AnnotationExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationExportService.swift; sourceTree = "<group>"; };
+		A9000000000000000000000E /* AnnotationFrameCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationFrameCanvas.swift; sourceTree = "<group>"; };
+		A90000000000000000000010 /* AnnotationWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationWorkspaceView.swift; sourceTree = "<group>"; };
+		A90000000000000000000012 /* AnnotationPredictionAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationPredictionAdapter.swift; sourceTree = "<group>"; };
+		B00000000000000000000002 /* PPointCorrectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PPointCorrectionState.swift; sourceTree = "<group>"; };
+		B00000000000000000000004 /* PPointCorrectionWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PPointCorrectionWorkspace.swift; sourceTree = "<group>"; };
+		B00000000000000000000006 /* LegacyAnnotationMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyAnnotationMigration.swift; sourceTree = "<group>"; };
+		C90000000000000000000002 /* AppInformation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppInformation.swift; sourceTree = "<group>"; };
+		C90000000000000000000004 /* AboutPrivacyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutPrivacyView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		000000000000000130000000 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		000000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				6DB7E57E30086B6E00B7B98C /* SwingArc */,
+				000000000000000000000020 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		000000000000000000000020 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000120 /* SwingArcProject.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		6DB7E57330086B6E00B7B98C /* Design */ = {
+			isa = PBXGroup;
+			children = (
+				6DB7E57230086B6E00B7B98C /* AnalysisTheme.swift */,
+			);
+			path = Design;
+			sourceTree = "<group>";
+		};
+		6DB7E57530086B6E00B7B98C /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				C90000000000000000000002 /* AppInformation.swift */,
+				6DB7E57430086B6E00B7B98C /* DrawingModels.swift */,
+				A20000000000000000000002 /* WorkspaceModels.swift */,
+				A30000000000000000000008 /* PracticeModels.swift */,
+				D60000000000000000000002 /* CameraRecordingReadiness.swift */,
+				D60000000000000000000004 /* FrameExtractionTolerancePolicy.swift */,
+				D60000000000000000000006 /* LiveSwingCaptureModels.swift */,
+				D70000000000000000000002 /* CompactPlaybackPolicy.swift */,
+				F80000000000000000000002 /* SwingObservationModels.swift */,
+				F80000000000000000000004 /* SwingMetricModels.swift */,
+				F80000000000000000000012 /* SimplifiedSwingFeedbackModels.swift */,
+				A90000000000000000000002 /* AnnotationModels.swift */,
+				A90000000000000000000004 /* AnnotationWorkspaceState.swift */,
+				B00000000000000000000002 /* PPointCorrectionState.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		6DB7E57730086B6E00B7B98C /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				6DB7E57630086B6E00B7B98C /* VisionPoseDetector.swift */,
+				A10000000000000000000002 /* SwingStageDetector.swift */,
+				A10000000000000000000004 /* MediaExportService.swift */,
+				A10000000000000000000008 /* LocalProjectStore.swift */,
+				A30000000000000000000002 /* StageCalibration.swift */,
+				A30000000000000000000004 /* SwingTechniqueEvaluator.swift */,
+				A30000000000000000000006 /* PracticeSessionEngine.swift */,
+				A3000000000000000000000C /* OnDevicePracticeAnalyzer.swift */,
+				D60000000000000000000008 /* LiveSwingTriggerDetector.swift */,
+				D6000000000000000000000A /* LivePoseSampler.swift */,
+				D6000000000000000000000C /* CapturedVideoStore.swift */,
+				F80000000000000000000006 /* SwingInputQualityEvaluator.swift */,
+				F80000000000000000000008 /* SwingPoseObservationAdapter.swift */,
+				F8000000000000000000000A /* SwingTrajectoryTracker.swift */,
+				F8000000000000000000000C /* GolfObjectObservationProvider.swift */,
+				F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */,
+				F80000000000000000000010 /* SwingMetricEngine.swift */,
+				F80000000000000000000014 /* SwingFeedbackAssembler.swift */,
+				F80000000000000000000016 /* SwingAnalysisArtifactBuilder.swift */,
+				F80000000000000000000018 /* SwingFeedbackPipeline.swift */,
+				A90000000000000000000006 /* ExactVideoFrameProvider.swift */,
+				A90000000000000000000008 /* AnnotationPackageValidator.swift */,
+				A9000000000000000000000A /* AnnotationStore.swift */,
+				A9000000000000000000000C /* AnnotationExportService.swift */,
+				A90000000000000000000012 /* AnnotationPredictionAdapter.swift */,
+				B00000000000000000000006 /* LegacyAnnotationMigration.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		6DB7E57C30086B6E00B7B98C /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				C90000000000000000000004 /* AboutPrivacyView.swift */,
+				6DB7E57830086B6E00B7B98C /* CameraView.swift */,
+				6DB7E57930086B6E00B7B98C /* ContentView.swift */,
+				6DB7E57A30086B6E00B7B98C /* CustomVideoPlayer.swift */,
+				6DB7E57B30086B6E00B7B98C /* DrawingOverlay.swift */,
+				A10000000000000000000006 /* ShareSheet.swift */,
+				A20000000000000000000004 /* ProjectLibraryView.swift */,
+				A20000000000000000000006 /* AnalysisWorkspaceView.swift */,
+				A20000000000000000000008 /* WorkspaceComponents.swift */,
+				A3000000000000000000000E /* PracticeHomeView.swift */,
+				A30000000000000000000010 /* PracticeSessionView.swift */,
+				C40000000000000000000002 /* BrandMarkView.swift */,
+				F8000000000000000000001A /* SwingTrajectoryOverlay.swift */,
+				F8000000000000000000001C /* SimplifiedSwingFeedbackView.swift */,
+				A9000000000000000000000E /* AnnotationFrameCanvas.swift */,
+				A90000000000000000000010 /* AnnotationWorkspaceView.swift */,
+				B00000000000000000000004 /* PPointCorrectionWorkspace.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		6DB7E57E30086B6E00B7B98C /* SwingArc */ = {
+			isa = PBXGroup;
+			children = (
+				B30000000000000000000002 /* Assets.xcassets */,
+				C50000000000000000000002 /* LaunchScreen.storyboard */,
+				E70000000000000000000002 /* PrivacyInfo.xcprivacy */,
+				6DB7E57330086B6E00B7B98C /* Design */,
+				6DB7E57530086B6E00B7B98C /* Models */,
+				6DB7E57730086B6E00B7B98C /* Services */,
+				6DB7E57C30086B6E00B7B98C /* Views */,
+				6DB7E57D30086B6E00B7B98C /* SwingArcApp.swift */,
+			);
+			path = SwingArc;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		000000000000000100000000 /* SwingArcProject */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 000000000000000110000000 /* Build configuration list for PBXNativeTarget "SwingArcProject" */;
+			buildPhases = (
+				000000000000000120000000 /* Sources */,
+				000000000000000130000000 /* Frameworks */,
+				000000000000000140000000 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SwingArcProject;
+			productName = MyApp;
+			productReference = 000000000000000000000120 /* SwingArcProject.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		000000000000000000000000 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2630;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					000000000000000100000000 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+				};
+			};
+			buildConfigurationList = 000000000000000010000000 /* Build configuration list for PBXProject "SwingArcProject" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 000000000000000000000001;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 90;
+			productRefGroup = 000000000000000000000020 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				000000000000000100000000 /* SwingArcProject */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		000000000000000140000000 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+				B30000000000000000000001 /* Assets.xcassets in Resources */,
+				C50000000000000000000001 /* LaunchScreen.storyboard in Resources */,
+				E70000000000000000000001 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		000000000000000120000000 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+				C90000000000000000000001 /* AppInformation.swift in Sources */,
+				C90000000000000000000003 /* AboutPrivacyView.swift in Sources */,
+				6DB7E57F30086B6E00B7B98C /* CameraView.swift in Sources */,
+				6DB7E58030086B6E00B7B98C /* AnalysisTheme.swift in Sources */,
+				6DB7E58130086B6E00B7B98C /* ContentView.swift in Sources */,
+				6DB7E58230086B6E00B7B98C /* DrawingModels.swift in Sources */,
+				6DB7E58330086B6E00B7B98C /* SwingArcApp.swift in Sources */,
+				6DB7E58430086B6E00B7B98C /* DrawingOverlay.swift in Sources */,
+				6DB7E58530086B6E00B7B98C /* VisionPoseDetector.swift in Sources */,
+				6DB7E58630086B6E00B7B98C /* CustomVideoPlayer.swift in Sources */,
+				A10000000000000000000001 /* SwingStageDetector.swift in Sources */,
+				A10000000000000000000003 /* MediaExportService.swift in Sources */,
+				A10000000000000000000005 /* ShareSheet.swift in Sources */,
+				A10000000000000000000007 /* LocalProjectStore.swift in Sources */,
+				A20000000000000000000001 /* WorkspaceModels.swift in Sources */,
+				A20000000000000000000003 /* ProjectLibraryView.swift in Sources */,
+				A20000000000000000000005 /* AnalysisWorkspaceView.swift in Sources */,
+				A20000000000000000000007 /* WorkspaceComponents.swift in Sources */,
+				A30000000000000000000001 /* StageCalibration.swift in Sources */,
+				A30000000000000000000003 /* SwingTechniqueEvaluator.swift in Sources */,
+				A30000000000000000000005 /* PracticeSessionEngine.swift in Sources */,
+				A30000000000000000000007 /* PracticeModels.swift in Sources */,
+				A3000000000000000000000B /* OnDevicePracticeAnalyzer.swift in Sources */,
+				A3000000000000000000000D /* PracticeHomeView.swift in Sources */,
+				A3000000000000000000000F /* PracticeSessionView.swift in Sources */,
+				D60000000000000000000001 /* CameraRecordingReadiness.swift in Sources */,
+				D60000000000000000000003 /* FrameExtractionTolerancePolicy.swift in Sources */,
+				D60000000000000000000005 /* LiveSwingCaptureModels.swift in Sources */,
+				D60000000000000000000007 /* LiveSwingTriggerDetector.swift in Sources */,
+				D60000000000000000000009 /* LivePoseSampler.swift in Sources */,
+				D6000000000000000000000B /* CapturedVideoStore.swift in Sources */,
+				D70000000000000000000001 /* CompactPlaybackPolicy.swift in Sources */,
+				F80000000000000000000001 /* SwingObservationModels.swift in Sources */,
+				F80000000000000000000003 /* SwingMetricModels.swift in Sources */,
+				F80000000000000000000011 /* SimplifiedSwingFeedbackModels.swift in Sources */,
+				F80000000000000000000005 /* SwingInputQualityEvaluator.swift in Sources */,
+				F80000000000000000000007 /* SwingPoseObservationAdapter.swift in Sources */,
+				F80000000000000000000009 /* SwingTrajectoryTracker.swift in Sources */,
+				F8000000000000000000000B /* GolfObjectObservationProvider.swift in Sources */,
+				F8000000000000000000000D /* CoreMLGolfObjectDetector.swift in Sources */,
+				F8000000000000000000000F /* SwingMetricEngine.swift in Sources */,
+				F80000000000000000000013 /* SwingFeedbackAssembler.swift in Sources */,
+				F80000000000000000000015 /* SwingAnalysisArtifactBuilder.swift in Sources */,
+				F80000000000000000000017 /* SwingFeedbackPipeline.swift in Sources */,
+				F80000000000000000000019 /* SwingTrajectoryOverlay.swift in Sources */,
+				F8000000000000000000001B /* SimplifiedSwingFeedbackView.swift in Sources */,
+				C40000000000000000000001 /* BrandMarkView.swift in Sources */,
+				A90000000000000000000001 /* AnnotationModels.swift in Sources */,
+				A90000000000000000000003 /* AnnotationWorkspaceState.swift in Sources */,
+				A90000000000000000000005 /* ExactVideoFrameProvider.swift in Sources */,
+				A90000000000000000000007 /* AnnotationPackageValidator.swift in Sources */,
+				A90000000000000000000009 /* AnnotationStore.swift in Sources */,
+				A9000000000000000000000B /* AnnotationExportService.swift in Sources */,
+				A9000000000000000000000D /* AnnotationFrameCanvas.swift in Sources */,
+				A9000000000000000000000F /* AnnotationWorkspaceView.swift in Sources */,
+				A90000000000000000000011 /* AnnotationPredictionAdapter.swift in Sources */,
+				B00000000000000000000001 /* PPointCorrectionState.swift in Sources */,
+				B00000000000000000000003 /* PPointCorrectionWorkspace.swift in Sources */,
+				B00000000000000000000005 /* LegacyAnnotationMigration.swift in Sources */,
+			);
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		000000000000000011000000 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				APPLETVOS_DEPLOYMENT_TARGET = 27.0;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DRIVERKIT_DEPLOYMENT_TARGET = 27.0;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PROJECT_UNIQUE_VALUE = HDNVE15C;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				WATCHOS_DEPLOYMENT_TARGET = 27.0;
+				XROS_DEPLOYMENT_TARGET = 27.0;
+			};
+			name = Debug;
+		};
+		000000000000000012000000 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				APPLETVOS_DEPLOYMENT_TARGET = 27.0;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DRIVERKIT_DEPLOYMENT_TARGET = 27.0;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PROJECT_UNIQUE_VALUE = HDNVE15C;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				WATCHOS_DEPLOYMENT_TARGET = 27.0;
+				XROS_DEPLOYMENT_TARGET = 27.0;
+			};
+			name = Release;
+		};
+		000000000000000111000000 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RCP42Y96T8;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = SwingArc;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
+				INFOPLIST_KEY_NSCameraUsageDescription = "SwingArc 需要使用相机录制您的高尔夫挥杆，并在设备本地进行动作分析。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "SwingArc 需要将您主动导出的标注图片和视频保存到照片图库。";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "SwingArc 需要让您从照片图库选择挥杆视频进行本地分析。";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = NO;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = NO;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.liangbo.swingarc;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		000000000000000112000000 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RCP42Y96T8;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = SwingArc;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
+				INFOPLIST_KEY_NSCameraUsageDescription = "SwingArc 需要使用相机录制您的高尔夫挥杆，并在设备本地进行动作分析。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "SwingArc 需要将您主动导出的标注图片和视频保存到照片图库。";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "SwingArc 需要让您从照片图库选择挥杆视频进行本地分析。";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = NO;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = NO;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.liangbo.swingarc;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		000000000000000010000000 /* Build configuration list for PBXProject "SwingArcProject" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				000000000000000011000000 /* Debug */,
+				000000000000000012000000 /* Release */,
+			);
+			defaultConfigurationName = Release;
+		};
+		000000000000000110000000 /* Build configuration list for PBXNativeTarget "SwingArcProject" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				000000000000000111000000 /* Debug */,
+				000000000000000112000000 /* Release */,
+			);
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 000000000000000000000000 /* Project object */;
+}

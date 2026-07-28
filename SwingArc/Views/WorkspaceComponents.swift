@@ -1,263 +1,15 @@
 import SwiftUI
 
-struct SwingFeedbackConfigurationView: View {
-    @Binding var practiceCameraView: PracticeCameraView?
-    @Binding var configuration: FeedbackConfiguration?
-    let analysisState: SwingAnalysisState
-    let sourceFrameRate: Double
-    let onDismiss: () -> Void
-
-    private var profile: FeedbackProfile? {
-        practiceCameraView.map(SwingFeedbackProfiles.profile(for:))
-    }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    viewSelector
-
-                    if let profile {
-                        ForEach(Array(profile.groups.enumerated()), id: \.offset) { _, group in
-                            groupSection(group, view: profile.view)
-                        }
-                    } else {
-                        ContentUnavailableView(
-                            "选择拍摄视角",
-                            systemImage: "camera.viewfinder",
-                            description: Text("请选择目标线视角或正面视角后配置分析参数。")
-                        )
-                        .frame(maxWidth: .infinity, minHeight: 280)
-                    }
-                }
-                .padding(16)
-            }
-            .background(AnalysisTheme.proTourBackground)
-            .navigationTitle("挥杆反馈")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭", action: onDismiss)
-                        .accessibilityLabel("关闭挥杆反馈")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("帮助") {}
-                        .accessibilityLabel("挥杆反馈帮助")
-                }
-            }
-        }
-        .preferredColorScheme(.dark)
-    }
-
-    private var viewSelector: some View {
-        HStack(spacing: 8) {
-            viewButton(.downTheLine, title: "目标线视角", abbreviation: "DTL")
-            viewButton(.faceOn, title: "正面视角", abbreviation: "FO")
-        }
-        .padding(4)
-        .background(AnalysisTheme.proTourSurface, in: Capsule())
-    }
-
-    private func viewButton(
-        _ view: PracticeCameraView,
-        title: String,
-        abbreviation: String
-    ) -> some View {
-        Button {
-            select(view)
-        } label: {
-            VStack(spacing: 2) {
-                Text(title)
-                    .font(.system(size: 14, weight: .bold))
-                Text(abbreviation)
-                    .font(.system(size: 9, weight: .black, design: .monospaced))
-            }
-            .foregroundStyle(practiceCameraView == view ? .white : AnalysisTheme.proTourSecondaryText)
-            .frame(maxWidth: .infinity, minHeight: 48)
-            .background(
-                practiceCameraView == view ? AnalysisTheme.proTourSignal : .clear,
-                in: Capsule()
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-    }
-
-    private func groupSection(
-        _ group: FeedbackGroup,
-        view: PracticeCameraView
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(group.title)
-                .font(.system(size: 21, weight: .bold, design: .rounded))
-                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
-
-            ForEach(group.metrics, id: \.metric) { definition in
-                metricRow(definition, view: view)
-            }
-        }
-        .padding(.top, 4)
-    }
-
-    private func metricRow(
-        _ definition: FeedbackMetricDefinition,
-        view: PracticeCameraView
-    ) -> some View {
-        let availability = FeedbackAvailability.resolve(
-            metric: definition.metric,
-            analysis: analysisState,
-            sourceFrameRate: sourceFrameRate
-        )
-        let isSelected = selectedConfiguration(for: view).activeMetric == definition.metric
-
-        return VStack(alignment: .leading, spacing: 10) {
-            Button {
-                select(definition.metric, for: view)
-            } label: {
-                HStack(spacing: 8) {
-                    Text(definition.title)
-                        .font(.system(size: 17, weight: .semibold))
-                    Spacer()
-                    if isSelected {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(AnalysisTheme.proTourSignal)
-                    }
-                }
-                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
-                .padding(.horizontal, 14)
-                .frame(minHeight: 48)
-                .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(isSelected ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourRaisedSurface, lineWidth: isSelected ? 1.5 : 1)
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("选择\(definition.title)")
-
-            switch availability {
-            case .available:
-                checkpointChips(definition, view: view)
-            case let .unavailable(reason):
-                Text(reason)
-                    .font(.footnote)
-                    .foregroundStyle(AnalysisTheme.proTourSecondaryText)
-                    .padding(.horizontal, 4)
-            }
-        }
-    }
-
-    private func checkpointChips(
-        _ definition: FeedbackMetricDefinition,
-        view: PracticeCameraView
-    ) -> some View {
-        FlowLayout(spacing: 8) {
-            ForEach(definition.stages) { stage in
-                let checkpoint = FeedbackCheckpoint(metric: definition.metric, stage: stage)
-                let isEnabled = selectedConfiguration(for: view).enabledCheckpoints.contains(checkpoint)
-                Button {
-                    toggle(checkpoint, for: view)
-                } label: {
-                    Text(stage.shortName.replacingOccurrences(of: "P[0-9] ", with: "", options: .regularExpression))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(isEnabled ? .black : AnalysisTheme.proTourPrimaryText)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 44)
-                        .background(isEnabled ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(AnalysisTheme.proTourRaisedSurface))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(definition.title) \(stage.shortName)")
-            }
-        }
-    }
-
-    private func selectedConfiguration(for view: PracticeCameraView) -> FeedbackConfiguration {
-        let candidate = configuration ?? FeedbackConfiguration.defaultValue(for: view)
-        return SwingFeedbackProfiles.profile(for: view).contains(candidate.activeMetric)
-            ? candidate
-            : FeedbackConfiguration.defaultValue(for: view)
-    }
-
-    private func select(_ view: PracticeCameraView) {
-        practiceCameraView = view
-        configuration = selectedConfiguration(for: view)
-    }
-
-    private func select(_ metric: FeedbackMetric, for view: PracticeCameraView) {
-        var value = selectedConfiguration(for: view)
-        value.activeMetric = metric
-        configuration = value
-    }
-
-    private func toggle(_ checkpoint: FeedbackCheckpoint, for view: PracticeCameraView) {
-        var value = selectedConfiguration(for: view)
-        if value.enabledCheckpoints.contains(checkpoint) {
-            value.enabledCheckpoints.remove(checkpoint)
-        } else {
-            value.enabledCheckpoints.insert(checkpoint)
-        }
-        configuration = value
-    }
-}
-
-private struct FlowLayout: Layout {
-    let spacing: CGFloat
-
-    func sizeThatFits(
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout ()
-    ) -> CGSize {
-        let width = proposal.width ?? 0
-        var cursor = CGPoint.zero
-        var maxHeight: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if cursor.x > 0, cursor.x + size.width > width {
-                cursor.x = 0
-                cursor.y += maxHeight + spacing
-                maxHeight = 0
-            }
-            cursor.x += size.width + spacing
-            maxHeight = max(maxHeight, size.height)
-        }
-        return CGSize(width: width, height: cursor.y + maxHeight)
-    }
-
-    func placeSubviews(
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout ()
-    ) {
-        var cursor = bounds.origin
-        var lineHeight: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if cursor.x > bounds.minX, cursor.x + size.width > bounds.maxX {
-                cursor.x = bounds.minX
-                cursor.y += lineHeight + spacing
-                lineHeight = 0
-            }
-            subview.place(at: cursor, proposal: ProposedViewSize(size))
-            cursor.x += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-        }
-    }
-}
-
 struct WorkspaceHeaderView: View {
     let projectName: String
     let saveStatus: WorkspaceSaveStatus
-    let hasResults: Bool
     let isRegularLayout: Bool
     let showsProjectSidebar: Bool
     let showsInspector: Bool
     let onBack: () -> Void
     let onToggleProjectSidebar: () -> Void
     let onToggleInspector: () -> Void
-    let onShowResults: () -> Void
+    let onCorrectPPoints: () -> Void
     let onExport: () -> Void
 
     var body: some View {
@@ -295,13 +47,12 @@ struct WorkspaceHeaderView: View {
 
             Spacer(minLength: 4)
 
-            if hasResults {
-                Button(action: onShowResults) {
-                    Image(systemName: "list.bullet.rectangle")
-                        .frame(width: 44, height: 44)
-                }
-                .accessibilityLabel("查看分析结果")
+            Button(action: onCorrectPPoints) {
+                Text("修正 P 点")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(minWidth: 72, minHeight: 44)
             }
+            .accessibilityLabel("修正 P 点")
 
             Button(action: onExport) {
                 Image(systemName: "square.and.arrow.up")
@@ -416,13 +167,481 @@ struct StageTimelineView: View {
     }
 }
 
+/// Compact review controls stay visible on iPhone. Each P-stage is represented
+/// by its own swing silhouette. Unresolved positions open the existing precise
+/// P-point correction workspace instead of presenting a disabled action.
+struct MobileReplayTimelineView: View {
+    @ObservedObject var playbackManager: VideoPlaybackManager
+    let keyframes: [KeyframeMarker]
+    let onCorrectPPoints: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 8) {
+                Text(formatTime(playbackManager.currentTime))
+                Slider(
+                    value: Binding(
+                        get: { min(max(playbackManager.currentTime, 0), max(playbackManager.duration, 0.001)) },
+                        set: { time in
+                            playbackManager.pause()
+                            playbackManager.seek(to: time)
+                        }
+                    ),
+                    in: 0...max(playbackManager.duration, 0.001)
+                )
+                .tint(.white)
+                .accessibilityLabel("视频进度")
+                Text(formatTime(playbackManager.duration))
+            }
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.white.opacity(0.76))
+
+            HStack(spacing: 0) {
+                ForEach(SwingStage.allCases) { stage in
+                    let marker = keyframes.first { $0.stage == stage.rawValue }
+                    let resultState = StageResultPolicy.state(for: marker)
+                    Button {
+                        playbackManager.pause()
+                        if let marker {
+                            playbackManager.seek(to: marker.time)
+                        } else {
+                            onCorrectPPoints()
+                        }
+                    } label: {
+                        ZStack {
+                            if isCurrent(marker) {
+                                Circle()
+                                    .stroke(.white, lineWidth: 1.5)
+                                    .frame(width: 42, height: 42)
+                            }
+
+                            SwingStagePoseGlyph(
+                                stage: stage,
+                                resultState: resultState
+                            )
+                            .frame(width: 40, height: 48)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(
+                        "\(stage.pNumber)，\(SwingStagePoseCue.description(for: stage))，"
+                            + StageResultPresentation.detailLabel(for: resultState)
+                    )
+                    .accessibilityHint(marker == nil ? "打开 P 点修正" : "跳到该阶段")
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func formatTime(_ time: Double) -> String {
+        guard time.isFinite else { return "00:00" }
+        let value = max(time, 0)
+        return String(format: "%02d:%02d", Int(value) / 60, Int(value) % 60)
+    }
+
+    private func isCurrent(_ marker: KeyframeMarker?) -> Bool {
+        guard let marker else { return false }
+        return abs(playbackManager.currentTime - marker.time) <= 0.18
+    }
+}
+
+/// The replay rail is a pose legend, not eight copies of the same SF Symbol.
+/// It follows the P1–P8 checkpoint sequence.  The body is deliberately drawn
+/// heavier than the club so a golfer can read the movement at phone size.
+private struct SwingStagePoseGlyph: View {
+    let stage: SwingStage
+    let resultState: StageResultState
+
+    var body: some View {
+        Canvas { context, size in
+            let pose = SwingStagePoseLibrary.pose(for: stage)
+            let bodyColor: Color
+            let clubColor: Color
+            let ballColor: Color
+            switch resultState {
+            case .confirmed, .manual:
+                bodyColor = .white
+                clubColor = .white.opacity(0.88)
+                ballColor = AnalysisTheme.proTourSignal
+            case .review:
+                bodyColor = AnalysisTheme.current
+                clubColor = AnalysisTheme.current.opacity(0.82)
+                ballColor = AnalysisTheme.current
+            case .unresolved:
+                bodyColor = .white.opacity(0.40)
+                clubColor = .white.opacity(0.30)
+                ballColor = .white.opacity(0.35)
+            }
+            let bodyLineWidth = max(2.25, min(size.width, size.height) * 0.065)
+            let clubLineWidth = max(1.25, bodyLineWidth * 0.56)
+
+            context.stroke(
+                path(for: pose.spine, in: size),
+                with: .color(bodyColor),
+                style: StrokeStyle(lineWidth: bodyLineWidth * 1.12, lineCap: .round, lineJoin: .round)
+            )
+            for stroke in [pose.shoulders, pose.hips] {
+                context.stroke(
+                    path(for: stroke, in: size),
+                    with: .color(bodyColor),
+                    style: StrokeStyle(lineWidth: bodyLineWidth * 0.78, lineCap: .round, lineJoin: .round)
+                )
+            }
+            for limb in pose.limbs {
+                context.stroke(
+                    path(for: limb, in: size),
+                    with: .color(bodyColor),
+                    style: StrokeStyle(lineWidth: bodyLineWidth, lineCap: .round, lineJoin: .round)
+                )
+            }
+            context.stroke(
+                path(for: pose.club, in: size),
+                with: .color(clubColor),
+                style: StrokeStyle(lineWidth: clubLineWidth, lineCap: .round, lineJoin: .round)
+            )
+            if let clubHead = clubHeadPath(for: pose.club, in: size) {
+                context.stroke(
+                    clubHead,
+                    with: .color(clubColor),
+                    style: StrokeStyle(lineWidth: clubLineWidth * 1.55, lineCap: .round)
+                )
+            }
+
+            let headCenter = point(pose.head, in: size)
+            let headDiameter = max(5.2, min(size.width, size.height) * 0.155)
+            let head = CGRect(
+                x: headCenter.x - headDiameter / 2,
+                y: headCenter.y - headDiameter / 2,
+                width: headDiameter,
+                height: headDiameter
+            )
+            context.fill(Path(ellipseIn: head), with: .color(bodyColor))
+
+            if let ball = pose.ball {
+                let center = point(ball, in: size)
+                let diameter = max(2.5, min(size.width, size.height) * 0.072)
+                let rect = CGRect(
+                    x: center.x - diameter / 2,
+                    y: center.y - diameter / 2,
+                    width: diameter,
+                    height: diameter
+                )
+                context.fill(
+                    Path(ellipseIn: rect),
+                    with: .color(ballColor)
+                )
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func point(_ normalized: CGPoint, in size: CGSize) -> CGPoint {
+        CGPoint(x: normalized.x * size.width, y: normalized.y * size.height)
+    }
+
+    private func path(for normalizedPoints: [CGPoint], in size: CGSize) -> Path {
+        guard let first = normalizedPoints.first else { return Path() }
+        var path = Path()
+        path.move(to: point(first, in: size))
+        for next in normalizedPoints.dropFirst() {
+            path.addLine(to: point(next, in: size))
+        }
+        return path
+    }
+
+    private func clubHeadPath(for club: [CGPoint], in size: CGSize) -> Path? {
+        guard club.count >= 2 else { return nil }
+        let tip = point(club[club.count - 1], in: size)
+        let preceding = point(club[club.count - 2], in: size)
+        let dx = tip.x - preceding.x
+        let dy = tip.y - preceding.y
+        let length = hypot(dx, dy)
+        guard length > 0.001 else { return nil }
+
+        let halfWidth = max(1.5, min(size.width, size.height) * 0.055)
+        let perpendicular = CGPoint(
+            x: -dy / length * halfWidth,
+            y: dx / length * halfWidth
+        )
+        var path = Path()
+        path.move(to: CGPoint(x: tip.x - perpendicular.x, y: tip.y - perpendicular.y))
+        path.addLine(to: CGPoint(x: tip.x + perpendicular.x, y: tip.y + perpendicular.y))
+        return path
+    }
+}
+
+private enum SwingStagePoseCue {
+    static func description(for stage: SwingStage) -> String {
+        switch stage {
+        case .address:
+            return "准备：双膝微屈，杆头落在球后"
+        case .takeaway:
+            return "起杆：杆身在身后平行地面"
+        case .leadArmParallelBackswing:
+            return "上杆左臂平行：左臂平行地面，右肘收拢"
+        case .top:
+            return "上杆顶点：双手越过后肩，杆身横过肩线"
+        case .leadArmParallelDownswing:
+            return "下杆左臂平行：左臂平行地面，杆身从身后下落"
+        case .shaftParallelDownswing:
+            return "下杆杆身平行：双手降至前髋，杆身水平滞后"
+        case .impact:
+            return "击球：双臂伸向球位，杆身前倾"
+        case .followThrough:
+            return "送杆杆身平行：双臂越过身体，杆身再次平行"
+        case .finish:
+            return "收杆：重心落在前脚，杆身绕到背后"
+        }
+    }
+}
+
+private struct SwingStagePose {
+    let head: CGPoint
+    let spine: [CGPoint]
+    let shoulders: [CGPoint]
+    let hips: [CGPoint]
+    let leadArm: [CGPoint]
+    let trailArm: [CGPoint]
+    let leadLeg: [CGPoint]
+    let trailLeg: [CGPoint]
+    let club: [CGPoint]
+    let ball: CGPoint?
+
+    var limbs: [[CGPoint]] {
+        [leadArm, trailArm, leadLeg, trailLeg]
+    }
+}
+
+private enum SwingStagePoseLibrary {
+    static func pose(for stage: SwingStage) -> SwingStagePose {
+        switch stage {
+        case .address:
+            return SwingStagePose(
+                head: CGPoint(x: 0.44, y: 0.16),
+                spine: [CGPoint(x: 0.46, y: 0.30), CGPoint(x: 0.53, y: 0.56)],
+                shoulders: [CGPoint(x: 0.42, y: 0.31), CGPoint(x: 0.50, y: 0.32)],
+                hips: [CGPoint(x: 0.48, y: 0.56), CGPoint(x: 0.58, y: 0.57)],
+                leadArm: [CGPoint(x: 0.42, y: 0.32), CGPoint(x: 0.54, y: 0.45), CGPoint(x: 0.63, y: 0.59)],
+                trailArm: [CGPoint(x: 0.50, y: 0.32), CGPoint(x: 0.56, y: 0.47), CGPoint(x: 0.63, y: 0.59)],
+                leadLeg: [CGPoint(x: 0.48, y: 0.56), CGPoint(x: 0.39, y: 0.75), CGPoint(x: 0.34, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.58, y: 0.57), CGPoint(x: 0.63, y: 0.76), CGPoint(x: 0.70, y: 0.94)],
+                club: [CGPoint(x: 0.63, y: 0.59), CGPoint(x: 0.87, y: 0.93)],
+                ball: CGPoint(x: 0.90, y: 0.94)
+            )
+        case .takeaway:
+            return SwingStagePose(
+                head: CGPoint(x: 0.44, y: 0.16),
+                spine: [CGPoint(x: 0.46, y: 0.30), CGPoint(x: 0.53, y: 0.56)],
+                shoulders: [CGPoint(x: 0.42, y: 0.31), CGPoint(x: 0.50, y: 0.32)],
+                hips: [CGPoint(x: 0.48, y: 0.56), CGPoint(x: 0.58, y: 0.57)],
+                leadArm: [CGPoint(x: 0.42, y: 0.32), CGPoint(x: 0.31, y: 0.41), CGPoint(x: 0.18, y: 0.46)],
+                trailArm: [CGPoint(x: 0.50, y: 0.32), CGPoint(x: 0.35, y: 0.46), CGPoint(x: 0.18, y: 0.46)],
+                leadLeg: [CGPoint(x: 0.48, y: 0.56), CGPoint(x: 0.39, y: 0.75), CGPoint(x: 0.34, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.58, y: 0.57), CGPoint(x: 0.63, y: 0.76), CGPoint(x: 0.70, y: 0.94)],
+                club: [CGPoint(x: 0.18, y: 0.46), CGPoint(x: 0.03, y: 0.46)],
+                ball: nil
+            )
+        case .leadArmParallelBackswing:
+            return SwingStagePose(
+                head: CGPoint(x: 0.47, y: 0.15),
+                spine: [CGPoint(x: 0.48, y: 0.30), CGPoint(x: 0.54, y: 0.56)],
+                shoulders: [CGPoint(x: 0.44, y: 0.31), CGPoint(x: 0.53, y: 0.33)],
+                hips: [CGPoint(x: 0.49, y: 0.56), CGPoint(x: 0.59, y: 0.57)],
+                leadArm: [CGPoint(x: 0.44, y: 0.31), CGPoint(x: 0.31, y: 0.34), CGPoint(x: 0.14, y: 0.34)],
+                trailArm: [CGPoint(x: 0.53, y: 0.33), CGPoint(x: 0.38, y: 0.43), CGPoint(x: 0.14, y: 0.34)],
+                leadLeg: [CGPoint(x: 0.49, y: 0.56), CGPoint(x: 0.40, y: 0.76), CGPoint(x: 0.35, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.59, y: 0.57), CGPoint(x: 0.65, y: 0.77), CGPoint(x: 0.72, y: 0.94)],
+                club: [CGPoint(x: 0.14, y: 0.34), CGPoint(x: 0.05, y: 0.04)],
+                ball: nil
+            )
+        case .top:
+            return SwingStagePose(
+                head: CGPoint(x: 0.55, y: 0.17),
+                spine: [CGPoint(x: 0.52, y: 0.30), CGPoint(x: 0.55, y: 0.57)],
+                shoulders: [CGPoint(x: 0.47, y: 0.31), CGPoint(x: 0.57, y: 0.31)],
+                hips: [CGPoint(x: 0.50, y: 0.57), CGPoint(x: 0.60, y: 0.57)],
+                leadArm: [CGPoint(x: 0.47, y: 0.31), CGPoint(x: 0.32, y: 0.22), CGPoint(x: 0.20, y: 0.16)],
+                trailArm: [CGPoint(x: 0.57, y: 0.31), CGPoint(x: 0.39, y: 0.21), CGPoint(x: 0.20, y: 0.16)],
+                leadLeg: [CGPoint(x: 0.50, y: 0.57), CGPoint(x: 0.41, y: 0.77), CGPoint(x: 0.36, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.60, y: 0.57), CGPoint(x: 0.66, y: 0.77), CGPoint(x: 0.73, y: 0.94)],
+                club: [CGPoint(x: 0.20, y: 0.16), CGPoint(x: 0.63, y: 0.12)],
+                ball: nil
+            )
+        case .leadArmParallelDownswing:
+            return SwingStagePose(
+                head: CGPoint(x: 0.58, y: 0.17),
+                spine: [CGPoint(x: 0.55, y: 0.30), CGPoint(x: 0.53, y: 0.56)],
+                shoulders: [CGPoint(x: 0.51, y: 0.31), CGPoint(x: 0.60, y: 0.33)],
+                hips: [CGPoint(x: 0.48, y: 0.56), CGPoint(x: 0.58, y: 0.57)],
+                leadArm: [CGPoint(x: 0.51, y: 0.31), CGPoint(x: 0.66, y: 0.31), CGPoint(x: 0.80, y: 0.32)],
+                trailArm: [CGPoint(x: 0.60, y: 0.33), CGPoint(x: 0.64, y: 0.45), CGPoint(x: 0.80, y: 0.32)],
+                leadLeg: [CGPoint(x: 0.48, y: 0.56), CGPoint(x: 0.40, y: 0.76), CGPoint(x: 0.34, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.58, y: 0.57), CGPoint(x: 0.65, y: 0.77), CGPoint(x: 0.72, y: 0.94)],
+                club: [CGPoint(x: 0.80, y: 0.32), CGPoint(x: 0.60, y: 0.05)],
+                ball: nil
+            )
+        case .shaftParallelDownswing:
+            return SwingStagePose(
+                head: CGPoint(x: 0.58, y: 0.18),
+                spine: [CGPoint(x: 0.55, y: 0.31), CGPoint(x: 0.52, y: 0.57)],
+                shoulders: [CGPoint(x: 0.50, y: 0.32), CGPoint(x: 0.60, y: 0.34)],
+                hips: [CGPoint(x: 0.47, y: 0.57), CGPoint(x: 0.57, y: 0.58)],
+                leadArm: [CGPoint(x: 0.50, y: 0.32), CGPoint(x: 0.65, y: 0.45), CGPoint(x: 0.76, y: 0.54)],
+                trailArm: [CGPoint(x: 0.60, y: 0.34), CGPoint(x: 0.65, y: 0.51), CGPoint(x: 0.76, y: 0.54)],
+                leadLeg: [CGPoint(x: 0.47, y: 0.57), CGPoint(x: 0.41, y: 0.77), CGPoint(x: 0.35, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.57, y: 0.58), CGPoint(x: 0.65, y: 0.78), CGPoint(x: 0.73, y: 0.94)],
+                club: [CGPoint(x: 0.76, y: 0.54), CGPoint(x: 0.34, y: 0.54)],
+                ball: nil
+            )
+        case .impact:
+            return SwingStagePose(
+                head: CGPoint(x: 0.58, y: 0.18),
+                spine: [CGPoint(x: 0.55, y: 0.31), CGPoint(x: 0.52, y: 0.57)],
+                shoulders: [CGPoint(x: 0.50, y: 0.32), CGPoint(x: 0.60, y: 0.34)],
+                hips: [CGPoint(x: 0.47, y: 0.57), CGPoint(x: 0.57, y: 0.58)],
+                leadArm: [CGPoint(x: 0.50, y: 0.32), CGPoint(x: 0.65, y: 0.45), CGPoint(x: 0.82, y: 0.55)],
+                trailArm: [CGPoint(x: 0.60, y: 0.34), CGPoint(x: 0.70, y: 0.48), CGPoint(x: 0.82, y: 0.55)],
+                leadLeg: [CGPoint(x: 0.47, y: 0.57), CGPoint(x: 0.41, y: 0.77), CGPoint(x: 0.35, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.57, y: 0.58), CGPoint(x: 0.67, y: 0.77), CGPoint(x: 0.75, y: 0.91)],
+                club: [CGPoint(x: 0.82, y: 0.55), CGPoint(x: 0.95, y: 0.86)],
+                ball: CGPoint(x: 0.96, y: 0.88)
+            )
+        case .followThrough:
+            return SwingStagePose(
+                head: CGPoint(x: 0.58, y: 0.16),
+                spine: [CGPoint(x: 0.55, y: 0.29), CGPoint(x: 0.58, y: 0.55)],
+                shoulders: [CGPoint(x: 0.51, y: 0.30), CGPoint(x: 0.60, y: 0.31)],
+                hips: [CGPoint(x: 0.52, y: 0.55), CGPoint(x: 0.63, y: 0.56)],
+                leadArm: [CGPoint(x: 0.51, y: 0.30), CGPoint(x: 0.68, y: 0.36), CGPoint(x: 0.85, y: 0.40)],
+                trailArm: [CGPoint(x: 0.60, y: 0.31), CGPoint(x: 0.70, y: 0.41), CGPoint(x: 0.85, y: 0.40)],
+                leadLeg: [CGPoint(x: 0.52, y: 0.55), CGPoint(x: 0.44, y: 0.76), CGPoint(x: 0.39, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.63, y: 0.56), CGPoint(x: 0.72, y: 0.72), CGPoint(x: 0.81, y: 0.88)],
+                club: [CGPoint(x: 0.85, y: 0.40), CGPoint(x: 0.99, y: 0.40)],
+                ball: nil
+            )
+        case .finish:
+            return SwingStagePose(
+                head: CGPoint(x: 0.57, y: 0.15),
+                spine: [CGPoint(x: 0.55, y: 0.29), CGPoint(x: 0.59, y: 0.55)],
+                shoulders: [CGPoint(x: 0.51, y: 0.30), CGPoint(x: 0.60, y: 0.31)],
+                hips: [CGPoint(x: 0.55, y: 0.55), CGPoint(x: 0.65, y: 0.56)],
+                leadArm: [CGPoint(x: 0.51, y: 0.30), CGPoint(x: 0.37, y: 0.18), CGPoint(x: 0.24, y: 0.12)],
+                trailArm: [CGPoint(x: 0.60, y: 0.31), CGPoint(x: 0.42, y: 0.20), CGPoint(x: 0.24, y: 0.12)],
+                leadLeg: [CGPoint(x: 0.55, y: 0.55), CGPoint(x: 0.46, y: 0.76), CGPoint(x: 0.42, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.65, y: 0.56), CGPoint(x: 0.75, y: 0.70), CGPoint(x: 0.82, y: 0.88)],
+                club: [CGPoint(x: 0.24, y: 0.12), CGPoint(x: 0.11, y: 0.02)],
+                ball: nil
+            )
+        }
+    }
+}
+
+struct CompactPlaybackControlsView: View {
+    @ObservedObject var playbackManager: VideoPlaybackManager
+    @Binding var interactionMode: WorkspaceInteractionMode
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Menu {
+                ForEach(PlaybackRate.allCases) { rate in
+                    Button(rate.label) {
+                        perform(.selectRate(rate.value))
+                    }
+                }
+            } label: {
+                Text(speedLabel)
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .frame(
+                        minWidth: CompactPlaybackPolicy.minimumTouchTarget,
+                        minHeight: CompactPlaybackPolicy.minimumTouchTarget
+                    )
+                    .background(.black.opacity(0.46), in: Capsule())
+            }
+            .accessibilityLabel("播放速度，当前 \(speedLabel)")
+
+            compactButton(
+                systemImage: "backward.frame.fill",
+                label: "前一帧"
+            ) {
+                perform(.previousFrame)
+            }
+
+            compactButton(
+                systemImage: playbackManager.isPlaying ? "pause.fill" : "play.fill",
+                label: playbackManager.isPlaying ? "暂停" : "播放",
+                emphasized: true
+            ) {
+                perform(.togglePlayback)
+            }
+
+            compactButton(
+                systemImage: "forward.frame.fill",
+                label: "后一帧"
+            ) {
+                perform(.nextFrame)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .foregroundStyle(.white)
+    }
+
+    private var speedLabel: String {
+        PlaybackRate.allCases.first {
+            abs($0.value - playbackManager.playbackSpeed) < 0.001
+        }?.label ?? String(format: "%.2g×", playbackManager.playbackSpeed)
+    }
+
+    private func perform(_ action: CompactPlaybackAction) {
+        CompactPlaybackInteraction.perform(
+            action,
+            isPlaying: playbackManager.isPlaying,
+            play: {
+                interactionMode = .idle
+                playbackManager.play()
+            },
+            pause: playbackManager.pause,
+            stepFrame: { playbackManager.stepFrame(forward: $0) },
+            setRate: playbackManager.setSpeed
+        )
+    }
+
+    private func compactButton(
+        systemImage: String,
+        label: String,
+        emphasized: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: emphasized ? 18 : 15, weight: .bold))
+                .frame(
+                    width: emphasized ? 50 : CompactPlaybackPolicy.minimumTouchTarget,
+                    height: emphasized ? 50 : CompactPlaybackPolicy.minimumTouchTarget
+                )
+                .background(
+                    emphasized
+                        ? AnalysisTheme.proTourSignal
+                        : .black.opacity(0.46),
+                    in: Circle()
+                )
+                .foregroundStyle(
+                    emphasized ? AnalysisTheme.proTourBackground : .white
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+}
+
 struct PlaybackControlsView: View {
     @ObservedObject var playbackManager: VideoPlaybackManager
     @Binding var interactionMode: WorkspaceInteractionMode
     let hasResults: Bool
     let onToggleDrawing: () -> Void
     let onAnalyze: () -> Void
-    let onShowResults: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -473,13 +692,13 @@ struct PlaybackControlsView: View {
             }
             .accessibilityLabel(interactionMode == .drawing ? "结束画线" : "画线")
 
-            Button(action: hasResults ? onShowResults : onAnalyze) {
+            Button(action: onAnalyze) {
                 VStack(spacing: 1) {
-                    Image(systemName: hasResults ? "list.bullet.rectangle" : "sparkles")
-                    Text(hasResults ? "结果" : "分析")
+                    Image(systemName: hasResults ? "arrow.clockwise" : "sparkles")
+                    Text(hasResults ? "重新分析" : "分析")
                         .font(.caption2.weight(.semibold))
                 }
-                .frame(width: 50, height: 44)
+                .frame(width: 58, height: 44)
                 .background(
                     hasResults ? AnalysisTheme.proTourSurface : AnalysisTheme.proTourSignal,
                     in: RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -487,7 +706,7 @@ struct PlaybackControlsView: View {
                 .foregroundStyle(hasResults ? AnalysisTheme.proTourPrimaryText : AnalysisTheme.proTourBackground)
             }
             .disabled(playbackManager.isScanning)
-            .accessibilityLabel(hasResults ? "查看分析结果" : "开始 AI 分析")
+            .accessibilityLabel(hasResults ? "重新分析" : "开始 P1–P8 分析")
         }
         .frame(maxWidth: .infinity)
         .foregroundStyle(AnalysisTheme.proTourPrimaryText)
@@ -757,80 +976,6 @@ struct AnalysisFailureBanner: View {
     }
 }
 
-struct TechniqueFeedbackCard: View {
-    let presentation: TechniqueFeedbackPresentation
-    let onSelectEvidence: (SwingStage) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 9) {
-                Image(systemName: presentation.showsEvidence ? "scope" : "questionmark.circle")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(presentation.showsEvidence ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourSecondaryText)
-                Text(presentation.showsEvidence ? "PRIORITY FEEDBACK" : "EVIDENCE PENDING")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .tracking(1.1)
-                    .foregroundStyle(presentation.showsEvidence ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourSecondaryText)
-                Spacer(minLength: 0)
-                Text(presentation.showsEvidence ? "CONFIRMED" : "NO PRESCRIPTION")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .tracking(0.7)
-                    .foregroundStyle(AnalysisTheme.proTourSecondaryText)
-            }
-
-            Text(presentation.title)
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
-            Text(presentation.detail)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(AnalysisTheme.proTourSecondaryText)
-
-            if presentation.showsEvidence {
-                VStack(alignment: .leading, spacing: 9) {
-                    Text("CONFIRMED P-STAGES")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .tracking(0.9)
-                        .foregroundStyle(AnalysisTheme.proTourSecondaryText)
-                    HStack(spacing: 8) {
-                        ForEach(presentation.evidenceStages) { stage in
-                            Button(stage.pNumber) { onSelectEvidence(stage) }
-                                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                                .foregroundStyle(AnalysisTheme.proTourBackground)
-                                .frame(minWidth: 44, minHeight: 36)
-                                .background(AnalysisTheme.proTourSignal, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        }
-                        Spacer(minLength: 0)
-                    }
-                }
-            }
-
-            if let drill = presentation.drill {
-                HStack(spacing: 10) {
-                    Image(systemName: "figure.strengthtraining.traditional")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(AnalysisTheme.proTourSignal)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("DRILL")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .tracking(0.9)
-                            .foregroundStyle(AnalysisTheme.proTourSecondaryText)
-                        Text(drill.title)
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(AnalysisTheme.proTourPrimaryText)
-                    }
-                }
-                .padding(.top, 2)
-            }
-        }
-        .padding(16)
-        .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(AnalysisTheme.proTourRaisedSurface, lineWidth: 1)
-        )
-    }
-}
-
 struct StageInspectorView: View {
     let presentation: AnalysisWorkspacePresentation
     let keyframes: [KeyframeMarker]
@@ -854,7 +999,7 @@ struct StageInspectorView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("阶段结果")
                     .font(.headline)
-                Text("已确认 \(summary.confirmed) · 待核对 \(summary.review) · 未确定 \(summary.unresolved)")
+                Text("已识别 \(summary.confirmed) · 待核对 \(summary.review) · 未识别 \(summary.unresolved)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -896,10 +1041,6 @@ struct WorkspaceInspectorView: View {
     @ObservedObject var playbackManager: VideoPlaybackManager
     let presentation: AnalysisWorkspacePresentation
     let keyframes: [KeyframeMarker]
-    @Binding var showPoseSkeleton: Bool
-    @Binding var showHeadStability: Bool
-    @Binding var showSpineAngle: Bool
-    @Binding var showGrid: Bool
     let onCancelAnalysis: () -> Void
     let onSeek: (Double) -> Void
     let onAdjust: (SwingStage) -> Void
@@ -926,23 +1067,6 @@ struct WorkspaceInspectorView: View {
                 AnalysisFailureBanner(failure: failure)
             }
 
-            Divider().overlay(.white.opacity(0.14))
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("叠层")
-                    .font(.headline)
-                Toggle("骨架", isOn: $showPoseSkeleton)
-                Toggle("头部轨迹", isOn: $showHeadStability)
-                Toggle("身体倾斜", isOn: $showSpineAngle)
-                Toggle("参考网格", isOn: $showGrid)
-            }
-            .disabled(!presentation.allowsPoseOverlays)
-
-            if !presentation.allowsPoseOverlays {
-                Text("分析完成后可开启人体叠层")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
             Spacer(minLength: 0)
         }
         .padding(14)
@@ -953,7 +1077,7 @@ struct WorkspaceInspectorView: View {
 
 struct StageAdjustmentBar: View {
     let stage: SwingStage
-    let detection: SwingStageDetection?
+    let marker: KeyframeMarker?
     @ObservedObject var playbackManager: VideoPlaybackManager
     let onCancel: () -> Void
     let onSetCurrentFrame: () -> Void
@@ -1009,18 +1133,16 @@ struct StageAdjustmentBar: View {
     }
 
     private var confidenceLabel: String {
-        switch detection?.status {
-        case .confirmed: return "已确认"
-        case .lowConfidence: return "待核对"
-        case .unresolved, nil: return "未确定"
-        }
+        StageResultPresentation.label(
+            for: StageResultPolicy.state(for: marker)
+        )
     }
 
     private var confidenceColor: Color {
-        switch detection?.status {
-        case .confirmed: return AnalysisTheme.confirmed
-        case .lowConfidence: return AnalysisTheme.current
-        case .unresolved, nil: return .white.opacity(0.55)
+        switch StageResultPolicy.state(for: marker) {
+        case .confirmed, .manual: return AnalysisTheme.confirmed
+        case .review: return AnalysisTheme.current
+        case .unresolved: return .white.opacity(0.55)
         }
     }
 
@@ -1185,8 +1307,9 @@ private struct SwingPhaseSilhouette: View {
         case .leadArmParallelBackswing: .degrees(-72)
         case .top: .degrees(-112)
         case .leadArmParallelDownswing: .degrees(38)
+        case .shaftParallelDownswing: .degrees(0)
         case .impact: .degrees(18)
-        case .followThrough: .degrees(66)
+        case .followThrough: .degrees(0)
         case .finish: .degrees(105)
         }
     }
@@ -1252,10 +1375,7 @@ private struct StageDisplayDescriptor {
     }
 
     var resultState: StageResultState {
-        if marker?.isLocked == true { return .manual }
-        if detection?.status == .lowConfidence { return .review }
-        if marker != nil { return .confirmed }
-        return .unresolved
+        StageResultPolicy.state(for: marker)
     }
 
     var stageStripColor: Color {
@@ -1278,12 +1398,7 @@ private struct StageDisplayDescriptor {
 
     var shortStatus: String {
         if isCurrent { return "当前" }
-        switch resultState {
-        case .confirmed: return "已确认"
-        case .manual: return "已锁定"
-        case .review: return "待核对"
-        case .unresolved: return "未确定"
-        }
+        return StageResultPresentation.detailLabel(for: resultState)
     }
 
     var foregroundColor: Color {
@@ -1319,19 +1434,29 @@ private struct StageDisplayDescriptor {
     func detailText(sourceFrameRate: Double) -> String {
         guard let marker else { return shortStatus }
         let frame = detection?.sourceFrameIndex
+            ?? marker.sourceFrameIndex
             ?? Int((marker.time * max(sourceFrameRate, 1)).rounded())
         var parts = [
             String(format: "%.3f 秒", marker.time),
             "第 \(frame) 帧",
             shortStatus
         ]
+        if let confidence = detection?.confidence ?? marker.automaticConfidence {
+            parts.append("置信度 \(Int((confidence * 100).rounded()))%")
+        }
         if let detection {
-            parts.append("置信度 \(Int((detection.confidence * 100).rounded()))%")
             if stage == .takeaway || stage == .impact {
                 parts.append(detection.hasClubEvidence ? "有杆身" : "无杆身")
             }
             if stage == .impact {
                 parts.append(detection.hasBallEvidence ? "有球位" : "无球位")
+            }
+        } else if let evidence = marker.automaticEvidence {
+            if stage == .takeaway || stage == .impact {
+                parts.append(evidence.hasClubEvidence ? "有杆身" : "无杆身")
+            }
+            if stage == .impact {
+                parts.append(evidence.hasBallEvidence ? "有球位" : "无球位")
             }
         }
         return parts.joined(separator: " · ")
@@ -1340,7 +1465,10 @@ private struct StageDisplayDescriptor {
 
 private extension SwingStage {
     var pNumber: String {
-        "P\((SwingStage.allCases.firstIndex(of: self) ?? 0) + 1)"
+        guard let index = SwingStage.allCases.firstIndex(of: self) else {
+            return "收杆"
+        }
+        return "P\(index + 1)"
     }
 
     var displayName: String {
@@ -1350,6 +1478,7 @@ private extension SwingStage {
         case .leadArmParallelBackswing: return "上杆左臂平行"
         case .top: return "上杆顶点"
         case .leadArmParallelDownswing: return "下杆左臂平行"
+        case .shaftParallelDownswing: return "下杆杆身平行"
         case .impact: return "击球"
         case .followThrough: return "送杆"
         case .finish: return "收杆"

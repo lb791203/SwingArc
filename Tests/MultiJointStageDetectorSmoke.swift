@@ -13,7 +13,20 @@ struct MultiJointStageDetectorSmoke {
 
         let result = SwingStageDetector.detectLegacySamplesForSmokeTests(samples)
         precondition(result.detections.map(\.stage) == SwingStage.allCases)
-        precondition(result.detections.allSatisfy { $0.status == .confirmed })
+        // Legacy pose-only fixtures may still locate the body-defined stages,
+        // but they must never invent the shaft-defined P6/P8 positions.
+        precondition(detection(.shaftParallelDownswing, in: result).status == .unresolved)
+        precondition(detection(.shaftParallelDownswing, in: result).time == nil)
+        precondition(detection(.followThrough, in: result).status == .unresolved)
+        precondition(detection(.followThrough, in: result).time == nil)
+        let poseDefinedStages = SwingStage.pStages.filter {
+            $0 != .shaftParallelDownswing && $0 != .followThrough
+        }
+        precondition(
+            result.detections
+                .filter { poseDefinedStages.contains($0.stage) }
+                .allSatisfy { $0.status == .confirmed }
+        )
         let times = result.detections.compactMap(\.time)
         precondition(zip(times, times.dropFirst()).allSatisfy(<))
 
@@ -56,5 +69,12 @@ struct MultiJointStageDetectorSmoke {
             leftHip: CGPoint(x: 0.43, y: 0.58), rightHip: CGPoint(x: 0.57, y: 0.58),
             head: CGPoint(x: 0.50, y: 0.16), spineAngle: 18, aggregateConfidence: 0.92
         )
+    }
+
+    private static func detection(
+        _ stage: SwingStage,
+        in result: SwingAnalysisResult
+    ) -> SwingStageDetection {
+        result.detections.first { $0.stage == stage }!
     }
 }

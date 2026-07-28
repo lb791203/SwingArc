@@ -63,9 +63,25 @@ enum SwingStage: String, CaseIterable, Identifiable, Codable {
     case leadArmParallelBackswing = "上杆左臂平行 (Lead Arm Parallel)"
     case top = "上杆顶点 (Top)"
     case leadArmParallelDownswing = "下杆左臂平行 (Lead Arm Parallel)"
+    case shaftParallelDownswing = "下杆杆身平行 (Shaft Parallel)"
     case impact = "击球瞬间 (Impact)"
     case followThrough = "送杆 (Follow-Through)"
     case finish = "收杆 (Finish)"
+
+    /// The canonical P-system track. `.finish` remains decodable so stored
+    /// projects retain their historical marker, but it is not a P1–P8 stage.
+    static let pStages: [SwingStage] = [
+        .address,
+        .takeaway,
+        .leadArmParallelBackswing,
+        .top,
+        .leadArmParallelDownswing,
+        .shaftParallelDownswing,
+        .impact,
+        .followThrough
+    ]
+
+    static let allCases = pStages
     
     var id: String { self.rawValue }
     
@@ -76,9 +92,10 @@ enum SwingStage: String, CaseIterable, Identifiable, Codable {
         case .leadArmParallelBackswing: return "P3 上杆"
         case .top: return "P4 顶点"
         case .leadArmParallelDownswing: return "P5 下杆"
-        case .impact: return "P6 击球"
-        case .followThrough: return "P7 送杆"
-        case .finish: return "P8 收杆"
+        case .shaftParallelDownswing: return "P6 杆身平行"
+        case .impact: return "P7 击球"
+        case .followThrough: return "P8 释放"
+        case .finish: return "收杆（兼容）"
         }
     }
     
@@ -89,6 +106,7 @@ enum SwingStage: String, CaseIterable, Identifiable, Codable {
         case .leadArmParallelBackswing: return .cyan
         case .top: return .orange
         case .leadArmParallelDownswing: return .yellow
+        case .shaftParallelDownswing: return .purple
         case .impact: return .red
         case .followThrough: return .indigo
         case .finish: return .green
@@ -102,22 +120,78 @@ enum KeyframeSource: String, Codable, Equatable {
     case manual
 }
 
+enum KeyframeAutomaticStatus: String, Codable, Equatable {
+    case confirmed
+    case lowConfidence
+}
+
+enum KeyframeEvidenceSource: String, Codable, Hashable {
+    case bodyPose
+    case grip
+    case shaft
+    case clubhead
+    case ball
+    case temporalTransition
+    case manual
+}
+
+struct KeyframeEvidenceSnapshot: Codable, Equatable {
+    let sources: Set<KeyframeEvidenceSource>
+    let detectedPointCount: Int
+    let estimatedPointCount: Int
+    let hasClubEvidence: Bool
+    let hasBallEvidence: Bool
+    let hasBallChangeEvidence: Bool
+}
+
 struct KeyframeMarker: Identifiable, Codable, Equatable {
     let id: UUID
     let time: Double // 视频时间（秒）
     let stage: String // SwingStage rawValue
     let source: KeyframeSource
+    let sourceFrameIndex: Int?
+    let automaticStatus: KeyframeAutomaticStatus?
+    let automaticConfidence: Double?
+    let automaticEvidence: KeyframeEvidenceSnapshot?
     
-    init(id: UUID = UUID(), time: Double, stage: SwingStage, source: KeyframeSource = .automatic) {
+    init(
+        id: UUID = UUID(),
+        time: Double,
+        stage: SwingStage,
+        source: KeyframeSource = .automatic,
+        sourceFrameIndex: Int? = nil,
+        automaticStatus: KeyframeAutomaticStatus? = nil,
+        automaticConfidence: Double? = nil,
+        automaticEvidence: KeyframeEvidenceSnapshot? = nil
+    ) {
         self.id = id
         self.time = time
         self.stage = stage.rawValue
         self.source = source
+        self.sourceFrameIndex = sourceFrameIndex
+        if source == .automatic {
+            self.automaticStatus = automaticStatus ?? .lowConfidence
+            self.automaticConfidence = automaticConfidence
+            self.automaticEvidence = automaticEvidence
+        } else {
+            self.automaticStatus = nil
+            self.automaticConfidence = nil
+            self.automaticEvidence = nil
+        }
     }
 
     var isLocked: Bool { source == .manual }
 
-    private enum CodingKeys: String, CodingKey { case id, time, stage, source }
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case time
+        case stage
+        case source
+        case sourceFrameIndex
+        case automaticStatus
+        case automaticConfidence
+        case automaticEvidence
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -125,6 +199,28 @@ struct KeyframeMarker: Identifiable, Codable, Equatable {
         time = try container.decode(Double.self, forKey: .time)
         stage = try container.decode(String.self, forKey: .stage)
         source = try container.decodeIfPresent(KeyframeSource.self, forKey: .source) ?? .automatic
+        sourceFrameIndex = try container.decodeIfPresent(
+            Int.self,
+            forKey: .sourceFrameIndex
+        )
+        if source == .automatic {
+            automaticStatus = try container.decodeIfPresent(
+                KeyframeAutomaticStatus.self,
+                forKey: .automaticStatus
+            ) ?? .lowConfidence
+            automaticConfidence = try container.decodeIfPresent(
+                Double.self,
+                forKey: .automaticConfidence
+            )
+            automaticEvidence = try container.decodeIfPresent(
+                KeyframeEvidenceSnapshot.self,
+                forKey: .automaticEvidence
+            )
+        } else {
+            automaticStatus = nil
+            automaticConfidence = nil
+            automaticEvidence = nil
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -133,6 +229,19 @@ struct KeyframeMarker: Identifiable, Codable, Equatable {
         try container.encode(time, forKey: .time)
         try container.encode(stage, forKey: .stage)
         try container.encode(source, forKey: .source)
+        try container.encodeIfPresent(
+            sourceFrameIndex,
+            forKey: .sourceFrameIndex
+        )
+        try container.encodeIfPresent(automaticStatus, forKey: .automaticStatus)
+        try container.encodeIfPresent(
+            automaticConfidence,
+            forKey: .automaticConfidence
+        )
+        try container.encodeIfPresent(
+            automaticEvidence,
+            forKey: .automaticEvidence
+        )
     }
 }
 

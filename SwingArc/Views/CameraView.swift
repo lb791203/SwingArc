@@ -1,15 +1,19 @@
 import SwiftUI
 import AVFoundation
 import Combine
+import UIKit
 
 /// 摄像头录制回调
 struct CameraView: View {
     @Environment(\.presentationMode) var presentationMode
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     let onRecordCompleted: (URL) -> Void
 
-    @State private var isRecording = false
+    @State private var captureLifecycle = ManualCaptureLifecycle()
     @State private var useFrontCamera = false
     @State private var pendingAutomaticStop: DispatchWorkItem?
+    @State private var recordingAlertMessage: String?
 
     @StateObject private var cameraState = CameraStateModel()
 
@@ -31,6 +35,51 @@ struct CameraView: View {
             .ignoresSafeArea()
             .allowsHitTesting(false)
 
+            if cameraState.accessState != .ready {
+                Color.black.opacity(0.72).ignoresSafeArea()
+                VStack(spacing: 16) {
+                    if cameraState.accessState == .checking {
+                        ProgressView()
+                            .tint(AnalysisTheme.proTourSignal)
+                    } else {
+                        Image(systemName: "camera.fill")
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundStyle(AnalysisTheme.proTourSignal)
+                    }
+
+                    Text(CameraAccessPresentation.title(for: cameraState.accessState))
+                        .font(.title2.bold())
+                        .accessibilityLabel(
+                            cameraState.accessState == .denied
+                                ? "需要相机权限"
+                                : CameraAccessPresentation.title(for: cameraState.accessState)
+                        )
+
+                    Text(CameraAccessPresentation.detail(for: cameraState.accessState))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+
+                    if cameraState.accessState == .denied {
+                        Button("打开设置") {
+                            guard let url = URL(
+                                string: UIApplication.openSettingsURLString
+                            ) else { return }
+                            openURL(url)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AnalysisTheme.proTourSignal)
+                    }
+                }
+                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                .padding(28)
+                .background(
+                    AnalysisTheme.proTourSurface,
+                    in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+                )
+                .padding(24)
+                .zIndex(10)
+            }
+
             captureGuide
 
             VStack(spacing: 0) {
@@ -47,9 +96,15 @@ struct CameraView: View {
         .onAppear {
             cameraState.setupSession()
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                cameraState.setupSession()
+            }
+        }
         .onDisappear {
             pendingAutomaticStop?.cancel()
-            if isRecording {
+            if isRecording || isStartingRecording {
+                captureLifecycle.didFinish()
                 cameraState.stopRecording()
             }
             cameraState.stopSession()
@@ -60,6 +115,32 @@ struct CameraView: View {
                 presentationMode.wrappedValue.dismiss()
             }
         }
+        .onChange(of: cameraState.recordingFailureMessage) { _, message in
+            guard let message else { return }
+            pendingAutomaticStop?.cancel()
+            pendingAutomaticStop = nil
+            captureLifecycle.didFail()
+            recordingAlertMessage = message
+        }
+        .alert(
+            "录像未完成",
+            isPresented: Binding(
+                get: { recordingAlertMessage != nil },
+                set: { if !$0 { recordingAlertMessage = nil } }
+            )
+        ) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(recordingAlertMessage ?? "")
+        }
+    }
+
+    private var isRecording: Bool {
+        captureLifecycle.state == .recording
+    }
+
+    private var isStartingRecording: Bool {
+        captureLifecycle.state == .starting
     }
 
     private var header: some View {
@@ -105,6 +186,11 @@ struct CameraView: View {
             }
             .foregroundStyle(AnalysisTheme.proTourPrimaryText)
             .accessibilityLabel("切换前后镜头")
+            .disabled(
+                cameraState.accessState != .ready
+                    || isStartingRecording
+                    || isRecording
+            )
         }
     }
 
@@ -190,12 +276,31 @@ struct CameraView: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(
+            !CameraAccessPresentation.canRecord(cameraState.accessState)
+                || isStartingRecording
+        )
     }
     
     private func startRecording() {
-        isRecording = true
-        cameraState.startRecording()
+        guard CameraAccessPresentation.canRecord(cameraState.accessState) else {
+            return
+        }
+        guard captureLifecycle.requestStart() else { return }
+        cameraState.startRecording { result in
+            switch result {
+            case .success:
+                captureLifecycle.didStart()
+                scheduleAutomaticStop()
+            case .failure(let error):
+                captureLifecycle.didFail()
+                recordingAlertMessage = error.localizedDescription
+            }
+        }
+    }
 
+    private func scheduleAutomaticStop() {
+        guard captureLifecycle.shouldScheduleAutomaticStop else { return }
         let automaticStop = DispatchWorkItem { stopRecording() }
         pendingAutomaticStop = automaticStop
         DispatchQueue.main.asyncAfter(
@@ -208,7 +313,7 @@ struct CameraView: View {
         guard isRecording else { return }
         pendingAutomaticStop?.cancel()
         pendingAutomaticStop = nil
-        isRecording = false
+        captureLifecycle.didFinish()
         cameraState.stopRecording()
     }
 }
@@ -219,6 +324,8 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
     @Published var session = AVCaptureSession()
     @Published var recordedVideoURL: URL? = nil
     @Published private(set) var captureFrameRate: Double = 30
+    @Published private(set) var accessState: CameraAccessState = .checking
+    @Published private(set) var recordingFailureMessage: String?
     
     private var movieOutput = AVCaptureMovieFileOutput()
     private var activeVideoInput: AVCaptureDeviceInput?
@@ -235,48 +342,136 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
     private var practiceStatus: ((PracticeCaptureStatus) -> Void)?
     private var practiceClipCompletion: ((Result<RecordedPracticeClip, PracticeSessionError>) -> Void)?
     private var discardsNextRecording = false
+    private var pendingRecordingStartCompletion: ((
+        Result<Void, CameraRecordingStartError>
+    ) -> Void)?
+
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(sessionWasInterrupted(_:)),
+            name: .AVCaptureSessionWasInterrupted,
+            object: session
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(sessionInterruptionEnded(_:)),
+            name: .AVCaptureSessionInterruptionEnded,
+            object: session
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(sessionRuntimeError(_:)),
+            name: .AVCaptureSessionRuntimeError,
+            object: session
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
     
     func setupSession() {
-        guard session.inputs.isEmpty else { return }
-        
-        session.beginConfiguration()
-        
-        // 预设高分辨率视频输入
-        session.sessionPreset = .high
-        
-        // 默认获取后置广角镜头
-        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-            print("Failed to get back camera")
-            session.commitConfiguration()
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            accessState = .checking
+            configureSessionIfNeeded()
+        case .notDetermined:
+            accessState = .checking
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if granted {
+                        self.accessState = .checking
+                        self.configureSessionIfNeeded()
+                    } else {
+                        self.accessState = .denied
+                        self.stopSession()
+                    }
+                }
+            }
+        case .denied, .restricted:
+            accessState = .denied
+            stopSession()
+        @unknown default:
+            accessState = .unavailable
+            stopSession()
+        }
+    }
+
+    private func configureSessionIfNeeded() {
+        guard session.inputs.isEmpty else {
+            guard activeVideoInput != nil,
+                  session.outputs.contains(where: { $0 === movieOutput }) else {
+                accessState = .unavailable
+                return
+            }
+            accessState = .checking
+            startSessionIfNeeded()
             return
         }
-        
+
+        session.beginConfiguration()
+        session.sessionPreset = .high
+
+        guard let camera = AVCaptureDevice.default(
+            .builtInWideAngleCamera,
+            for: .video,
+            position: .back
+        ) else {
+            session.commitConfiguration()
+            accessState = .unavailable
+            return
+        }
+
         do {
             let input = try AVCaptureDeviceInput(device: camera)
-            if session.canAddInput(input) {
-                session.addInput(input)
-                activeVideoInput = input
+            guard session.canAddInput(input) else {
+                session.commitConfiguration()
+                accessState = .unavailable
+                return
             }
-            
-            // 尝试配置 120 FPS 高帧率
+            session.addInput(input)
+            activeVideoInput = input
             configureHighFrameRate(for: camera)
-            
-            if session.canAddOutput(movieOutput) {
-                session.addOutput(movieOutput)
+            guard session.canAddOutput(movieOutput) else {
+                session.removeInput(input)
+                activeVideoInput = nil
+                session.commitConfiguration()
+                accessState = .unavailable
+                return
             }
+            session.addOutput(movieOutput)
             configureVisualOutput()
-            
             session.commitConfiguration()
-            
-            // Session startup and recording requests share one queue. FIFO
-            // ordering prevents a fast tap from racing `startRunning()`.
-            sessionQueue.async { [weak self] in
-                guard let self, !self.session.isRunning else { return }
+            startSessionIfNeeded()
+        } catch {
+            session.commitConfiguration()
+            accessState = .unavailable
+        }
+    }
+
+    private func startSessionIfNeeded() {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            if !self.session.isRunning {
                 self.session.startRunning()
             }
-        } catch {
-            print("Camera session setup error: \(error)")
-            session.commitConfiguration()
+            self.publishRecordableReadiness()
+        }
+    }
+
+    private func publishRecordableReadiness() {
+        let videoConnection = movieOutput.connection(with: .video)
+        let hasActiveVideoConnection = videoConnection?.isEnabled == true
+            && videoConnection?.isActive == true
+        let isRecordable = CameraRecordingReadiness.isRecordable(
+            sessionIsRunning: session.isRunning,
+            hasActiveVideoConnection: hasActiveVideoConnection
+        )
+        DispatchQueue.main.async { [weak self] in
+            self?.accessState = isRecordable ? .ready : .unavailable
         }
     }
     
@@ -305,13 +500,20 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
         pendingBoundary = nil
         lastPublishedCaptureStatus = nil
         practiceClipCompletion = completion
-        publishPracticeStatus(.captureFrameRateChanged(captureFrameRate))
-        publishPracticeStatus(.searchingForPerson)
-        startRecording { [weak self] in
-            guard let self, let completion = self.practiceClipCompletion else { return }
-            self.clearAutomaticPracticeState()
-            self.practiceClipCompletion = nil
-            completion(.failure(.recordingFailed))
+        startRecording { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.publishPracticeStatus(
+                    .captureFrameRateChanged(self.captureFrameRate)
+                )
+                self.publishPracticeStatus(.searchingForPerson)
+            case .failure:
+                guard let completion = self.practiceClipCompletion else { return }
+                self.clearAutomaticPracticeState()
+                self.practiceClipCompletion = nil
+                completion(.failure(.recordingFailed))
+            }
         }
     }
 
@@ -325,10 +527,20 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
     
     /// 切换前后摄像头
     func toggleCamera(useFront: Bool) {
+        accessState = .checking
+        sessionQueue.async { [weak self] in
+            self?.toggleCameraOnSessionQueue(useFront: useFront)
+        }
+    }
+
+    private func toggleCameraOnSessionQueue(useFront: Bool) {
         session.beginConfiguration()
+        defer {
+            session.commitConfiguration()
+            publishRecordableReadiness()
+        }
         
         guard let currentInput = activeVideoInput else {
-            session.commitConfiguration()
             return
         }
         
@@ -337,7 +549,6 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
         let position: AVCaptureDevice.Position = useFront ? .front : .back
         guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position) else {
             session.addInput(currentInput) // 失败则还原
-            session.commitConfiguration()
             return
         }
         
@@ -355,7 +566,6 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
             session.addInput(currentInput)
         }
         
-        session.commitConfiguration()
     }
     
     /// Prefer 240 FPS, then degrade explicitly to 120 or 60 FPS when the
@@ -421,13 +631,17 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
     
     // MARK: - 录制控制
     
-    func startRecording() {
-        startRecording(onFailure: nil)
-    }
-
-    private func startRecording(onFailure: (() -> Void)?) {
+    func startRecording(
+        completion: @escaping (Result<Void, CameraRecordingStartError>) -> Void
+    ) {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            guard self.pendingRecordingStartCompletion == nil else {
+                DispatchQueue.main.async {
+                    completion(.failure(.rejected))
+                }
+                return
+            }
             let videoConnection = self.movieOutput.connection(with: .video)
             let hasActiveVideoConnection = videoConnection?.isEnabled == true &&
                 videoConnection?.isActive == true
@@ -437,17 +651,24 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
                 isAlreadyRecording: self.movieOutput.isRecording
             ) else {
                 DispatchQueue.main.async {
-                    onFailure?()
+                    completion(.failure(.notReady))
                 }
                 return
             }
 
+            self.pendingRecordingStartCompletion = completion
+            DispatchQueue.main.async {
+                self.recordingFailureMessage = nil
+            }
             let outputURL = URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent("swing_record_\(UUID().uuidString).mp4")
-            // Keep the session queue blocked through the transition while the
-            // delegate call remains on the model's main-actor context.
+            // Keep capture-session ordering serialized while satisfying the
+            // delegate's main-actor isolation under the app target settings.
             DispatchQueue.main.sync {
-                self.movieOutput.startRecording(to: outputURL, recordingDelegate: self)
+                self.movieOutput.startRecording(
+                    to: outputURL,
+                    recordingDelegate: self
+                )
             }
         }
     }
@@ -517,6 +738,7 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
     
     func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {
         print("Camera recording started: \(fileURL)")
+        completePendingRecordingStart(.success(()))
         guard practiceClipCompletion != nil else { return }
         visionQueue.async { [weak self] in
             guard let self else { return }
@@ -531,6 +753,10 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
         if let error = error {
             print("Camera recording error: \(error.localizedDescription)")
+            completePendingRecordingStart(.failure(.rejected))
+            publishRecordingFailure(
+                "录像中断：\(error.localizedDescription)"
+            )
         }
 
         if practiceClipCompletion != nil {
@@ -559,10 +785,34 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
             try? FileManager.default.removeItem(at: outputFileURL)
             return
         }
+
+        guard error == nil else {
+            try? FileManager.default.removeItem(at: outputFileURL)
+            return
+        }
         
         // 传递录制结果
         DispatchQueue.main.async {
             self.recordedVideoURL = outputFileURL
+        }
+    }
+
+    private func completePendingRecordingStart(
+        _ result: Result<Void, CameraRecordingStartError>
+    ) {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            let completion = self.pendingRecordingStartCompletion
+            self.pendingRecordingStartCompletion = nil
+            DispatchQueue.main.async {
+                completion?(result)
+            }
+        }
+    }
+
+    private func publishRecordingFailure(_ message: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.recordingFailureMessage = message
         }
     }
 
@@ -626,6 +876,39 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
         lastPublishedCaptureStatus = status
         DispatchQueue.main.async { [weak self] in
             self?.practiceStatus?(status)
+        }
+    }
+
+    @objc private func sessionWasInterrupted(_ notification: Notification) {
+        handleSessionFailure("相机被系统中断，请稍候后重试。")
+    }
+
+    @objc private func sessionInterruptionEnded(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.setupSession()
+        }
+    }
+
+    @objc private func sessionRuntimeError(_ notification: Notification) {
+        let error = notification.userInfo?[AVCaptureSessionErrorKey] as? Error
+        let detail = error?.localizedDescription ?? "未知相机错误"
+        handleSessionFailure("相机运行错误：\(detail)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.setupSession()
+        }
+    }
+
+    private func handleSessionFailure(_ message: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.accessState = .checking
+        }
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            if self.movieOutput.isRecording {
+                self.movieOutput.stopRecording()
+            }
+            self.completePendingRecordingStart(.failure(.interrupted))
+            self.publishRecordingFailure(message)
         }
     }
 

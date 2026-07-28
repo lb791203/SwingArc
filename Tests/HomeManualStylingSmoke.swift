@@ -29,15 +29,19 @@ struct HomeManualStylingSmoke {
         precondition(home.contains("modeAccent"))
 
         let opacityArguments = [
-            "surfaceOpacity: 0.85",
             "surfaceOpacity: 0.70",
-            "surfaceOpacity: 0.55",
-            "surfaceOpacity: 0.40"
+            "surfaceOpacity: 0.50"
         ]
 
         for argument in opacityArguments {
             precondition(home.contains(argument))
         }
+
+        precondition(home.contains("Text(\"挥杆视频分析\")"))
+        precondition(home.contains("录制或导入视频，开始 P1–P8 识别与画线"))
+        precondition(!home.contains("选择机位"))
+        precondition(!home.contains("正后方 · DTL"))
+        precondition(!home.contains("正面 · FACE-ON"))
 
         precondition(home.contains("let surfaceOpacity: Double"))
         precondition(

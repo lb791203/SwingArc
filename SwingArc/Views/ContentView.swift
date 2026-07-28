@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import Foundation
+import UIKit
 
 private enum MediaAction {
     case save
@@ -13,13 +14,14 @@ private struct SharePayload: Identifiable {
 }
 
 struct ContentView: View {
+    @Environment(\.openURL) private var openURL
     @StateObject private var playbackManager = VideoPlaybackManager()
 
     @State private var projects = LocalProjectStore.projects()
     @State private var activeProject: LocalProjectSummary?
     @State private var currentProjectURL: URL?
     @State private var practiceCameraView: PracticeCameraView?
-    @State private var feedbackConfiguration: FeedbackConfiguration?
+    @State private var legacyFeedbackConfiguration: FeedbackConfiguration?
     @State private var saveStatus: WorkspaceSaveStatus = .idle
 
     @State private var drawings: [DrawingElement] = []
@@ -31,23 +33,22 @@ struct ContentView: View {
     @State private var showSpineAngle = false
     @State private var showGrid = false
 
-    @State private var selectedPracticeView: PracticeCameraView?
     @State private var showProjectLibrary = false
+    @State private var showAboutPrivacy = false
     @State private var showVideoPicker = false
     @State private var showManualCapture = false
+    @State private var showPPointCorrection = false
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var showExportActions = false
     @State private var sharePayload: SharePayload?
     @State private var isExporting = false
     @State private var statusMessage: String?
+    @State private var showsSettingsAction = false
     @State private var didLoadPreviewImport = false
 
     init() {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let previewView = PracticePreviewConfiguration.view(for: arguments) {
-            _selectedPracticeView = State(initialValue: previewView)
-        }
         if PracticePreviewConfiguration.showsLibrary(for: arguments) {
             _showProjectLibrary = State(initialValue: true)
         }
@@ -67,12 +68,6 @@ struct ContentView: View {
                     drawings: $drawings,
                     keyframes: $keyframes,
                     isKeyframeMode: $isKeyframeMode,
-                    showPoseSkeleton: $showPoseSkeleton,
-                    showHeadStability: $showHeadStability,
-                    showSpineAngle: $showSpineAngle,
-                    showGrid: $showGrid,
-                    practiceCameraView: $practiceCameraView,
-                    feedbackConfiguration: $feedbackConfiguration,
                     saveStatus: saveStatus,
                     onBack: closeWorkspace,
                     onSelectProject: openProject,
@@ -80,10 +75,10 @@ struct ContentView: View {
                     onAnalyze: runAISwingAnalysis,
                     onCancelAnalysis: playbackManager.cancelAnalysis,
                     onSetManualStage: saveManualStage,
-                    feedback: playbackManager.priorityFeedback(
-                        view: practiceCameraView,
-                        manualMarkers: keyframes
-                    )
+                    onCorrectPPoints: {
+                        playbackManager.pause()
+                        showPPointCorrection = true
+                    }
                 )
             } else if showProjectLibrary {
                 ProjectLibraryView(
@@ -95,10 +90,10 @@ struct ContentView: View {
                 )
             } else {
                 PracticeHomeView(
-                    onStartPractice: { selectedPracticeView = $0 },
                     onManualCapture: { showManualCapture = true },
                     onImport: { showVideoPicker = true },
-                    onOpenLibrary: { showProjectLibrary = true }
+                    onOpenLibrary: { showProjectLibrary = true },
+                    onOpenAbout: { showAboutPrivacy = true }
                 )
             }
         }
@@ -116,7 +111,12 @@ struct ContentView: View {
                   ) else { return }
 
             didLoadPreviewImport = true
-            loadVideoFromURL(URL(fileURLWithPath: path))
+            loadVideoFromURL(
+                URL(fileURLWithPath: path),
+                practiceView: PracticePreviewConfiguration.view(
+                    for: ProcessInfo.processInfo.arguments
+                )
+            )
             #endif
         }
         .onChange(of: drawings) { _, _ in persistCurrentProject() }
@@ -127,31 +127,32 @@ struct ContentView: View {
         .onChange(of: showHeadStability) { _, _ in persistCurrentProject() }
         .onChange(of: showSpineAngle) { _, _ in persistCurrentProject() }
         .onChange(of: showGrid) { _, _ in persistCurrentProject() }
-        .onChange(of: feedbackConfiguration) { _, _ in persistCurrentProject() }
-        .fullScreenCover(item: $selectedPracticeView) { practiceView in
-            PracticeSessionView(
-                view: practiceView,
-                onClose: {
-                    selectedPracticeView = nil
-                    projects = LocalProjectStore.projects()
-                },
-                onOpenLastClip: { clipURL in
-                    selectedPracticeView = nil
-                    loadVideoFromURL(
-                        clipURL,
-                        practiceView: practiceView,
-                        origin: .capturedClipSaved
-                    )
-                }
-            )
-        }
+        .onChange(of: practiceCameraView) { _, _ in persistCurrentProject() }
         .fullScreenCover(isPresented: $showManualCapture) {
             CameraView { temporaryURL in
                 persistCapturedVideo(temporaryURL)
             }
         }
+        .fullScreenCover(isPresented: $showPPointCorrection) {
+            if let currentProjectURL {
+                PPointCorrectionWorkspace(
+                    videoURL: currentProjectURL,
+                    prediction: AnnotationPredictionAdapter.snapshot(
+                        detections: playbackManager.analysisOutput?.result.detections ?? [],
+                        frames: playbackManager.analysisOutput?.observationFrames ?? []
+                    ),
+                    markers: keyframes,
+                    initialTime: playbackManager.currentTime,
+                    onClose: { showPPointCorrection = false },
+                    onSave: savePPointCorrection
+                )
+            }
+        }
         .sheet(item: $sharePayload) { payload in
             ShareSheet(items: [payload.url])
+        }
+        .sheet(isPresented: $showAboutPrivacy) {
+            AboutPrivacyView()
         }
         .confirmationDialog("导出", isPresented: $showExportActions, titleVisibility: .visible) {
             Button("保存当前标注帧") { performMediaAction(.save, kind: .frame) }
@@ -162,9 +163,24 @@ struct ContentView: View {
         }
         .alert("SwingArc", isPresented: Binding(
             get: { statusMessage != nil },
-            set: { if !$0 { statusMessage = nil } }
+            set: {
+                if !$0 {
+                    statusMessage = nil
+                    showsSettingsAction = false
+                }
+            }
         )) {
-            Button("好", role: .cancel) {}
+            if showsSettingsAction {
+                Button("打开设置") {
+                    guard let url = URL(
+                        string: UIApplication.openSettingsURLString
+                    ) else { return }
+                    openURL(url)
+                }
+            }
+            Button("好", role: .cancel) {
+                showsSettingsAction = false
+            }
         } message: {
             Text(statusMessage ?? "")
         }
@@ -195,6 +211,7 @@ struct ContentView: View {
         activeProject = nil
         currentProjectURL = nil
         practiceCameraView = nil
+        legacyFeedbackConfiguration = nil
         stageCorrections = []
         saveStatus = .idle
         projects = LocalProjectStore.projects()
@@ -204,20 +221,22 @@ struct ContentView: View {
         pickerItem.loadTransferable(type: Data.self) { result in
             switch result {
             case .success(let data?):
-                let videoURL = LocalProjectStore.videoDirectory()
-                    .appendingPathComponent("imported-\(UUID().uuidString).mp4")
-                do {
-                    try data.write(to: videoURL, options: .atomic)
-                    DispatchQueue.main.async {
+                Task { @MainActor in
+                    isExporting = true
+                    do {
+                        let videoURL = try await ImportedVideoStore(
+                            destinationDirectory: LocalProjectStore.videoDirectory()
+                        ).persist(data: data)
                         loadVideoFromURL(videoURL, origin: .importCompleted)
+                    } catch {
+                        showsSettingsAction = false
+                        statusMessage = "所选文件不是可播放的视频，请重新选择。"
                     }
-                } catch {
-                    DispatchQueue.main.async {
-                        statusMessage = "视频导入失败：\(error.localizedDescription)"
-                    }
+                    isExporting = false
                 }
             case .failure(let error):
                 DispatchQueue.main.async {
+                    showsSettingsAction = false
                     statusMessage = "无法读取所选视频：\(error.localizedDescription)"
                 }
             default:
@@ -240,6 +259,7 @@ struct ContentView: View {
                 showManualCapture = false
                 loadVideoFromURL(clip.url, origin: .capturedClipSaved)
             } catch {
+                showsSettingsAction = false
                 statusMessage = "录像已经完成，但保存失败。请检查本机储存空间后重试。"
             }
             isExporting = false
@@ -257,12 +277,12 @@ struct ContentView: View {
         drawings = []
         keyframes = []
         stageCorrections = []
+        legacyFeedbackConfiguration = nil
         isKeyframeMode = false
         showPoseSkeleton = false
         showHeadStability = false
         showSpineAngle = false
         showGrid = false
-        feedbackConfiguration = nil
         saveStatus = .idle
 
         let didLoad = playbackManager.loadVideo(url: url)
@@ -277,7 +297,7 @@ struct ContentView: View {
             showGrid = saved.showGrid
             self.practiceCameraView = practiceView ?? saved.practiceCameraView
             stageCorrections = saved.stageCorrections
-            feedbackConfiguration = saved.feedbackConfiguration
+            legacyFeedbackConfiguration = saved.legacyFeedbackConfiguration
         } else {
             self.practiceCameraView = practiceView
         }
@@ -302,6 +322,7 @@ struct ContentView: View {
         activeProject = summary
         projects = LocalProjectStore.projects()
         saveStatus = .saved
+        migrateLegacyAnnotationIfNeeded(for: url)
 
         if didLoad, AutomaticAnalysisPolicy.shouldAnalyze(event: origin) {
             DispatchQueue.main.async {
@@ -325,7 +346,7 @@ struct ContentView: View {
                 showGrid: showGrid,
                 practiceCameraView: practiceCameraView,
                 stageCorrections: stageCorrections,
-                feedbackConfiguration: feedbackConfiguration
+                legacyFeedbackConfiguration: legacyFeedbackConfiguration
             ),
             for: videoURL
         )
@@ -338,6 +359,77 @@ struct ContentView: View {
         activeProject = project
         projects = LocalProjectStore.projects()
         saveStatus = saved ? .saved : .failed
+    }
+
+    private func migrateLegacyAnnotationIfNeeded(for videoURL: URL) {
+        Task {
+            do {
+                let mediaSHA256 = try await Task.detached(
+                    priority: .utility
+                ) {
+                    try AnnotationStore.mediaSHA256(url: videoURL)
+                }.value
+                guard currentProjectURL == videoURL,
+                      !LegacyAnnotationMigration.isCompleted(
+                          mediaSHA256: mediaSHA256
+                      ) else {
+                    return
+                }
+
+                let store = AnnotationStore()
+                guard let package = try store.load(
+                    mediaSHA256: mediaSHA256
+                ) else {
+                    LegacyAnnotationMigration.markCompleted(
+                        mediaSHA256: mediaSHA256
+                    )
+                    return
+                }
+
+                let frameSession = ExactVideoFrameSession()
+                let metadata = try await frameSession.open(url: videoURL)
+                guard metadata.timelineSHA256
+                    == package.media.timelineSHA256 else {
+                    throw AnnotationStoreError.mediaIdentityMismatch
+                }
+                var frameTimes: [Int: Double] = [:]
+                for frame in LegacyAnnotationMigration.sourceFrameIndices(
+                    package: package
+                ) {
+                    if let time = await frameSession.presentationTimeSeconds(
+                        at: frame
+                    ) {
+                        frameTimes[frame] = time
+                    }
+                }
+
+                guard currentProjectURL == videoURL else { return }
+                let migrated = LegacyAnnotationMigration.migrate(
+                    package: package,
+                    frameTimes: frameTimes,
+                    existingMarkers: keyframes
+                )
+
+                if migrated.sanitizedPackage != package {
+                    try store.save(
+                        migrated.sanitizedPackage,
+                        expectedMediaSHA256: mediaSHA256
+                    )
+                }
+                if migrated.markers != keyframes {
+                    keyframes = migrated.markers
+                    persistCurrentProject()
+                }
+                guard saveStatus != .failed else { return }
+                LegacyAnnotationMigration.markCompleted(
+                    mediaSHA256: mediaSHA256
+                )
+            } catch {
+                guard currentProjectURL == videoURL else { return }
+                showsSettingsAction = false
+                statusMessage = "已有 P 点修正未能迁移，原数据仍保留。"
+            }
+        }
     }
 
     private var projectStatus: LocalProjectStatus {
@@ -367,30 +459,81 @@ struct ContentView: View {
         playbackManager.pause()
         playbackManager.analyzeSwing { result in
             keyframes = StageMarkerMerger.merge(existing: keyframes, automatic: result.detectedMarkers)
+            guard let currentProjectURL else { return }
+            playbackManager.refineManualPPoints(
+                videoURL: currentProjectURL,
+                manualMarkers: keyframes
+            )
         }
     }
 
     private func saveManualStage(_ stage: SwingStage) {
-        let marker = KeyframeMarker(time: playbackManager.currentTime, stage: stage, source: .manual)
+        let sourceFrameIndex: Int?
+        if playbackManager.sourceFrameRate > 0 {
+            sourceFrameIndex = Int(
+                (playbackManager.currentTime * playbackManager.sourceFrameRate).rounded()
+            )
+        } else {
+            sourceFrameIndex = nil
+        }
+        saveManualStage(
+            stage,
+            time: playbackManager.currentTime,
+            sourceFrameIndex: sourceFrameIndex
+        )
+    }
+
+    private func savePPointCorrection(
+        code: PPointCode,
+        sourceFrameIndex: Int,
+        time: Double,
+        image: CGImage
+    ) {
+        guard SwingStage.pStages.indices.contains(code.ordinal) else { return }
+        let stage = SwingStage.pStages[code.ordinal]
+        saveManualStage(
+            stage,
+            time: time,
+            sourceFrameIndex: sourceFrameIndex
+        )
+        playbackManager.seek(to: time)
+        playbackManager.refineManualPPoint(
+            image: image,
+            sourceFrameIndex: sourceFrameIndex,
+            time: time
+        )
+    }
+
+    private func saveManualStage(
+        _ stage: SwingStage,
+        time: Double,
+        sourceFrameIndex: Int?
+    ) {
+        let marker = KeyframeMarker(
+            time: time,
+            stage: stage,
+            source: .manual,
+            sourceFrameIndex: sourceFrameIndex
+        )
         keyframes.removeAll { $0.stage == stage.rawValue }
         keyframes.append(marker)
         keyframes.sort { $0.time < $1.time }
         guard let view = practiceCameraView,
               let automaticFrame = playbackManager.analysisOutput?.result.detections
                 .first(where: { $0.stage == stage })?.sourceFrameIndex,
-              playbackManager.sourceFrameRate > 0 else { return }
-        let manualFrame = Int((playbackManager.currentTime * playbackManager.sourceFrameRate).rounded())
+              let sourceFrameIndex else { return }
         stageCorrections.removeAll { $0.stage == stage && $0.view == view }
         stageCorrections.append(StageCorrection(
             stage: stage,
             view: view,
             automaticFrameIndex: automaticFrame,
-            manualFrameIndex: manualFrame
+            manualFrameIndex: sourceFrameIndex
         ))
     }
 
     private func performMediaAction(_ action: MediaAction, kind: MediaExportKind) {
         guard let asset = playbackManager.currentAsset else {
+            showsSettingsAction = false
             statusMessage = "没有可导出的视频。"
             return
         }
@@ -412,11 +555,17 @@ struct ContentView: View {
                 switch action {
                 case .save:
                     try await MediaExportService.saveToPhotoLibrary(exportURL, kind: kind)
+                    showsSettingsAction = false
                     statusMessage = kind == .frame ? "当前帧已保存到相册。" : "标注视频已保存到相册。"
                 case .share:
                     sharePayload = SharePayload(url: exportURL)
                 }
             } catch {
+                if case MediaExportError.photoPermissionDenied = error {
+                    showsSettingsAction = true
+                } else {
+                    showsSettingsAction = false
+                }
                 statusMessage = error.localizedDescription
             }
             isExporting = false

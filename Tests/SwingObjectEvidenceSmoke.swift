@@ -65,7 +65,7 @@ struct SwingObjectEvidenceSmoke {
             _ = tracker.update(ball, sourceFrameIndex: frame)
         }
 
-        // Sparse P1/P2/P7 neighborhoods are independent observations. A miss
+        // Sparse P1/P2/P6/P8 neighborhoods are independent observations. A miss
         // in each neighborhood must never add up to a false impact event.
         for frame in [100, 200, 300] {
             let isolatedMiss = tracker.update(nil, sourceFrameIndex: frame)

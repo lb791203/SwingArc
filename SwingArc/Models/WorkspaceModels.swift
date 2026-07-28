@@ -88,7 +88,7 @@ struct AnalysisProgressPresentation: Equatable {
         switch phase {
         case .preparing: return "正在读取视频信息"
         case .locating: return "正在以 8 FPS 粗扫完整视频"
-        case .expanding: return "正在寻找准备位和稳定收杆"
+        case .expanding: return "正在寻找准备位和击球后动作"
         case .evidence: return "正在检查关节、杆身和球位"
         case .solving: return "正在联合定位 P1–P8"
         }
@@ -110,6 +110,8 @@ struct AnalysisFailurePresentation: Equatable {
             return "视频读取失败，请重新导入。"
         case .insufficientPoseEvidence:
             return "未检测到清晰人体。请选择全身入镜、光线充足的视频；手工标注不会被清除。"
+        case .insufficientStageEvidence:
+            return "人体已识别，但未能自动确定完整 P1–P8。你可以手动设置 P 点。"
         case .noStableGolfer:
             return "无法持续锁定主球员。请使用固定机位、全身入镜且避免多人遮挡的视频。"
         case .noSwingMotion:
@@ -126,10 +128,28 @@ struct AnalysisFailurePresentation: Equatable {
             return "找不到上杆顶点到下杆的转换"
         case .noImpactCorridor:
             return "找不到可信的击球候选段"
-        case .missingFinishBoundary:
-            return "找不到稳定收杆位置"
+        case .missingPostImpactBoundary:
+            return "找不到击球后动作边界"
         case .incompleteSwingClip:
             return "视频缺少完整挥杆前段或后段"
+        case let .unsupportedInput(issues):
+            let guidance = issues.map { issue in
+                switch issue {
+                case .personNotStable:
+                    return "人物检测不稳定，请保持单人入镜并避免遮挡"
+                case .fullBodyNotVisible:
+                    return "请确保人物全身入镜"
+                case .clubNotVisible:
+                    return "球杆不可见，请调整机位和光线"
+                case .clubVisibilityNotAssessed:
+                    return "暂时无法确认球杆可见性"
+                case .cameraMoved:
+                    return "机位不稳定，请固定手机"
+                case .motionBlur:
+                    return "画面运动模糊，请提高光线或帧率"
+                }
+            }.joined(separator: "；")
+            return "当前视频不适合自动分析：\(guidance)。视频仍可播放和手工标注。"
         case .analysisCancelled:
             return "分析已取消"
         }
@@ -303,6 +323,28 @@ enum StageResultState: Equatable {
     case review
     case unresolved
     case manual
+}
+
+enum StageResultPolicy {
+    static func state(for marker: KeyframeMarker?) -> StageResultState {
+        guard let marker else { return .unresolved }
+        if marker.isLocked { return .manual }
+        return marker.automaticStatus == .confirmed ? .confirmed : .review
+    }
+}
+
+enum StageResultPresentation {
+    static func label(for state: StageResultState) -> String {
+        switch state {
+        case .confirmed, .manual: return "已识别"
+        case .review: return "待核对"
+        case .unresolved: return "未识别"
+        }
+    }
+
+    static func detailLabel(for state: StageResultState) -> String {
+        state == .manual ? "已识别（人工修正）" : label(for: state)
+    }
 }
 
 enum StageStripIndicator: String, Equatable {
@@ -565,6 +607,7 @@ enum SwingFeedbackProfiles {
         .leadArmParallelBackswing,
         .top,
         .leadArmParallelDownswing,
+        .shaftParallelDownswing,
         .impact,
         .followThrough
     ]
@@ -579,6 +622,7 @@ enum SwingFeedbackProfiles {
                         .takeaway,
                         .leadArmParallelBackswing,
                         .leadArmParallelDownswing,
+                        .shaftParallelDownswing,
                         .followThrough
                     ], evidence: .pose)
                 ]),
@@ -589,7 +633,7 @@ enum SwingFeedbackProfiles {
                     .init(metric: .spineStability, stages: movementStages, evidence: .pose)
                 ]),
                 FeedbackGroup(title: "头部位置", metrics: [
-                    .init(metric: .headPosition, stages: Array(SwingStage.allCases.dropLast()), evidence: .pose)
+                    .init(metric: .headPosition, stages: SwingStage.pStages, evidence: .pose)
                 ])
             ])
         case .faceOn:
@@ -598,6 +642,7 @@ enum SwingFeedbackProfiles {
                 FeedbackGroup(title: "释放", metrics: [
                     .init(metric: .clubRelease, stages: [
                         .leadArmParallelDownswing,
+                        .shaftParallelDownswing,
                         .impact
                     ], evidence: .clubAndImpact)
                 ]),
@@ -611,7 +656,7 @@ enum SwingFeedbackProfiles {
                     .init(metric: .leadHip, stages: movementStages, evidence: .pose)
                 ]),
                 FeedbackGroup(title: "头部位置", metrics: [
-                    .init(metric: .headPosition, stages: Array(SwingStage.allCases.dropLast()), evidence: .pose)
+                    .init(metric: .headPosition, stages: SwingStage.pStages, evidence: .pose)
                 ])
             ])
         }

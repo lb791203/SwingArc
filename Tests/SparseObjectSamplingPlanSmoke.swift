@@ -9,6 +9,7 @@ struct SparseObjectSamplingPlanSmoke {
         let candidates = [
             candidate(.address, sourceFrameIndex: 375, score: 0.80),
             candidate(.takeaway, sourceFrameIndex: 414, score: 0.78),
+            candidate(.shaftParallelDownswing, sourceFrameIndex: 471, score: 0.81),
             candidate(.impact, sourceFrameIndex: 478, score: 0.62),
             candidate(.impact, sourceFrameIndex: 480, score: 0.88),
             candidate(.impact, sourceFrameIndex: 481, score: 0.92),
@@ -29,6 +30,7 @@ struct SparseObjectSamplingPlanSmoke {
         precondition(Set(selected.map(\.sourceFrameIndex)).isSuperset(of: [
             374, 375, 376,
             413, 414, 415,
+            470, 471, 472,
             477, 478, 479, 480, 481, 482,
             495, 496, 497
         ]))
@@ -64,6 +66,8 @@ struct SparseObjectSamplingPlanSmoke {
             candidate(.takeaway, sourceFrameIndex: 414, score: 0.40),
             candidate(.takeaway, sourceFrameIndex: 375, score: 0.40),
             candidate(.takeaway, sourceFrameIndex: 376, score: 0.40),
+            candidate(.shaftParallelDownswing, sourceFrameIndex: 470, score: 0.75),
+            candidate(.shaftParallelDownswing, sourceFrameIndex: 471, score: 0.73),
             candidate(.impact, sourceFrameIndex: 472, score: 0.34),
             candidate(.impact, sourceFrameIndex: 477, score: 0.33),
             candidate(.impact, sourceFrameIndex: 478, score: 0.34),
@@ -82,6 +86,32 @@ struct SparseObjectSamplingPlanSmoke {
         precondition(
             denseProductionLike.contains { $0.sourceFrameIndex == 414 },
             "A dense impact neighborhood must not starve the third P2 candidate center"
+        )
+        precondition(
+            denseProductionLike.contains { $0.sourceFrameIndex == 470 },
+            "A bounded sparse pass must retain the provisional P6 delivery neighborhood"
+        )
+
+        let p6StarvationCandidates = [20, 40, 60, 80, 100].map {
+            candidate(.impact, sourceFrameIndex: $0, score: 1.00)
+        } + [120, 135, 150, 165, 180].map {
+            candidate(.address, sourceFrameIndex: $0, score: 0.95)
+        } + [195, 205, 215, 225, 235].map {
+            candidate(.takeaway, sourceFrameIndex: $0, score: 0.90)
+        } + [245, 255, 265, 275, 285].map {
+            candidate(.followThrough, sourceFrameIndex: $0, score: 0.85)
+        } + [
+            candidate(.shaftParallelDownswing, sourceFrameIndex: 240, score: 0.32)
+        ]
+        let p6StarvationSelection = SparseObjectSamplingPlan.frames(
+            from: (0...300).map {
+                FineFrameReference(sourceFrameIndex: $0, time: Double($0) / 30)
+            },
+            candidates: p6StarvationCandidates
+        )
+        precondition(
+            p6StarvationSelection.contains { $0.sourceFrameIndex == 240 },
+            "Impact and pose candidate density must never starve the only provisional P6 shaft neighborhood"
         )
 
         let fallback = SparseObjectSamplingPlan.frames(from: references, candidates: [])
@@ -134,7 +164,9 @@ struct SparseObjectSamplingPlanSmoke {
             score: score,
             requirementsSatisfied: true,
             maximumStatus: .confirmed,
-            hasClubEvidence: stage == .impact,
+            hasClubEvidence: stage == .shaftParallelDownswing
+                || stage == .impact
+                || stage == .followThrough,
             hasBallEvidence: stage == .impact
         )
     }

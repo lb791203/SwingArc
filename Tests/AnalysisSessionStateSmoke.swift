@@ -12,6 +12,7 @@ struct AnalysisSessionStateSmoke {
         )
         precondition(SwingAnalysisState.completed(result).hasCompletedResult)
         precondition(!SwingAnalysisState.failed(.insufficientPoseEvidence).hasCompletedResult)
+        precondition(!SwingAnalysisState.failed(.insufficientStageEvidence).hasCompletedResult)
 
         let gate = AnalysisRunGate()
         let supersededRun = gate.begin()

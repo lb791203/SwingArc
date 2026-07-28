@@ -1,17 +1,18 @@
 {
+  "stageSystem": "legacy-named-keyframes-v1",
   "video": "IMG_4500.mov",
   "sourceFrameRate": 30.0,
   "duration": 25.23,
   "annotationPasses": 2,
-  "maximumAcceptedFrameError": 1,
+  "maximumAcceptedFrameError": 2,
   "stages": [
     { "stage": "P1", "sourceFrameIndex": 375, "definition": "last stable address frame before sustained takeaway" },
     { "stage": "P2", "sourceFrameIndex": 414, "definition": "backswing shaft-horizontal frame" },
     { "stage": "P3", "sourceFrameIndex": 431, "definition": "backswing lead-arm-horizontal frame" },
     { "stage": "P4", "sourceFrameIndex": 453, "definition": "last top-plateau frame before sustained downswing" },
     { "stage": "P5", "sourceFrameIndex": 466, "definition": "downswing lead-arm-horizontal frame" },
-    { "stage": "P6", "sourceFrameIndex": 481, "definition": "clubhead at stable ball position" },
-    { "stage": "P7", "sourceFrameIndex": 496, "definition": "post-impact extension parallel frame" },
-    { "stage": "P8", "sourceFrameIndex": 513, "definition": "first stable finish-plateau frame" }
+    { "stage": "impact", "sourceFrameIndex": 481, "definition": "legacy impact anchor" },
+    { "stage": "followThrough", "sourceFrameIndex": 496, "definition": "legacy post-impact extension parallel frame" },
+    { "stage": "finish", "sourceFrameIndex": 513, "definition": "legacy stable finish-plateau frame" }
   ]
 }

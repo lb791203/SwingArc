@@ -35,6 +35,7 @@ class VideoPlaybackManager: ObservableObject {
     private var isPoseDetectionInFlight = false
     private let analysisRunGate = AnalysisRunGate()
     private var analysisRunID: UUID?
+    private var mediaSessionID = UUID()
     
     init() {}
     
@@ -53,6 +54,7 @@ class VideoPlaybackManager: ObservableObject {
         }
 
         cancelAnalysis()
+        mediaSessionID = UUID()
         isPlaying = false
         stopDisplayLink()
         removeObservers()
@@ -137,6 +139,7 @@ class VideoPlaybackManager: ObservableObject {
 
     func unloadVideo() {
         cancelAnalysis()
+        mediaSessionID = UUID()
         pause()
         stopDisplayLink()
         removeObservers()
@@ -444,6 +447,165 @@ class VideoPlaybackManager: ObservableObject {
             view: view,
             leadArm: output.leadArm
         ))
+    }
+
+    func correctedDetections(
+        manualMarkers: [KeyframeMarker]
+    ) -> [SwingStageDetection] {
+        guard let output = analysisOutput else { return [] }
+        return ManualStageDetectionPolicy.applying(
+            manualMarkers: manualMarkers,
+            sourceFrameRate: output.sourceFrameRate,
+            automatic: output.result.detections,
+            availablePoseSamples: output.poseSamples
+        )
+    }
+
+    /// Re-runs Apple Vision only on the exact frame chosen by the user and
+    /// publishes a refined analysis output. Derived metrics and feedback then
+    /// recompute from the measured pose without rescanning the full video.
+    func refineManualPPoint(
+        image: CGImage,
+        sourceFrameIndex: Int,
+        time: Double
+    ) {
+        guard analysisOutput != nil else { return }
+        let sessionID = mediaSessionID
+        poseQueue.async { [weak self] in
+            guard let self,
+                  let pose = self.poseDetector.detectPose(
+                      in: image,
+                      orientation: .up
+                  ) else {
+                return
+            }
+            let exactBodyFrame = SwingPoseObservationAdapter.frame(
+                pose: pose,
+                sourceFrameIndex: sourceFrameIndex,
+                time: time
+            )
+            DispatchQueue.main.async {
+                guard self.mediaSessionID == sessionID,
+                      let output = self.analysisOutput else {
+                    return
+                }
+                let refined = ManualPPointAnalysisRefiner.merging(
+                    exactBodyFrame: exactBodyFrame,
+                    intoFrames: output.observationFrames,
+                    poseSamples: output.poseSamples
+                )
+                self.currentPose = pose
+                self.analysisOutput = SwingVideoAnalysisOutput(
+                    result: output.result,
+                    poseSamples: refined.poseSamples,
+                    leadArm: output.leadArm,
+                    adaptiveWindow: output.adaptiveWindow,
+                    sourceFrameRate: output.sourceFrameRate,
+                    elapsedSeconds: output.elapsedSeconds,
+                    trackingDiagnostics: output.trackingDiagnostics,
+                    observationFrames: refined.frames
+                )
+            }
+        }
+    }
+
+    /// Restores exact-frame Vision evidence for saved manual P points after a
+    /// relaunch or a fresh full analysis, so corrections remain effective.
+    func refineManualPPoints(
+        videoURL: URL,
+        manualMarkers: [KeyframeMarker]
+    ) {
+        let exactMarkers = manualMarkers.filter {
+            $0.source == .manual && $0.sourceFrameIndex != nil
+        }
+        guard analysisOutput != nil, !exactMarkers.isEmpty else { return }
+        let sessionID = mediaSessionID
+        poseQueue.async { [weak self] in
+            guard let self,
+                  let provider = try? ExactVideoFrameProvider.load(
+                      url: videoURL
+                  ) else {
+                return
+            }
+            let exactBodyFrames = exactMarkers.compactMap {
+                marker -> SwingFrameObservation? in
+                guard let sourceFrameIndex = marker.sourceFrameIndex,
+                      let frame = try? provider.frame(
+                          at: sourceFrameIndex
+                      ),
+                      let pose = self.poseDetector.detectPose(
+                          in: frame.image,
+                          orientation: .up
+                      ) else {
+                    return nil
+                }
+                return SwingPoseObservationAdapter.frame(
+                    pose: pose,
+                    sourceFrameIndex: sourceFrameIndex,
+                    time: frame.presentationTime.seconds
+                )
+            }
+            guard !exactBodyFrames.isEmpty else { return }
+            DispatchQueue.main.async {
+                guard self.mediaSessionID == sessionID,
+                      let output = self.analysisOutput else {
+                    return
+                }
+                var frames = output.observationFrames
+                var poseSamples = output.poseSamples
+                for exactBodyFrame in exactBodyFrames {
+                    let refined = ManualPPointAnalysisRefiner.merging(
+                        exactBodyFrame: exactBodyFrame,
+                        intoFrames: frames,
+                        poseSamples: poseSamples
+                    )
+                    frames = refined.frames
+                    poseSamples = refined.poseSamples
+                }
+                self.analysisOutput = SwingVideoAnalysisOutput(
+                    result: output.result,
+                    poseSamples: poseSamples,
+                    leadArm: output.leadArm,
+                    adaptiveWindow: output.adaptiveWindow,
+                    sourceFrameRate: output.sourceFrameRate,
+                    elapsedSeconds: output.elapsedSeconds,
+                    trackingDiagnostics: output.trackingDiagnostics,
+                    observationFrames: frames
+                )
+            }
+        }
+    }
+
+    func analysisArtifact(
+        view: PracticeCameraView?,
+        manualMarkers: [KeyframeMarker]
+    ) -> SwingAnalysisArtifact? {
+        feedbackPipeline(
+            view: view,
+            manualMarkers: manualMarkers
+        )?.artifact
+    }
+
+    func simplifiedFeedback(
+        view: PracticeCameraView?,
+        manualMarkers: [KeyframeMarker]
+    ) -> SimplifiedSwingFeedback? {
+        feedbackPipeline(
+            view: view,
+            manualMarkers: manualMarkers
+        )?.feedback
+    }
+
+    private func feedbackPipeline(
+        view: PracticeCameraView?,
+        manualMarkers: [KeyframeMarker]
+    ) -> SwingFeedbackPipelineResult? {
+        guard let output = analysisOutput else { return nil }
+        return SwingFeedbackPipeline.make(
+            output: output,
+            view: view,
+            manualMarkers: manualMarkers
+        )
     }
 }
 
