@@ -67,6 +67,126 @@ public struct GolfDatasetExportSelection: Equatable, Sendable {
     }
 }
 
+public struct GolfTrainingInputAffineAudit: Codable, Equatable, Sendable {
+    public let scaleX: Double
+    public let scaleY: Double
+    public let translateX: Double
+    public let translateY: Double
+}
+
+public enum GolfTrainingInputTransformError: Error, Equatable, Sendable {
+    case invalidDimensions(width: Int, height: Int)
+    case arithmeticOverflow(width: Int, height: Int)
+}
+
+public struct GolfTrainingInputTransform: Codable, Equatable, Sendable {
+    public static let version = "full-frame-aspect-fit-v1"
+    public static let canvasSize = 512
+
+    public let version: String
+    public let sourceOrientedWidth: Int
+    public let sourceOrientedHeight: Int
+    public let canvasWidth: Int
+    public let canvasHeight: Int
+    public let contentWidth: Int
+    public let contentHeight: Int
+    public let offsetX: Int
+    public let offsetY: Int
+    public let forward: GolfTrainingInputAffineAudit
+    public let inverse: GolfTrainingInputAffineAudit
+
+    public init(
+        sourceOrientedWidth width: Int,
+        sourceOrientedHeight height: Int
+    ) throws {
+        guard width > 0, height > 0 else {
+            throw GolfTrainingInputTransformError.invalidDimensions(
+                width: width,
+                height: height
+            )
+        }
+        let canvas = Self.canvasSize
+        let contentWidth: Int
+        let contentHeight: Int
+        if width >= height {
+            contentWidth = canvas
+            contentHeight = try Self.halfUpContentDimension(
+                scaledDimension: height,
+                referenceDimension: width
+            )
+        } else {
+            contentWidth = try Self.halfUpContentDimension(
+                scaledDimension: width,
+                referenceDimension: height
+            )
+            contentHeight = canvas
+        }
+        let offsetX = (canvas - contentWidth) / 2
+        let offsetY = (canvas - contentHeight) / 2
+
+        version = Self.version
+        sourceOrientedWidth = width
+        sourceOrientedHeight = height
+        canvasWidth = canvas
+        canvasHeight = canvas
+        self.contentWidth = contentWidth
+        self.contentHeight = contentHeight
+        self.offsetX = offsetX
+        self.offsetY = offsetY
+        forward = GolfTrainingInputAffineAudit(
+            scaleX: Double(contentWidth) / Double(canvas),
+            scaleY: Double(contentHeight) / Double(canvas),
+            translateX: Double(offsetX) / Double(canvas),
+            translateY: Double(offsetY) / Double(canvas)
+        )
+        inverse = GolfTrainingInputAffineAudit(
+            scaleX: Double(canvas) / Double(contentWidth),
+            scaleY: Double(canvas) / Double(contentHeight),
+            translateX: -Double(offsetX) / Double(contentWidth),
+            translateY: -Double(offsetY) / Double(contentHeight)
+        )
+    }
+
+    private static func halfUpContentDimension(
+        scaledDimension: Int,
+        referenceDimension: Int
+    ) throws -> Int {
+        let (twiceCanvas, canvasOverflow) = canvasSize
+            .multipliedReportingOverflow(by: 2)
+        let (scaledNumerator, scaleOverflow) = scaledDimension
+            .multipliedReportingOverflow(by: twiceCanvas)
+        let (numerator, additionOverflow) = scaledNumerator
+            .addingReportingOverflow(referenceDimension)
+        let (denominator, denominatorOverflow) = referenceDimension
+            .multipliedReportingOverflow(by: 2)
+        guard !canvasOverflow,
+              !scaleOverflow,
+              !additionOverflow,
+              !denominatorOverflow,
+              denominator > 0 else {
+            throw GolfTrainingInputTransformError.arithmeticOverflow(
+                width: scaledDimension,
+                height: referenceDimension
+            )
+        }
+        return max(1, numerator / denominator)
+    }
+
+    fileprivate var canonicalIdentity: String {
+        [
+            version,
+            String(sourceOrientedWidth),
+            String(sourceOrientedHeight),
+            String(canvasWidth),
+            String(canvasHeight),
+            String(contentWidth),
+            String(contentHeight),
+            String(offsetX),
+            String(offsetY)
+        ].joined(separator: "|")
+    }
+}
+
 public struct GolfResolvedGolfer: Codable, Equatable, Sendable {
     public let golferID: String
     public let split: GolfDatasetSplit
@@ -134,6 +254,7 @@ public struct GolfResolvedFrameLabel: Codable, Equatable, Sendable {
     public let sourceFrameIndex: Int
     public let sourceTime: Double
     public let queueReasons: [String]
+    public let annotationROITransform: GolfROIAffineTransform
     public let landmarks: GolfResolvedLandmarkCollection
 }
 
@@ -143,11 +264,19 @@ public struct GolfResolvedClip: Codable, Equatable, Sendable {
     public let split: GolfDatasetSplit
     public let view: GolfDatasetView
     public let handedness: GolfDatasetHandedness
+    public let authorization: GolfDatasetAuthorization
+    public let fileName: String
+    public let frameCount: Int
+    public let orientedWidth: Int
+    public let orientedHeight: Int
+    public let sourceTimescale: Int
     public let mediaSHA256: String
     public let timelineSHA256: String
     public let pPointTruthSHA256: String
     public let predictionRunID: String
     public let revisionID: String
+    public let revisionCompletedAt: Date
+    public let trainingInputTransform: GolfTrainingInputTransform
     public let pPointTruth: [GolfPPointFrameTruth]
     public let frames: [GolfResolvedFrameLabel]
 }
@@ -156,6 +285,9 @@ public struct GolfResolvedDataset: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let datasetID: String
     public let roiAlgorithmVersion: String
+    public let inputTransformVersion: String
+    public let inputWidth: Int
+    public let inputHeight: Int
     public let golfers: [GolfResolvedGolfer]
     public let clips: [GolfResolvedClip]
 }
@@ -163,19 +295,33 @@ public struct GolfResolvedDataset: Codable, Equatable, Sendable {
 public struct GolfDatasetManifestClip: Codable, Equatable, Sendable {
     public let clipID: String
     public let golferID: String
+    public let split: GolfDatasetSplit
+    public let view: GolfDatasetView
+    public let handedness: GolfDatasetHandedness
     public let predictionRunID: String
     public let revisionID: String
+    public let revisionCompletedAt: Date
+    public let authorization: GolfDatasetAuthorization
+    public let fileName: String
+    public let frameCount: Int
+    public let orientedWidth: Int
+    public let orientedHeight: Int
+    public let sourceTimescale: Int
     public let mediaSHA256: String
     public let timelineSHA256: String
     public let pPointTruthSHA256: String
     public let predictionProvenanceHash: String
     public let resolvedFrameCount: Int
+    public let trainingInputTransformSHA256: String
 }
 
 public struct GolfDatasetExportManifest: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let datasetID: String
     public let roiAlgorithmVersion: String
+    public let inputTransformVersion: String
+    public let inputWidth: Int
+    public let inputHeight: Int
     public let resolvedLabelsFile: String
     public let resolvedLabelsSHA256: String
     public let clips: [GolfDatasetManifestClip]
@@ -205,12 +351,24 @@ public enum GolfResolvedLabelExportError: Error, Equatable, CustomStringConverti
     case predictionClipMismatch(String)
     case revisionClipMismatch(String)
     case revisionPredictionMismatch(String)
+    case revisionNotCompleted(String)
     case roiVersionMismatch(expected: String, actual: String)
     case incompletePPointTruth(String)
     case duplicatePPointStage(clipID: String, stage: GolfPPointStage)
     case pPointFrameOutOfRange(clipID: String, sourceFrameIndex: Int)
     case duplicateFrameMetadata(clipID: String, sourceFrameIndex: Int)
     case missingPredictionFrame(clipID: String, sourceFrameIndex: Int)
+    case resolvedFrameSetMismatch(
+        clipID: String,
+        expected: [Int],
+        actual: [Int]
+    )
+    case invalidOrientedDimensions(clipID: String, width: Int, height: Int)
+    case trainingInputTransformOverflow(
+        clipID: String,
+        width: Int,
+        height: Int
+    )
 
     public var description: String {
         switch self {
@@ -236,6 +394,8 @@ public enum GolfResolvedLabelExportError: Error, Equatable, CustomStringConverti
             return "Revision \(revisionID) does not belong to its selected clip"
         case .revisionPredictionMismatch(let revisionID):
             return "Revision \(revisionID) does not reference its selected prediction run"
+        case .revisionNotCompleted(let revisionID):
+            return "Revision \(revisionID) is not completed"
         case .roiVersionMismatch(let expected, let actual):
             return "ROI algorithm version mismatch: expected \(expected), got \(actual)"
         case .incompletePPointTruth(let clipID):
@@ -248,6 +408,14 @@ public enum GolfResolvedLabelExportError: Error, Equatable, CustomStringConverti
             return "Clip \(clipID) has duplicate metadata for frame \(sourceFrameIndex)"
         case .missingPredictionFrame(let clipID, let sourceFrameIndex):
             return "Clip \(clipID) has no unique prediction frame at \(sourceFrameIndex)"
+        case .resolvedFrameSetMismatch(let clipID, let expected, let actual):
+            return "Clip \(clipID) resolved frame set \(actual) does not match " +
+                "P1-P8 truth frame set \(expected)"
+        case .invalidOrientedDimensions(let clipID, let width, let height):
+            return "Clip \(clipID) has invalid oriented dimensions \(width)x\(height)"
+        case .trainingInputTransformOverflow(let clipID, let width, let height):
+            return "Clip \(clipID) oriented dimensions \(width)x\(height) " +
+                "overflow full-frame input transform arithmetic"
         }
     }
 }
@@ -307,6 +475,9 @@ public enum GolfResolvedLabelExporter {
             guard revision.parentPredictionRunID == prediction.predictionRunID else {
                 throw GolfResolvedLabelExportError.revisionPredictionMismatch(revision.revisionID)
             }
+            guard let revisionCompletedAt = revision.completedAt else {
+                throw GolfResolvedLabelExportError.revisionNotCompleted(revision.revisionID)
+            }
             guard prediction.roiAlgorithmVersion == selection.roiAlgorithmVersion else {
                 throw GolfResolvedLabelExportError.roiVersionMismatch(
                     expected: selection.roiAlgorithmVersion,
@@ -318,6 +489,19 @@ public enum GolfResolvedLabelExporter {
             }
 
             let orderedTruth = try canonicalPPointTruth(selected.pPointTruth, for: clip)
+            let expectedFrameIndexes = Set(
+                orderedTruth.map(\.sourceFrameIndex)
+            )
+            let actualFrameIndexes = Set(
+                revision.frameRevisions.map(\.sourceFrameIndex)
+            )
+            guard actualFrameIndexes == expectedFrameIndexes else {
+                throw GolfResolvedLabelExportError.resolvedFrameSetMismatch(
+                    clipID: clip.clipID,
+                    expected: expectedFrameIndexes.sorted(),
+                    actual: actualFrameIndexes.sorted()
+                )
+            }
             let metadata = try canonicalFrameMetadata(selected.frameMetadata, clipID: clip.clipID)
             let predictionFrameGroups = Dictionary(
                 grouping: prediction.frames,
@@ -351,21 +535,50 @@ public enum GolfResolvedLabelExporter {
                     sourceFrameIndex: frameRevision.sourceFrameIndex,
                     sourceTime: predictionFrame.sourceTime,
                     queueReasons: metadata[frameRevision.sourceFrameIndex] ?? [],
+                    annotationROITransform: predictionFrame.roiTransform,
                     landmarks: GolfResolvedLandmarkCollection(landmarks)
                 ))
             }
 
+            let trainingInputTransform: GolfTrainingInputTransform
+            do {
+                trainingInputTransform = try GolfTrainingInputTransform(
+                    sourceOrientedWidth: clip.media.orientedWidth,
+                    sourceOrientedHeight: clip.media.orientedHeight
+                )
+            } catch GolfTrainingInputTransformError.invalidDimensions {
+                throw GolfResolvedLabelExportError.invalidOrientedDimensions(
+                    clipID: clip.clipID,
+                    width: clip.media.orientedWidth,
+                    height: clip.media.orientedHeight
+                )
+            } catch GolfTrainingInputTransformError.arithmeticOverflow {
+                throw GolfResolvedLabelExportError
+                    .trainingInputTransformOverflow(
+                        clipID: clip.clipID,
+                        width: clip.media.orientedWidth,
+                        height: clip.media.orientedHeight
+                    )
+            }
             let resolvedClip = GolfResolvedClip(
                 clipID: clip.clipID,
                 golferID: clip.golferID,
                 split: golfer.split,
                 view: clip.view,
                 handedness: clip.handedness,
+                authorization: clip.authorization,
+                fileName: clip.media.fileName,
+                frameCount: clip.media.frameCount,
+                orientedWidth: clip.media.orientedWidth,
+                orientedHeight: clip.media.orientedHeight,
+                sourceTimescale: clip.media.sourceTimescale,
                 mediaSHA256: clip.media.sha256,
                 timelineSHA256: clip.media.timelineSHA256,
                 pPointTruthSHA256: clip.pPointTruthSHA256,
                 predictionRunID: prediction.predictionRunID,
                 revisionID: revision.revisionID,
+                revisionCompletedAt: revisionCompletedAt,
+                trainingInputTransform: trainingInputTransform,
                 pPointTruth: orderedTruth,
                 frames: frames
             )
@@ -373,13 +586,26 @@ public enum GolfResolvedLabelExporter {
             manifestClips.append(GolfDatasetManifestClip(
                 clipID: clip.clipID,
                 golferID: clip.golferID,
+                split: golfer.split,
+                view: clip.view,
+                handedness: clip.handedness,
                 predictionRunID: prediction.predictionRunID,
                 revisionID: revision.revisionID,
+                revisionCompletedAt: revisionCompletedAt,
+                authorization: clip.authorization,
+                fileName: clip.media.fileName,
+                frameCount: clip.media.frameCount,
+                orientedWidth: clip.media.orientedWidth,
+                orientedHeight: clip.media.orientedHeight,
+                sourceTimescale: clip.media.sourceTimescale,
                 mediaSHA256: clip.media.sha256,
                 timelineSHA256: clip.media.timelineSHA256,
                 pPointTruthSHA256: clip.pPointTruthSHA256,
                 predictionProvenanceHash: prediction.provenanceHash,
-                resolvedFrameCount: frames.count
+                resolvedFrameCount: frames.count,
+                trainingInputTransformSHA256: sha256(
+                    Data(trainingInputTransform.canonicalIdentity.utf8)
+                )
             ))
         }
 
@@ -391,18 +617,24 @@ public enum GolfResolvedLabelExporter {
             }
         }
         let dataset = GolfResolvedDataset(
-            schemaVersion: 1,
+            schemaVersion: 2,
             datasetID: registry.datasetID,
             roiAlgorithmVersion: selection.roiAlgorithmVersion,
+            inputTransformVersion: GolfTrainingInputTransform.version,
+            inputWidth: GolfTrainingInputTransform.canvasSize,
+            inputHeight: GolfTrainingInputTransform.canvasSize,
             golfers: golfers,
             clips: resolvedClips
         )
         let encoder = canonicalEncoder()
         let resolvedLabelsData = try encoder.encode(dataset)
         let manifest = GolfDatasetExportManifest(
-            schemaVersion: 1,
+            schemaVersion: 2,
             datasetID: registry.datasetID,
             roiAlgorithmVersion: selection.roiAlgorithmVersion,
+            inputTransformVersion: GolfTrainingInputTransform.version,
+            inputWidth: GolfTrainingInputTransform.canvasSize,
+            inputHeight: GolfTrainingInputTransform.canvasSize,
             resolvedLabelsFile: "resolved-labels.json",
             resolvedLabelsSHA256: sha256(resolvedLabelsData),
             clips: manifestClips

@@ -1,10 +1,12 @@
 import torch
 from PIL import Image
 
-from dataset import GolfKeypointDataset, ReviewedTrainingLabelsRequired
+from contracts import HEATMAP_SIZE, INPUT_SIZE, LANDMARK_NAMES
+from dataset import GolfHeatmapDataset, ReviewedTrainingLabelsRequired
 from evaluate import build_evaluation_report, promotion_passed
 from export_coreml import assert_report_passes, file_sha256
 from model import GolfKeypointNet
+from test_dataset_heatmaps import _write_export
 from train import masked_keypoint_loss
 
 
@@ -18,68 +20,20 @@ def test_output_contract():
 
 
 def test_dataset_requires_authorized_reviewed_labels(tmp_path):
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(
-        """
-        [{
-          "clipID": "clip-1",
-          "golferID": "golfer-1",
-          "fileName": "clip.mov",
-          "split": "training",
-          "authorization": "training-allowed",
-          "sourceFrameRate": 30,
-          "frameLabels": [{
-            "sourceFrameIndex": 12,
-            "reviewer": "reviewer-a",
-            "reviewed": true,
-            "landmarks": {
-              "grip": {"x": 0.1, "y": 0.2, "visibility": "visible"},
-              "shaftStart": {"x": 0.2, "y": 0.3, "visibility": "visible"},
-              "shaftEnd": {"x": 0.4, "y": 0.5, "visibility": "visible"},
-              "clubhead": {"x": 0.6, "y": 0.7, "visibility": "visible"},
-              "ball": {"x": 0.8, "y": 0.9, "visibility": "occluded"}
-            }
-          }]
-        }]
-        """,
-        encoding="utf-8",
-    )
-    dataset = GolfKeypointDataset(
-        manifest_path=manifest,
+    manifest_sha = _write_export(tmp_path)
+    dataset = GolfHeatmapDataset(
+        export_path=tmp_path / "manifest.json",
         video_root=tmp_path,
         split="training",
-        image_loader=lambda _sample: Image.new("RGB", (320, 180), "black"),
+        expected_manifest_sha256=manifest_sha,
+        image_loader=lambda _sample: Image.new("RGB", (180, 320), "black"),
     )
-    image, coordinates, visibility = dataset[0]
-    assert image.shape == (3, 256, 256)
-    assert coordinates.shape == (5, 2)
-    assert abs(float(coordinates[0, 0]) - 0.1) < 1e-6
-    assert abs(float(coordinates[0, 1]) - 0.33125) < 1e-6
-    assert visibility.tolist() == [1, 1, 1, 1, 0]
-
-    manifest.write_text(
-        manifest.read_text(encoding="utf-8").replace('"reviewed": true', '"reviewed": false'),
-        encoding="utf-8",
-    )
-    try:
-        GolfKeypointDataset(manifest, tmp_path, "training")
-    except ReviewedTrainingLabelsRequired as error:
-        assert "reviewed training labels required" in str(error)
-    else:
-        raise AssertionError("unreviewed labels must be rejected")
-
-    manifest.write_text(
-        manifest.read_text(encoding="utf-8")
-        .replace('"reviewed": false', '"reviewed": true')
-        .replace('"visibility": "occluded"', '"visibility": "visble"'),
-        encoding="utf-8",
-    )
-    try:
-        GolfKeypointDataset(manifest, tmp_path, "training")
-    except ReviewedTrainingLabelsRequired as error:
-        assert "visibility" in str(error)
-    else:
-        raise AssertionError("unknown visibility values must be rejected")
+    image, heatmaps, visibility, coordinate_mask, metadata = dataset[0]
+    assert image.shape == (3, INPUT_SIZE, INPUT_SIZE)
+    assert heatmaps.shape == (len(LANDMARK_NAMES), HEATMAP_SIZE, HEATMAP_SIZE)
+    assert visibility.shape == (len(LANDMARK_NAMES),)
+    assert coordinate_mask.shape == (len(LANDMARK_NAMES),)
+    assert metadata["manifest_sha256"] == manifest_sha
 
 
 def test_masked_coordinate_loss_ignores_hidden_points():

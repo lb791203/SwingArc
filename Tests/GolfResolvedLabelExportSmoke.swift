@@ -9,10 +9,10 @@ private func sha256(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
 }
 
-private func identityTransform() -> GolfROIAffineTransform {
+private func auditTransform() -> GolfROIAffineTransform {
     GolfROIAffineTransform(
-        a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0,
-        invA: 1, invB: 0, invC: 0, invD: 1, invTx: 0, invTy: 0
+        a: 2, b: 0, c: 0, d: 2, tx: -0.5, ty: -0.5,
+        invA: 0.5, invB: 0, invC: 0, invD: 0.5, invTx: 0.25, invTy: 0.25
     )
 }
 
@@ -28,7 +28,11 @@ private func predictionPoint(_ point: GolfNormalizedPoint) -> GolfPredictionPoin
     )
 }
 
-private func fixture(shaftEndX: Double = 0.72) -> (
+private func fixture(
+    shaftEndX: Double = 0.72,
+    orientedWidth: Int = 1920,
+    orientedHeight: Int = 1080
+) -> (
     snapshot: GolfDatasetSnapshot,
     selection: GolfDatasetExportSelection
 ) {
@@ -56,8 +60,8 @@ private func fixture(shaftEndX: Double = 0.72) -> (
             sha256: mediaHash,
             timelineSHA256: timelineHash,
             frameCount: 120,
-            orientedWidth: 1920,
-            orientedHeight: 1080,
+            orientedWidth: orientedWidth,
+            orientedHeight: orientedHeight,
             sourceTimescale: 600
         ),
         view: .downTheLine,
@@ -82,7 +86,7 @@ private func fixture(shaftEndX: Double = 0.72) -> (
             GolfPredictionFrame(
                 sourceFrameIndex: 60,
                 sourceTime: 2.0,
-                roiTransform: identityTransform(),
+                roiTransform: auditTransform(),
                 points: [.grip: predictionPoint(gripPoint)]
             )
         ],
@@ -144,14 +148,14 @@ private func fixture(shaftEndX: Double = 0.72) -> (
                 predictionRunID: prediction.predictionRunID,
                 revisionID: revision.revisionID,
                 pPointTruth: [
-                    .init(stage: .p8, sourceFrameIndex: 105),
-                    .init(stage: .p2, sourceFrameIndex: 20),
-                    .init(stage: .p1, sourceFrameIndex: 10),
-                    .init(stage: .p4, sourceFrameIndex: 45),
-                    .init(stage: .p3, sourceFrameIndex: 32),
-                    .init(stage: .p6, sourceFrameIndex: 70),
+                    .init(stage: .p8, sourceFrameIndex: 60),
+                    .init(stage: .p2, sourceFrameIndex: 60),
+                    .init(stage: .p1, sourceFrameIndex: 60),
+                    .init(stage: .p4, sourceFrameIndex: 60),
+                    .init(stage: .p3, sourceFrameIndex: 60),
+                    .init(stage: .p6, sourceFrameIndex: 60),
                     .init(stage: .p5, sourceFrameIndex: 60),
-                    .init(stage: .p7, sourceFrameIndex: 86)
+                    .init(stage: .p7, sourceFrameIndex: 60)
                 ],
                 frameMetadata: [
                     .init(
@@ -210,8 +214,57 @@ private func testResolvedSemanticsAndDeterminism() throws {
     precondition(frame.landmarks[.clubhead]?.visibility == .occluded)
     precondition(frame.landmarks[.clubhead]?.point == nil)
     precondition(frame.landmarks[.ball] == nil)
+    precondition(frame.annotationROITransform == auditTransform())
     precondition(frame.queueReasons == ["p6-dense", "p8-dense"])
     precondition(clip.pPointTruth.map(\.stage) == GolfPPointStage.allCases)
+    precondition(clip.authorization == .trainingAllowed)
+    precondition(clip.fileName == "clip-b.mov")
+    precondition(clip.frameCount == 120)
+    precondition(clip.orientedWidth == 1920)
+    precondition(clip.orientedHeight == 1080)
+    precondition(clip.sourceTimescale == 600)
+    let landscapeTransform = try GolfTrainingInputTransform(
+        sourceOrientedWidth: 1920,
+        sourceOrientedHeight: 1080
+    )
+    precondition(clip.trainingInputTransform == landscapeTransform)
+    precondition(clip.trainingInputTransform.contentWidth == 512)
+    precondition(clip.trainingInputTransform.contentHeight == 288)
+    precondition(clip.trainingInputTransform.offsetX == 0)
+    precondition(clip.trainingInputTransform.offsetY == 112)
+    let portraitTransform = try GolfTrainingInputTransform(
+        sourceOrientedWidth: 1080,
+        sourceOrientedHeight: 1920
+    )
+    precondition(portraitTransform.contentWidth == 288)
+    precondition(portraitTransform.contentHeight == 512)
+    precondition(portraitTransform.offsetX == 112)
+    precondition(portraitTransform.offsetY == 0)
+    precondition(
+        clip.revisionCompletedAt
+            == Date(timeIntervalSince1970: 1_700_000_090)
+    )
+    precondition(first.dataset.schemaVersion == 2)
+    precondition(first.manifest.schemaVersion == 2)
+    precondition(
+        first.dataset.inputTransformVersion
+            == GolfTrainingInputTransform.version
+    )
+    precondition(first.dataset.inputWidth == 512)
+    precondition(first.dataset.inputHeight == 512)
+    precondition(
+        first.manifest.inputTransformVersion
+            == GolfTrainingInputTransform.version
+    )
+    precondition(first.manifest.inputWidth == 512)
+    precondition(first.manifest.inputHeight == 512)
+    guard let manifestClip = first.manifest.clips.first else {
+        throw GolfResolvedLabelExportSmokeError.missingFixture
+    }
+    precondition(manifestClip.split == .validation)
+    precondition(manifestClip.view == .downTheLine)
+    precondition(manifestClip.handedness == .right)
+    precondition(manifestClip.trainingInputTransformSHA256.count == 64)
     precondition(first.receipt.manifestSHA256.count == 64)
     precondition(first.receipt.manifestSHA256 == second.receipt.manifestSHA256)
 
@@ -284,12 +337,144 @@ private func testRejectsUnfinishedRevision() throws {
     }
 }
 
+private func testRejectsInvalidOrOverflowingOrientedDimensions() throws {
+    for (width, height, expectedOverflow) in [
+        (0, 1080, false),
+        (Int.max, Int.max - 1, true)
+    ] {
+        let input = fixture(
+            orientedWidth: width,
+            orientedHeight: height
+        )
+        let directory = try temporaryDirectory("invalid-dimensions")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        do {
+            _ = try GolfResolvedLabelExporter.export(
+                snapshot: input.snapshot,
+                selection: input.selection,
+                to: directory
+            )
+            preconditionFailure("invalid dimensions must not export")
+        } catch GolfResolvedLabelExportError.invalidOrientedDimensions(
+            let clipID,
+            let actualWidth,
+            let actualHeight
+        ) {
+            precondition(!expectedOverflow)
+            precondition(clipID == "clip-b")
+            precondition(actualWidth == width)
+            precondition(actualHeight == height)
+        } catch GolfResolvedLabelExportError.trainingInputTransformOverflow(
+            let clipID,
+            let actualWidth,
+            let actualHeight
+        ) {
+            precondition(expectedOverflow)
+            precondition(clipID == "clip-b")
+            precondition(actualWidth == width)
+            precondition(actualHeight == height)
+        }
+    }
+}
+
+private func testRequiresExactPPointResolvedFrameSet() throws {
+    let input = fixture()
+    let source = input.snapshot.revisions[0]
+    let missingFrame = GolfAnnotationRevision(
+        revisionID: source.revisionID,
+        clipID: source.clipID,
+        parentPredictionRunID: source.parentPredictionRunID,
+        annotatorID: source.annotatorID,
+        createdAt: source.createdAt,
+        completedAt: source.completedAt,
+        frameRevisions: []
+    )
+    let snapshot = GolfDatasetSnapshot(
+        registry: input.snapshot.registry,
+        clips: input.snapshot.clips,
+        predictions: input.snapshot.predictions,
+        revisions: [missingFrame]
+    )
+    let directory = try temporaryDirectory("missing-p-point-frame")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    do {
+        _ = try GolfResolvedLabelExporter.export(
+            snapshot: snapshot,
+            selection: input.selection,
+            to: directory
+        )
+        preconditionFailure("missing P-point frames must not export")
+    } catch GolfResolvedLabelExportError.resolvedFrameSetMismatch(
+        let clipID,
+        let expected,
+        let actual
+    ) {
+        precondition(clipID == "clip-b")
+        precondition(expected == [60])
+        precondition(actual.isEmpty)
+    }
+}
+
+private func testSkinnyInputTransformsRemainFinite() throws {
+    let fixtures = [
+        (width: 2048, height: 1, contentWidth: 512, contentHeight: 1,
+         offsetX: 0, offsetY: 255),
+        (width: 1, height: 2048, contentWidth: 1, contentHeight: 512,
+         offsetX: 255, offsetY: 0),
+        (width: 1025, height: 1, contentWidth: 512, contentHeight: 1,
+         offsetX: 0, offsetY: 255)
+    ]
+    for fixture in fixtures {
+        let transform = try GolfTrainingInputTransform(
+            sourceOrientedWidth: fixture.width,
+            sourceOrientedHeight: fixture.height
+        )
+        precondition(transform.contentWidth == fixture.contentWidth)
+        precondition(transform.contentHeight == fixture.contentHeight)
+        precondition(transform.offsetX == fixture.offsetX)
+        precondition(transform.offsetY == fixture.offsetY)
+        let auditValues = [
+            transform.forward.scaleX,
+            transform.forward.scaleY,
+            transform.forward.translateX,
+            transform.forward.translateY,
+            transform.inverse.scaleX,
+            transform.inverse.scaleY,
+            transform.inverse.translateX,
+            transform.inverse.translateY
+        ]
+        precondition(auditValues.allSatisfy(\.isFinite))
+
+        for point in [(x: 0.0, y: 0.0), (x: 0.37, y: 0.61), (x: 1.0, y: 1.0)] {
+            let canvasX = (
+                Double(transform.offsetX)
+                    + point.x * Double(transform.contentWidth)
+            ) / 512
+            let canvasY = (
+                Double(transform.offsetY)
+                    + point.y * Double(transform.contentHeight)
+            ) / 512
+            let sourceX = (
+                canvasX * 512 - Double(transform.offsetX)
+            ) / Double(transform.contentWidth)
+            let sourceY = (
+                canvasY * 512 - Double(transform.offsetY)
+            ) / Double(transform.contentHeight)
+            precondition(abs(sourceX - point.x) <= 1e-9)
+            precondition(abs(sourceY - point.y) <= 1e-9)
+        }
+    }
+}
+
 @main
 struct GolfResolvedLabelExportSmokeRunner {
     static func main() throws {
         try testResolvedSemanticsAndDeterminism()
         try testDecisionChangesManifestHash()
         try testRejectsUnfinishedRevision()
+        try testRejectsInvalidOrOverflowingOrientedDimensions()
+        try testRequiresExactPPointResolvedFrameSet()
+        try testSkinnyInputTransformsRemainFinite()
         print("All GolfResolvedLabelExporter tests passed.")
     }
 }
