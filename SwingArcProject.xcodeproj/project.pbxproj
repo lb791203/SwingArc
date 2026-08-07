@@ -39,6 +39,7 @@
 		D60000000000000000000007 /* LiveSwingTriggerDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D60000000000000000000008 /* LiveSwingTriggerDetector.swift */; };
 		D60000000000000000000009 /* LivePoseSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6000000000000000000000A /* LivePoseSampler.swift */; };
 		D6000000000000000000000B /* CapturedVideoStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6000000000000000000000C /* CapturedVideoStore.swift */; };
+		D70000000000000000000001 /* CompactPlaybackPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D70000000000000000000002 /* CompactPlaybackPolicy.swift */; };
 		E70000000000000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E70000000000000000000002 /* PrivacyInfo.xcprivacy */; };
 		F80000000000000000000001 /* SwingObservationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000002 /* SwingObservationModels.swift */; };
 		F80000000000000000000003 /* SwingMetricModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000004 /* SwingMetricModels.swift */; };
@@ -102,6 +103,7 @@
 		D60000000000000000000008 /* LiveSwingTriggerDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSwingTriggerDetector.swift; sourceTree = "<group>"; };
 		D6000000000000000000000A /* LivePoseSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePoseSampler.swift; sourceTree = "<group>"; };
 		D6000000000000000000000C /* CapturedVideoStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturedVideoStore.swift; sourceTree = "<group>"; };
+		D70000000000000000000002 /* CompactPlaybackPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactPlaybackPolicy.swift; sourceTree = "<group>"; };
 		E70000000000000000000002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		F80000000000000000000002 /* SwingObservationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingObservationModels.swift; sourceTree = "<group>"; };
 		F80000000000000000000004 /* SwingMetricModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingMetricModels.swift; sourceTree = "<group>"; };
@@ -172,6 +174,7 @@
 				A30000000000000000000008 /* PracticeModels.swift */,
 				D60000000000000000000002 /* CameraRecordingReadiness.swift */,
 				D60000000000000000000004 /* FrameExtractionTolerancePolicy.swift */,
+				D70000000000000000000002 /* CompactPlaybackPolicy.swift */,
 				D60000000000000000000006 /* LiveSwingCaptureModels.swift */,
 				F80000000000000000000002 /* SwingObservationModels.swift */,
 				F80000000000000000000004 /* SwingMetricModels.swift */,
@@ -352,6 +355,7 @@
 				D60000000000000000000007 /* LiveSwingTriggerDetector.swift in Sources */,
 				D60000000000000000000009 /* LivePoseSampler.swift in Sources */,
 				D6000000000000000000000B /* CapturedVideoStore.swift in Sources */,
+				D70000000000000000000001 /* CompactPlaybackPolicy.swift in Sources */,
 				F80000000000000000000001 /* SwingObservationModels.swift in Sources */,
 				F80000000000000000000003 /* SwingMetricModels.swift in Sources */,
 				F80000000000000000000011 /* SimplifiedSwingFeedbackModels.swift in Sources */,

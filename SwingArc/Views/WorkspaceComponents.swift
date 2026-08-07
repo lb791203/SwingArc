@@ -185,7 +185,7 @@ struct MobileReplayTimelineView: View {
     let keyframes: [KeyframeMarker]
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: MobileReplayStageStripPolicy.stackSpacing) {
             HStack(spacing: 8) {
                 Text(formatTime(playbackManager.currentTime))
                 Slider(
@@ -205,29 +205,37 @@ struct MobileReplayTimelineView: View {
             .font(.caption2.monospacedDigit())
             .foregroundStyle(.white.opacity(0.76))
 
-            HStack(spacing: 0) {
+            HStack(spacing: MobileReplayStageStripPolicy.stageSpacing) {
                 ForEach(SwingStage.allCases) { stage in
                     let marker = keyframes.first { $0.stage == stage.rawValue }
+                    let current = currentStage == stage
                     Button {
                         guard let marker else { return }
                         playbackManager.pause()
                         playbackManager.seek(to: marker.time)
                     } label: {
-                        ZStack {
-                            if isCurrent(marker) {
-                                Circle()
-                                    .stroke(.white, lineWidth: 1.5)
-                                    .frame(width: 42, height: 42)
-                            }
-
+                        VStack(spacing: 2) {
                             SwingStagePoseGlyph(
                                 stage: stage,
-                                isResolved: marker != nil
+                                isResolved: marker != nil,
+                                isCurrent: current
                             )
-                            .frame(width: 40, height: 48)
+                            .frame(
+                                width: MobileReplayStageStripPolicy.glyphWidth,
+                                height: MobileReplayStageStripPolicy.glyphHeight
+                            )
+
+                            Capsule()
+                                .fill(AnalysisTheme.proTourSignal)
+                                .frame(
+                                    width: MobileReplayStageStripPolicy.currentIndicatorWidth,
+                                    height: MobileReplayStageStripPolicy.currentIndicatorHeight
+                                )
+                                .opacity(current ? 1 : 0)
                         }
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .contentShape(Rectangle())
+                        .frame(maxWidth: .infinity)
+                        .frame(height: MobileReplayStageStripPolicy.buttonHeight)
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .allowsHitTesting(marker != nil)
@@ -238,6 +246,10 @@ struct MobileReplayTimelineView: View {
                     )
                 }
             }
+            // Consume near-miss taps in the gaps instead of forwarding them to
+            // the full-screen video play/pause gesture behind this rail.
+            .contentShape(Rectangle())
+            .onTapGesture { }
         }
         .accessibilityElement(children: .contain)
     }
@@ -248,9 +260,12 @@ struct MobileReplayTimelineView: View {
         return String(format: "%02d:%02d", Int(value) / 60, Int(value) % 60)
     }
 
-    private func isCurrent(_ marker: KeyframeMarker?) -> Bool {
-        guard let marker else { return false }
-        return abs(playbackManager.currentTime - marker.time) <= 0.18
+    private var currentStage: SwingStage? {
+        ReplayStageSelectionPolicy.currentStage(
+            at: playbackManager.currentTime,
+            keyframes: keyframes,
+            tolerance: 0.18
+        )
     }
 }
 
@@ -260,107 +275,34 @@ struct MobileReplayTimelineView: View {
 private struct SwingStagePoseGlyph: View {
     let stage: SwingStage
     let isResolved: Bool
+    let isCurrent: Bool
 
     var body: some View {
-        Canvas { context, size in
-            let pose = SwingStagePoseLibrary.pose(for: stage)
-            let bodyColor = isResolved ? Color.white : Color.white.opacity(0.40)
-            let clubColor = isResolved ? Color.white.opacity(0.88) : Color.white.opacity(0.30)
-            let bodyLineWidth = max(2.25, min(size.width, size.height) * 0.065)
-            let clubLineWidth = max(1.25, bodyLineWidth * 0.56)
-
-            context.stroke(
-                path(for: pose.spine, in: size),
-                with: .color(bodyColor),
-                style: StrokeStyle(lineWidth: bodyLineWidth * 1.12, lineCap: .round, lineJoin: .round)
+        Image(SwingStageGlyphAsset.name(for: stage))
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .foregroundStyle(
+                isCurrent
+                    ? AnalysisTheme.proTourSignal
+                    : .white.opacity(isResolved ? 1 : 0.38)
             )
-            for stroke in [pose.shoulders, pose.hips] {
-                context.stroke(
-                    path(for: stroke, in: size),
-                    with: .color(bodyColor),
-                    style: StrokeStyle(lineWidth: bodyLineWidth * 0.78, lineCap: .round, lineJoin: .round)
-                )
-            }
-            for limb in pose.limbs {
-                context.stroke(
-                    path(for: limb, in: size),
-                    with: .color(bodyColor),
-                    style: StrokeStyle(lineWidth: bodyLineWidth, lineCap: .round, lineJoin: .round)
-                )
-            }
-            context.stroke(
-                path(for: pose.club, in: size),
-                with: .color(clubColor),
-                style: StrokeStyle(lineWidth: clubLineWidth, lineCap: .round, lineJoin: .round)
-            )
-            if let clubHead = clubHeadPath(for: pose.club, in: size) {
-                context.stroke(
-                    clubHead,
-                    with: .color(clubColor),
-                    style: StrokeStyle(lineWidth: clubLineWidth * 1.55, lineCap: .round)
-                )
-            }
-
-            let headCenter = point(pose.head, in: size)
-            let headDiameter = max(5.2, min(size.width, size.height) * 0.155)
-            let head = CGRect(
-                x: headCenter.x - headDiameter / 2,
-                y: headCenter.y - headDiameter / 2,
-                width: headDiameter,
-                height: headDiameter
-            )
-            context.fill(Path(ellipseIn: head), with: .color(bodyColor))
-
-            if let ball = pose.ball {
-                let center = point(ball, in: size)
-                let diameter = max(2.5, min(size.width, size.height) * 0.072)
-                let rect = CGRect(
-                    x: center.x - diameter / 2,
-                    y: center.y - diameter / 2,
-                    width: diameter,
-                    height: diameter
-                )
-                context.fill(
-                    Path(ellipseIn: rect),
-                    with: .color(isResolved ? AnalysisTheme.proTourSignal : Color.white.opacity(0.35))
-                )
-            }
-        }
         .accessibilityHidden(true)
     }
+}
 
-    private func point(_ normalized: CGPoint, in size: CGSize) -> CGPoint {
-        CGPoint(x: normalized.x * size.width, y: normalized.y * size.height)
-    }
-
-    private func path(for normalizedPoints: [CGPoint], in size: CGSize) -> Path {
-        guard let first = normalizedPoints.first else { return Path() }
-        var path = Path()
-        path.move(to: point(first, in: size))
-        for next in normalizedPoints.dropFirst() {
-            path.addLine(to: point(next, in: size))
+private enum SwingStageGlyphAsset {
+    static func name(for stage: SwingStage) -> String {
+        switch stage {
+        case .address: return "PStage1"
+        case .takeaway: return "PStage2"
+        case .leadArmParallelBackswing: return "PStage3"
+        case .top: return "PStage4"
+        case .leadArmParallelDownswing: return "PStage5"
+        case .shaftParallelDownswing: return "PStage6"
+        case .impact: return "PStage7"
+        case .followThrough, .finish: return "PStage8"
         }
-        return path
-    }
-
-    private func clubHeadPath(for club: [CGPoint], in size: CGSize) -> Path? {
-        guard club.count >= 2 else { return nil }
-        let tip = point(club[club.count - 1], in: size)
-        let preceding = point(club[club.count - 2], in: size)
-        let dx = tip.x - preceding.x
-        let dy = tip.y - preceding.y
-        let length = hypot(dx, dy)
-        guard length > 0.001 else { return nil }
-
-        let halfWidth = max(1.5, min(size.width, size.height) * 0.055)
-        let perpendicular = CGPoint(
-            x: -dy / length * halfWidth,
-            y: dx / length * halfWidth
-        )
-        var path = Path()
-        path.move(to: CGPoint(x: tip.x - perpendicular.x, y: tip.y - perpendicular.y))
-        path.addLine(to: CGPoint(x: tip.x + perpendicular.x, y: tip.y + perpendicular.y))
-        return path
     }
 }
 
@@ -411,122 +353,240 @@ private enum SwingStagePoseLibrary {
         switch stage {
         case .address:
             return SwingStagePose(
-                head: CGPoint(x: 0.44, y: 0.16),
-                spine: [CGPoint(x: 0.46, y: 0.30), CGPoint(x: 0.53, y: 0.56)],
-                shoulders: [CGPoint(x: 0.42, y: 0.31), CGPoint(x: 0.50, y: 0.32)],
-                hips: [CGPoint(x: 0.48, y: 0.56), CGPoint(x: 0.58, y: 0.57)],
-                leadArm: [CGPoint(x: 0.42, y: 0.32), CGPoint(x: 0.54, y: 0.45), CGPoint(x: 0.63, y: 0.59)],
-                trailArm: [CGPoint(x: 0.50, y: 0.32), CGPoint(x: 0.56, y: 0.47), CGPoint(x: 0.63, y: 0.59)],
-                leadLeg: [CGPoint(x: 0.48, y: 0.56), CGPoint(x: 0.39, y: 0.75), CGPoint(x: 0.34, y: 0.94)],
-                trailLeg: [CGPoint(x: 0.58, y: 0.57), CGPoint(x: 0.63, y: 0.76), CGPoint(x: 0.70, y: 0.94)],
-                club: [CGPoint(x: 0.63, y: 0.59), CGPoint(x: 0.87, y: 0.93)],
-                ball: CGPoint(x: 0.90, y: 0.94)
+                head: CGPoint(x: 0.50, y: 0.15),
+                spine: [CGPoint(x: 0.50, y: 0.27), CGPoint(x: 0.50, y: 0.56)],
+                shoulders: [CGPoint(x: 0.37, y: 0.30), CGPoint(x: 0.63, y: 0.30)],
+                hips: [CGPoint(x: 0.40, y: 0.56), CGPoint(x: 0.60, y: 0.56)],
+                leadArm: [CGPoint(x: 0.38, y: 0.31), CGPoint(x: 0.42, y: 0.46), CGPoint(x: 0.49, y: 0.60)],
+                trailArm: [CGPoint(x: 0.62, y: 0.31), CGPoint(x: 0.58, y: 0.46), CGPoint(x: 0.49, y: 0.60)],
+                leadLeg: [CGPoint(x: 0.42, y: 0.56), CGPoint(x: 0.37, y: 0.76), CGPoint(x: 0.31, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.58, y: 0.56), CGPoint(x: 0.63, y: 0.76), CGPoint(x: 0.69, y: 0.94)],
+                club: [CGPoint(x: 0.49, y: 0.60), CGPoint(x: 0.49, y: 0.98)],
+                ball: nil
             )
         case .takeaway:
             return SwingStagePose(
-                head: CGPoint(x: 0.44, y: 0.16),
-                spine: [CGPoint(x: 0.46, y: 0.30), CGPoint(x: 0.53, y: 0.56)],
-                shoulders: [CGPoint(x: 0.42, y: 0.31), CGPoint(x: 0.50, y: 0.32)],
-                hips: [CGPoint(x: 0.48, y: 0.56), CGPoint(x: 0.58, y: 0.57)],
-                leadArm: [CGPoint(x: 0.42, y: 0.32), CGPoint(x: 0.31, y: 0.41), CGPoint(x: 0.18, y: 0.46)],
-                trailArm: [CGPoint(x: 0.50, y: 0.32), CGPoint(x: 0.35, y: 0.46), CGPoint(x: 0.18, y: 0.46)],
-                leadLeg: [CGPoint(x: 0.48, y: 0.56), CGPoint(x: 0.39, y: 0.75), CGPoint(x: 0.34, y: 0.94)],
-                trailLeg: [CGPoint(x: 0.58, y: 0.57), CGPoint(x: 0.63, y: 0.76), CGPoint(x: 0.70, y: 0.94)],
-                club: [CGPoint(x: 0.18, y: 0.46), CGPoint(x: 0.03, y: 0.46)],
+                head: CGPoint(x: 0.52, y: 0.16),
+                spine: [CGPoint(x: 0.52, y: 0.28), CGPoint(x: 0.52, y: 0.56)],
+                shoulders: [CGPoint(x: 0.39, y: 0.30), CGPoint(x: 0.64, y: 0.33)],
+                hips: [CGPoint(x: 0.40, y: 0.56), CGPoint(x: 0.61, y: 0.56)],
+                leadArm: [CGPoint(x: 0.40, y: 0.31), CGPoint(x: 0.42, y: 0.44), CGPoint(x: 0.35, y: 0.52)],
+                trailArm: [CGPoint(x: 0.63, y: 0.33), CGPoint(x: 0.50, y: 0.45), CGPoint(x: 0.35, y: 0.52)],
+                leadLeg: [CGPoint(x: 0.42, y: 0.56), CGPoint(x: 0.37, y: 0.76), CGPoint(x: 0.31, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.59, y: 0.56), CGPoint(x: 0.64, y: 0.76), CGPoint(x: 0.70, y: 0.94)],
+                club: [CGPoint(x: 0.35, y: 0.52), CGPoint(x: 0.03, y: 0.45)],
                 ball: nil
             )
         case .leadArmParallelBackswing:
             return SwingStagePose(
-                head: CGPoint(x: 0.47, y: 0.15),
-                spine: [CGPoint(x: 0.48, y: 0.30), CGPoint(x: 0.54, y: 0.56)],
-                shoulders: [CGPoint(x: 0.44, y: 0.31), CGPoint(x: 0.53, y: 0.33)],
-                hips: [CGPoint(x: 0.49, y: 0.56), CGPoint(x: 0.59, y: 0.57)],
-                leadArm: [CGPoint(x: 0.44, y: 0.31), CGPoint(x: 0.31, y: 0.34), CGPoint(x: 0.14, y: 0.34)],
-                trailArm: [CGPoint(x: 0.53, y: 0.33), CGPoint(x: 0.38, y: 0.43), CGPoint(x: 0.14, y: 0.34)],
-                leadLeg: [CGPoint(x: 0.49, y: 0.56), CGPoint(x: 0.40, y: 0.76), CGPoint(x: 0.35, y: 0.94)],
-                trailLeg: [CGPoint(x: 0.59, y: 0.57), CGPoint(x: 0.65, y: 0.77), CGPoint(x: 0.72, y: 0.94)],
-                club: [CGPoint(x: 0.14, y: 0.34), CGPoint(x: 0.05, y: 0.04)],
+                head: CGPoint(x: 0.57, y: 0.16),
+                spine: [CGPoint(x: 0.54, y: 0.28), CGPoint(x: 0.52, y: 0.56)],
+                shoulders: [CGPoint(x: 0.39, y: 0.31), CGPoint(x: 0.65, y: 0.32)],
+                hips: [CGPoint(x: 0.41, y: 0.56), CGPoint(x: 0.61, y: 0.56)],
+                leadArm: [CGPoint(x: 0.40, y: 0.31), CGPoint(x: 0.46, y: 0.37), CGPoint(x: 0.31, y: 0.40)],
+                trailArm: [CGPoint(x: 0.64, y: 0.32), CGPoint(x: 0.49, y: 0.43), CGPoint(x: 0.31, y: 0.40)],
+                leadLeg: [CGPoint(x: 0.43, y: 0.56), CGPoint(x: 0.38, y: 0.76), CGPoint(x: 0.32, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.59, y: 0.56), CGPoint(x: 0.64, y: 0.76), CGPoint(x: 0.70, y: 0.94)],
+                club: [CGPoint(x: 0.31, y: 0.40), CGPoint(x: 0.29, y: 0.03)],
                 ball: nil
             )
         case .top:
             return SwingStagePose(
-                head: CGPoint(x: 0.55, y: 0.17),
-                spine: [CGPoint(x: 0.52, y: 0.30), CGPoint(x: 0.55, y: 0.57)],
-                shoulders: [CGPoint(x: 0.47, y: 0.31), CGPoint(x: 0.57, y: 0.31)],
-                hips: [CGPoint(x: 0.50, y: 0.57), CGPoint(x: 0.60, y: 0.57)],
-                leadArm: [CGPoint(x: 0.47, y: 0.31), CGPoint(x: 0.32, y: 0.22), CGPoint(x: 0.20, y: 0.16)],
-                trailArm: [CGPoint(x: 0.57, y: 0.31), CGPoint(x: 0.39, y: 0.21), CGPoint(x: 0.20, y: 0.16)],
-                leadLeg: [CGPoint(x: 0.50, y: 0.57), CGPoint(x: 0.41, y: 0.77), CGPoint(x: 0.36, y: 0.94)],
-                trailLeg: [CGPoint(x: 0.60, y: 0.57), CGPoint(x: 0.66, y: 0.77), CGPoint(x: 0.73, y: 0.94)],
-                club: [CGPoint(x: 0.20, y: 0.16), CGPoint(x: 0.63, y: 0.12)],
+                head: CGPoint(x: 0.58, y: 0.16),
+                spine: [CGPoint(x: 0.55, y: 0.28), CGPoint(x: 0.52, y: 0.56)],
+                shoulders: [CGPoint(x: 0.40, y: 0.31), CGPoint(x: 0.66, y: 0.32)],
+                hips: [CGPoint(x: 0.41, y: 0.56), CGPoint(x: 0.61, y: 0.56)],
+                leadArm: [CGPoint(x: 0.41, y: 0.31), CGPoint(x: 0.37, y: 0.21), CGPoint(x: 0.30, y: 0.20)],
+                trailArm: [CGPoint(x: 0.65, y: 0.32), CGPoint(x: 0.48, y: 0.18), CGPoint(x: 0.30, y: 0.20)],
+                leadLeg: [CGPoint(x: 0.43, y: 0.56), CGPoint(x: 0.38, y: 0.76), CGPoint(x: 0.32, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.59, y: 0.56), CGPoint(x: 0.64, y: 0.76), CGPoint(x: 0.70, y: 0.94)],
+                club: [CGPoint(x: 0.30, y: 0.20), CGPoint(x: 0.61, y: 0.02)],
                 ball: nil
             )
         case .leadArmParallelDownswing:
             return SwingStagePose(
-                head: CGPoint(x: 0.58, y: 0.17),
-                spine: [CGPoint(x: 0.55, y: 0.30), CGPoint(x: 0.53, y: 0.56)],
-                shoulders: [CGPoint(x: 0.51, y: 0.31), CGPoint(x: 0.60, y: 0.33)],
-                hips: [CGPoint(x: 0.48, y: 0.56), CGPoint(x: 0.58, y: 0.57)],
-                leadArm: [CGPoint(x: 0.51, y: 0.31), CGPoint(x: 0.66, y: 0.31), CGPoint(x: 0.80, y: 0.32)],
-                trailArm: [CGPoint(x: 0.60, y: 0.33), CGPoint(x: 0.64, y: 0.45), CGPoint(x: 0.80, y: 0.32)],
-                leadLeg: [CGPoint(x: 0.48, y: 0.56), CGPoint(x: 0.40, y: 0.76), CGPoint(x: 0.34, y: 0.94)],
-                trailLeg: [CGPoint(x: 0.58, y: 0.57), CGPoint(x: 0.65, y: 0.77), CGPoint(x: 0.72, y: 0.94)],
-                club: [CGPoint(x: 0.80, y: 0.32), CGPoint(x: 0.60, y: 0.05)],
+                head: CGPoint(x: 0.57, y: 0.16),
+                spine: [CGPoint(x: 0.54, y: 0.28), CGPoint(x: 0.51, y: 0.56)],
+                shoulders: [CGPoint(x: 0.39, y: 0.31), CGPoint(x: 0.65, y: 0.32)],
+                hips: [CGPoint(x: 0.40, y: 0.56), CGPoint(x: 0.60, y: 0.56)],
+                leadArm: [CGPoint(x: 0.40, y: 0.31), CGPoint(x: 0.45, y: 0.37), CGPoint(x: 0.34, y: 0.40)],
+                trailArm: [CGPoint(x: 0.64, y: 0.32), CGPoint(x: 0.48, y: 0.44), CGPoint(x: 0.34, y: 0.40)],
+                leadLeg: [CGPoint(x: 0.42, y: 0.56), CGPoint(x: 0.37, y: 0.76), CGPoint(x: 0.31, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.58, y: 0.56), CGPoint(x: 0.63, y: 0.76), CGPoint(x: 0.69, y: 0.94)],
+                club: [CGPoint(x: 0.34, y: 0.40), CGPoint(x: 0.46, y: 0.04)],
                 ball: nil
             )
         case .shaftParallelDownswing:
             return SwingStagePose(
-                head: CGPoint(x: 0.58, y: 0.18),
-                spine: [CGPoint(x: 0.55, y: 0.31), CGPoint(x: 0.52, y: 0.57)],
-                shoulders: [CGPoint(x: 0.50, y: 0.32), CGPoint(x: 0.60, y: 0.34)],
-                hips: [CGPoint(x: 0.47, y: 0.57), CGPoint(x: 0.57, y: 0.58)],
-                leadArm: [CGPoint(x: 0.50, y: 0.32), CGPoint(x: 0.65, y: 0.45), CGPoint(x: 0.76, y: 0.54)],
-                trailArm: [CGPoint(x: 0.60, y: 0.34), CGPoint(x: 0.65, y: 0.51), CGPoint(x: 0.76, y: 0.54)],
-                leadLeg: [CGPoint(x: 0.47, y: 0.57), CGPoint(x: 0.41, y: 0.77), CGPoint(x: 0.35, y: 0.94)],
-                trailLeg: [CGPoint(x: 0.57, y: 0.58), CGPoint(x: 0.65, y: 0.78), CGPoint(x: 0.73, y: 0.94)],
-                club: [CGPoint(x: 0.76, y: 0.54), CGPoint(x: 0.34, y: 0.54)],
+                head: CGPoint(x: 0.51, y: 0.16),
+                spine: [CGPoint(x: 0.50, y: 0.28), CGPoint(x: 0.50, y: 0.56)],
+                shoulders: [CGPoint(x: 0.37, y: 0.30), CGPoint(x: 0.63, y: 0.31)],
+                hips: [CGPoint(x: 0.39, y: 0.56), CGPoint(x: 0.60, y: 0.56)],
+                leadArm: [CGPoint(x: 0.38, y: 0.31), CGPoint(x: 0.43, y: 0.45), CGPoint(x: 0.38, y: 0.55)],
+                trailArm: [CGPoint(x: 0.62, y: 0.31), CGPoint(x: 0.55, y: 0.47), CGPoint(x: 0.38, y: 0.55)],
+                leadLeg: [CGPoint(x: 0.41, y: 0.56), CGPoint(x: 0.36, y: 0.76), CGPoint(x: 0.30, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.58, y: 0.56), CGPoint(x: 0.63, y: 0.76), CGPoint(x: 0.69, y: 0.94)],
+                club: [CGPoint(x: 0.38, y: 0.55), CGPoint(x: 0.03, y: 0.48)],
                 ball: nil
             )
         case .impact:
             return SwingStagePose(
-                head: CGPoint(x: 0.58, y: 0.18),
-                spine: [CGPoint(x: 0.55, y: 0.31), CGPoint(x: 0.52, y: 0.57)],
-                shoulders: [CGPoint(x: 0.50, y: 0.32), CGPoint(x: 0.60, y: 0.34)],
-                hips: [CGPoint(x: 0.47, y: 0.57), CGPoint(x: 0.57, y: 0.58)],
-                leadArm: [CGPoint(x: 0.50, y: 0.32), CGPoint(x: 0.65, y: 0.45), CGPoint(x: 0.82, y: 0.55)],
-                trailArm: [CGPoint(x: 0.60, y: 0.34), CGPoint(x: 0.70, y: 0.48), CGPoint(x: 0.82, y: 0.55)],
-                leadLeg: [CGPoint(x: 0.47, y: 0.57), CGPoint(x: 0.41, y: 0.77), CGPoint(x: 0.35, y: 0.94)],
-                trailLeg: [CGPoint(x: 0.57, y: 0.58), CGPoint(x: 0.67, y: 0.77), CGPoint(x: 0.75, y: 0.91)],
-                club: [CGPoint(x: 0.82, y: 0.55), CGPoint(x: 0.95, y: 0.86)],
-                ball: CGPoint(x: 0.96, y: 0.88)
+                head: CGPoint(x: 0.49, y: 0.16),
+                spine: [CGPoint(x: 0.49, y: 0.28), CGPoint(x: 0.51, y: 0.56)],
+                shoulders: [CGPoint(x: 0.36, y: 0.30), CGPoint(x: 0.62, y: 0.31)],
+                hips: [CGPoint(x: 0.40, y: 0.56), CGPoint(x: 0.61, y: 0.56)],
+                leadArm: [CGPoint(x: 0.37, y: 0.31), CGPoint(x: 0.42, y: 0.46), CGPoint(x: 0.48, y: 0.60)],
+                trailArm: [CGPoint(x: 0.61, y: 0.31), CGPoint(x: 0.57, y: 0.47), CGPoint(x: 0.48, y: 0.60)],
+                leadLeg: [CGPoint(x: 0.42, y: 0.56), CGPoint(x: 0.36, y: 0.76), CGPoint(x: 0.29, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.59, y: 0.56), CGPoint(x: 0.62, y: 0.76), CGPoint(x: 0.68, y: 0.93)],
+                club: [CGPoint(x: 0.48, y: 0.60), CGPoint(x: 0.45, y: 0.98)],
+                ball: nil
             )
         case .followThrough:
             return SwingStagePose(
-                head: CGPoint(x: 0.58, y: 0.16),
-                spine: [CGPoint(x: 0.55, y: 0.29), CGPoint(x: 0.58, y: 0.55)],
-                shoulders: [CGPoint(x: 0.51, y: 0.30), CGPoint(x: 0.60, y: 0.31)],
-                hips: [CGPoint(x: 0.52, y: 0.55), CGPoint(x: 0.63, y: 0.56)],
-                leadArm: [CGPoint(x: 0.51, y: 0.30), CGPoint(x: 0.68, y: 0.36), CGPoint(x: 0.85, y: 0.40)],
-                trailArm: [CGPoint(x: 0.60, y: 0.31), CGPoint(x: 0.70, y: 0.41), CGPoint(x: 0.85, y: 0.40)],
-                leadLeg: [CGPoint(x: 0.52, y: 0.55), CGPoint(x: 0.44, y: 0.76), CGPoint(x: 0.39, y: 0.94)],
-                trailLeg: [CGPoint(x: 0.63, y: 0.56), CGPoint(x: 0.72, y: 0.72), CGPoint(x: 0.81, y: 0.88)],
-                club: [CGPoint(x: 0.85, y: 0.40), CGPoint(x: 0.99, y: 0.40)],
+                head: CGPoint(x: 0.48, y: 0.16),
+                spine: [CGPoint(x: 0.49, y: 0.28), CGPoint(x: 0.54, y: 0.56)],
+                shoulders: [CGPoint(x: 0.37, y: 0.30), CGPoint(x: 0.63, y: 0.31)],
+                hips: [CGPoint(x: 0.44, y: 0.56), CGPoint(x: 0.64, y: 0.56)],
+                leadArm: [CGPoint(x: 0.38, y: 0.31), CGPoint(x: 0.52, y: 0.39), CGPoint(x: 0.72, y: 0.43)],
+                trailArm: [CGPoint(x: 0.62, y: 0.31), CGPoint(x: 0.64, y: 0.40), CGPoint(x: 0.72, y: 0.43)],
+                leadLeg: [CGPoint(x: 0.46, y: 0.56), CGPoint(x: 0.39, y: 0.76), CGPoint(x: 0.31, y: 0.94)],
+                trailLeg: [CGPoint(x: 0.62, y: 0.56), CGPoint(x: 0.68, y: 0.73), CGPoint(x: 0.76, y: 0.91)],
+                club: [CGPoint(x: 0.72, y: 0.43), CGPoint(x: 0.98, y: 0.42)],
                 ball: nil
             )
         case .finish:
             return SwingStagePose(
-                head: CGPoint(x: 0.57, y: 0.15),
-                spine: [CGPoint(x: 0.55, y: 0.29), CGPoint(x: 0.59, y: 0.55)],
-                shoulders: [CGPoint(x: 0.51, y: 0.30), CGPoint(x: 0.60, y: 0.31)],
-                hips: [CGPoint(x: 0.55, y: 0.55), CGPoint(x: 0.65, y: 0.56)],
-                leadArm: [CGPoint(x: 0.51, y: 0.30), CGPoint(x: 0.37, y: 0.18), CGPoint(x: 0.24, y: 0.12)],
-                trailArm: [CGPoint(x: 0.60, y: 0.31), CGPoint(x: 0.42, y: 0.20), CGPoint(x: 0.24, y: 0.12)],
-                leadLeg: [CGPoint(x: 0.55, y: 0.55), CGPoint(x: 0.46, y: 0.76), CGPoint(x: 0.42, y: 0.94)],
-                trailLeg: [CGPoint(x: 0.65, y: 0.56), CGPoint(x: 0.75, y: 0.70), CGPoint(x: 0.82, y: 0.88)],
-                club: [CGPoint(x: 0.24, y: 0.12), CGPoint(x: 0.11, y: 0.02)],
+                head: CGPoint(x: 0.45, y: 0.15),
+                spine: [CGPoint(x: 0.48, y: 0.27), CGPoint(x: 0.57, y: 0.55)],
+                shoulders: [CGPoint(x: 0.36, y: 0.29), CGPoint(x: 0.61, y: 0.31)],
+                hips: [CGPoint(x: 0.47, y: 0.55), CGPoint(x: 0.66, y: 0.56)],
+                leadArm: [CGPoint(x: 0.37, y: 0.30), CGPoint(x: 0.45, y: 0.20), CGPoint(x: 0.59, y: 0.17)],
+                trailArm: [CGPoint(x: 0.60, y: 0.31), CGPoint(x: 0.55, y: 0.21), CGPoint(x: 0.59, y: 0.17)],
+                leadLeg: [CGPoint(x: 0.49, y: 0.55), CGPoint(x: 0.42, y: 0.75), CGPoint(x: 0.35, y: 0.93)],
+                trailLeg: [CGPoint(x: 0.64, y: 0.56), CGPoint(x: 0.71, y: 0.70), CGPoint(x: 0.78, y: 0.88)],
+                club: [CGPoint(x: 0.59, y: 0.17), CGPoint(x: 0.76, y: 0.03)],
                 ball: nil
             )
         }
+    }
+}
+
+struct CompactPlaybackControlsView: View {
+    @ObservedObject var playbackManager: VideoPlaybackManager
+    @Binding var interactionMode: WorkspaceInteractionMode
+
+    var body: some View {
+        HStack(spacing: CompactPlaybackPolicy.controlSpacing) {
+            Menu {
+                ForEach(PlaybackRate.allCases) { rate in
+                    Button {
+                        perform(.selectRate(rate.value))
+                    } label: {
+                        if abs(rate.value - playbackManager.playbackSpeed) < 0.001 {
+                            Label(rate.label, systemImage: "checkmark")
+                        } else {
+                            Text(rate.label)
+                        }
+                    }
+                }
+            } label: {
+                Text(speedLabel)
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .frame(
+                        width: CompactPlaybackPolicy.speedControlWidth,
+                        height: CompactPlaybackPolicy.minimumTouchTarget
+                    )
+                    .background(.black.opacity(0.46), in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
+            }
+            .accessibilityLabel("播放速度，当前 \(speedLabel)")
+            .accessibilityHint("选择 0.1、0.25、0.5 或 1 倍速度")
+
+            compactButton(
+                systemImage: "backward.frame.fill",
+                label: "前一帧"
+            ) {
+                perform(.previousFrame)
+            }
+
+            compactButton(
+                systemImage: playbackManager.isPlaying ? "pause.fill" : "play.fill",
+                label: playbackManager.isPlaying ? "暂停" : "播放",
+                emphasized: true
+            ) {
+                perform(.togglePlayback)
+            }
+
+            compactButton(
+                systemImage: "forward.frame.fill",
+                label: "后一帧"
+            ) {
+                perform(.nextFrame)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: CompactPlaybackPolicy.rowHeight)
+        .contentShape(Rectangle())
+        .onTapGesture { }
+        .foregroundStyle(.white)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var speedLabel: String {
+        PlaybackRate.allCases.first {
+            abs($0.value - playbackManager.playbackSpeed) < 0.001
+        }?.label ?? String(format: "%.2g×", playbackManager.playbackSpeed)
+    }
+
+    private func perform(_ action: CompactPlaybackAction) {
+        CompactPlaybackInteraction.perform(
+            action,
+            isPlaying: playbackManager.isPlaying,
+            play: {
+                interactionMode = .idle
+                playbackManager.play()
+            },
+            pause: playbackManager.pause,
+            stepFrame: { playbackManager.stepFrame(forward: $0) },
+            setRate: playbackManager.setSpeed
+        )
+    }
+
+    private func compactButton(
+        systemImage: String,
+        label: String,
+        emphasized: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: emphasized ? 18 : 15, weight: .bold))
+                .frame(
+                    width: emphasized
+                        ? CompactPlaybackPolicy.emphasizedTouchTarget
+                        : CompactPlaybackPolicy.minimumTouchTarget,
+                    height: emphasized
+                        ? CompactPlaybackPolicy.emphasizedTouchTarget
+                        : CompactPlaybackPolicy.minimumTouchTarget
+                )
+                .background(
+                    emphasized
+                        ? AnalysisTheme.proTourSignal
+                        : .black.opacity(0.46),
+                    in: Circle()
+                )
+                .overlay {
+                    if !emphasized {
+                        Circle().stroke(.white.opacity(0.18), lineWidth: 1)
+                    }
+                }
+                .foregroundStyle(
+                    emphasized ? AnalysisTheme.proTourBackground : .white
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 }
 
@@ -1165,7 +1225,7 @@ struct SwingPhaseRailView: View {
             .tint(AnalysisTheme.proTourSignal)
             .accessibilityLabel("挥杆进度")
 
-            HStack(spacing: 0) {
+            HStack(spacing: MobileReplayStageStripPolicy.stageSpacing) {
                 ForEach(visibleDescriptors, id: \.stage) { descriptor in
                     Button {
                         if let marker = descriptor.marker {
@@ -1178,12 +1238,15 @@ struct SwingPhaseRailView: View {
                             resultState: descriptor.resultState
                         )
                         .frame(maxWidth: .infinity, minHeight: FullscreenPlaybackPolicy.minimumTouchTarget)
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(descriptor.accessibilityLabel)
                     .accessibilityHint("跳到该挥杆位置")
                 }
             }
+            .contentShape(Rectangle())
+            .onTapGesture { }
         }
         .padding(.horizontal, 4)
         .padding(.top, 5)
@@ -1218,53 +1281,27 @@ private struct SwingPhaseSilhouette: View {
     let isCurrent: Bool
     let resultState: StageResultState
 
-    private var clubAngle: Angle {
-        switch stage {
-        case .address: .degrees(-20)
-        case .takeaway: .degrees(-48)
-        case .leadArmParallelBackswing: .degrees(-72)
-        case .top: .degrees(-112)
-        case .leadArmParallelDownswing: .degrees(38)
-        case .shaftParallelDownswing: .degrees(0)
-        case .impact: .degrees(18)
-        case .followThrough: .degrees(0)
-        case .finish: .degrees(105)
-        }
-    }
-
-    private var accent: Color {
-        if isCurrent { return .white }
-        switch resultState {
-        case .confirmed, .manual: return AnalysisTheme.proTourSignal
-        case .review: return AnalysisTheme.current.opacity(0.45)
-        case .unresolved: return .white.opacity(0.28)
-        }
-    }
-
     var body: some View {
-        ZStack {
-            Circle()
-                .stroke(isCurrent ? .white : .clear, lineWidth: 1.5)
-                .frame(width: 36, height: 36)
-
-            Circle()
-                .fill(accent)
-                .frame(width: 5.5, height: 5.5)
-                .offset(y: -11)
-
-            Capsule()
-                .fill(accent)
-                .frame(width: 3.5, height: 15)
-                .offset(y: -2)
+        VStack(spacing: 2) {
+            SwingStagePoseGlyph(
+                stage: stage,
+                isResolved: resultState != .unresolved,
+                isCurrent: isCurrent
+            )
+            .frame(
+                width: MobileReplayStageStripPolicy.glyphWidth,
+                height: MobileReplayStageStripPolicy.glyphHeight
+            )
 
             Capsule()
-                .fill(accent)
-                .frame(width: 2.5, height: 13)
-                .rotationEffect(clubAngle)
-                .offset(x: 6, y: -2)
+                .fill(AnalysisTheme.proTourSignal)
+                .frame(
+                    width: MobileReplayStageStripPolicy.currentIndicatorWidth,
+                    height: MobileReplayStageStripPolicy.currentIndicatorHeight
+                )
+                .opacity(isCurrent ? 1 : 0)
         }
-        .frame(width: 40, height: 40)
-        .contentShape(Circle())
+        .frame(width: 42, height: FullscreenPlaybackPolicy.minimumTouchTarget)
         .accessibilityHidden(true)
     }
 }
@@ -1285,11 +1322,11 @@ private struct StageDisplayDescriptor {
         self.stage = stage
         marker = keyframes.first { $0.stage == stage.rawValue }
         detection = presentation.detection(for: stage)
-        if let marker, currentTime >= 0 {
-            isCurrent = abs(marker.time - currentTime) <= max(frameDuration * 1.5, 0.02)
-        } else {
-            isCurrent = false
-        }
+        isCurrent = ReplayStageSelectionPolicy.currentStage(
+            at: currentTime,
+            keyframes: keyframes,
+            tolerance: max(frameDuration * 1.5, 0.02)
+        ) == stage
     }
 
     var resultState: StageResultState {

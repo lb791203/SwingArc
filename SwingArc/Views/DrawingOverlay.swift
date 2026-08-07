@@ -39,9 +39,10 @@ struct DrawingOverlay: View {
             )
 
             ZStack {
-                    // 1. 手势检测层 (使用 contentShape 确保透明层也能 100% 捕获触摸手势)
+                if !rect.isEmpty {
+                    // 1. 只在实际视频画面内捕获绘制手势。
                     Color.clear
-                        .contentShape(Rectangle())
+                        .contentShape(VideoDrawingInteractionShape(interactionRect: rect))
                         .allowsHitTesting(isInteractionEnabled)
                         .gesture(
                             DragGesture(minimumDistance: 0, coordinateSpace: .local)
@@ -55,16 +56,21 @@ struct DrawingOverlay: View {
                     
                     // 2. 向量绘制 Canvas 层
                     Canvas { context, size in
+                        var videoContext = context
+                        var videoClip = Path()
+                        videoClip.addRect(rect)
+                        videoContext.clip(to: videoClip)
+
                         // 绘制 Vision 自动计算数据
                         if let pose = playbackManager.currentPose {
                             if showPoseSkeleton {
-                                drawPoseSkeleton(context: context, pose: pose, rect: rect)
+                                drawPoseSkeleton(context: videoContext, pose: pose, rect: rect)
                             }
                             if showHeadStability {
-                                drawHeadStability(context: context, pose: pose, rect: rect)
+                                drawHeadStability(context: videoContext, pose: pose, rect: rect)
                             }
                             if showSpineAngle {
-                                drawSpineAngle(context: context, pose: pose, rect: rect)
+                                drawSpineAngle(context: videoContext, pose: pose, rect: rect)
                             }
                         }
                         
@@ -76,7 +82,7 @@ struct DrawingOverlay: View {
                                 at: playbackManager.currentTime,
                                 isKeyframeMode: isKeyframeMode
                             ) {
-                                drawElement(context: context, element: element, rect: rect)
+                                drawElement(context: videoContext, element: element, rect: rect)
                             }
                         }
                         
@@ -90,12 +96,12 @@ struct DrawingOverlay: View {
                                 isKeyframeSpecific: isKeyframeMode,
                                 videoTime: playbackManager.currentTime
                             )
-                            drawElement(context: context, element: tempElement, rect: rect)
+                            drawElement(context: videoContext, element: tempElement, rect: rect)
                         }
                         
                         // 在选择工具模式下，绘制控制端点把手 (Handles)
                         if isInteractionEnabled && activeTool == .select {
-                            drawControlHandles(context: context, rect: rect)
+                            drawControlHandles(context: videoContext, rect: rect)
                         }
                         
                         // 3. 绘制微调向量放大镜
@@ -123,6 +129,7 @@ struct DrawingOverlay: View {
                             .position(x: xPos, y: yPos - (pose.headRadius ?? 0.06) * rect.height - 15)
                             .allowsHitTesting(false) // 同样允许触摸穿透
                     }
+                }
             }
         }
     }
@@ -168,13 +175,7 @@ struct DrawingOverlay: View {
         case .circle:
             let center = screenPoints[0]
             let edge = screenPoints[1]
-            let radius = sqrt(pow(center.x - edge.x, 2) + pow(center.y - edge.y, 2))
-            path.addEllipse(in: CGRect(
-                x: center.x - radius,
-                y: center.y - radius,
-                width: radius * 2,
-                height: radius * 2
-            ))
+            path.addEllipse(in: DrawingCircleGeometry.bounds(center: center, edge: edge))
             context.stroke(path, with: .color(element.color), lineWidth: element.lineWidth)
             
         case .angle:
@@ -505,8 +506,7 @@ struct DrawingOverlay: View {
         case .circle:
             let zCenter = zoomedPoints[0]
             let zEdge = zoomedPoints[1]
-            let zRadius = sqrt(pow(zCenter.x - zEdge.x, 2) + pow(zCenter.y - zEdge.y, 2))
-            path.addEllipse(in: CGRect(x: zCenter.x - zRadius, y: zCenter.y - zRadius, width: zRadius * 2, height: zRadius * 2))
+            path.addEllipse(in: DrawingCircleGeometry.bounds(center: zCenter, edge: zEdge))
             context.stroke(path, with: .color(element.color), lineWidth: element.lineWidth * scale)
         case .angle:
             guard zoomedPoints.count >= 3 else { return }
@@ -742,5 +742,15 @@ struct DrawingOverlay: View {
             // 清理临时绘制点
             currentPoints = []
         }
+    }
+}
+
+private struct VideoDrawingInteractionShape: Shape {
+    let interactionRect: CGRect
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.addRect(interactionRect)
+        return path
     }
 }

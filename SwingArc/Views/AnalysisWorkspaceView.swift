@@ -478,8 +478,13 @@ struct AnalysisWorkspaceView: View {
     }
 
     private var mobileReplayOverlayControls: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: CompactPlaybackPolicy.sectionSpacing) {
             mobileReplayActionRow
+
+            CompactPlaybackControlsView(
+                playbackManager: playbackManager,
+                interactionMode: $interactionMode
+            )
 
             MobileReplayTimelineView(
                 playbackManager: playbackManager,
@@ -488,6 +493,8 @@ struct AnalysisWorkspaceView: View {
         }
         .padding(.top, 34)
         .padding(.bottom, 10)
+        .contentShape(Rectangle())
+        .onTapGesture { }
         .background(alignment: .bottom) {
             LinearGradient(
                 colors: [.clear, .black.opacity(0.34), .black.opacity(0.84)],

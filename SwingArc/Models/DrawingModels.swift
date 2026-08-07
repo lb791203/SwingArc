@@ -311,9 +311,52 @@ enum DrawingInteractionPolicy {
 enum DrawingCanvasGeometry {
     static func interactionRect(videoRect: CGRect, canvasSize: CGSize) -> CGRect {
         guard videoRect.width > 0, videoRect.height > 0 else {
-            return CGRect(origin: .zero, size: canvasSize)
+            // The AVPlayer layer can briefly report no video rect while a
+            // stored project is reopening. Rendering against the whole canvas
+            // during that window makes persisted normalized points jump and
+            // grow, so wait for a real video rect instead.
+            return .zero
         }
-        return videoRect
+        return videoRect.intersection(CGRect(origin: .zero, size: canvasSize))
+    }
+
+    static func aspectFitRect(contentSize: CGSize, containerSize: CGSize) -> CGRect {
+        guard contentSize.width > 0,
+              contentSize.height > 0,
+              containerSize.width > 0,
+              containerSize.height > 0 else {
+            return .zero
+        }
+
+        let scale = min(
+            containerSize.width / contentSize.width,
+            containerSize.height / contentSize.height
+        )
+        let fittedSize = CGSize(
+            width: contentSize.width * scale,
+            height: contentSize.height * scale
+        )
+        return CGRect(
+            x: (containerSize.width - fittedSize.width) / 2,
+            y: (containerSize.height - fittedSize.height) / 2,
+            width: fittedSize.width,
+            height: fittedSize.height
+        )
+    }
+}
+
+/// Circles are persisted as a center point plus a point on the circumference.
+/// Keeping the conversion in one place prevents the editing canvas and media
+/// exporters from interpreting the same two points as different geometries.
+enum DrawingCircleGeometry {
+    static func bounds(center: CGPoint, edge: CGPoint) -> CGRect {
+        let radius = hypot(edge.x - center.x, edge.y - center.y)
+        return CGRect(
+            x: center.x - radius,
+            y: center.y - radius,
+            width: radius * 2,
+            height: radius * 2
+        )
     }
 }
 

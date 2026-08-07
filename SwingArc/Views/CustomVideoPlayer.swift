@@ -626,6 +626,9 @@ struct PlayerViewRepresentable: UIViewRepresentable {
 
 class PlayerUIView: UIView {
     private let playerLayer = AVPlayerLayer()
+    private var videoRectRetryWorkItem: DispatchWorkItem?
+    private var videoRectRetryCount = 0
+    private var lastPublishedVideoRect: CGRect = .zero
     var onVideoRectChanged: (CGRect) -> Void
     
     init(player: AVPlayer, onVideoRectChanged: @escaping (CGRect) -> Void) {
@@ -643,32 +646,68 @@ class PlayerUIView: UIView {
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+
+    deinit {
+        videoRectRetryWorkItem?.cancel()
+    }
     
     override func layoutSubviews() {
         super.layoutSubviews()
         playerLayer.frame = bounds
-        
-        // 延时一下以确保 videoRect 已经完成计算并就绪
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            let rect = self.playerLayer.videoRect
-            if rect != .zero && rect.width > 0 && rect.height > 0 {
-                self.onVideoRectChanged(rect)
-            }
-        }
+        videoRectRetryCount = 0
+        publishVideoRectWhenReady()
     }
     
     func updatePlayer(_ player: AVPlayer) {
         if playerLayer.player !== player {
             playerLayer.player = player
-            // 当更换视频时，重新发送视频渲染范围
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                guard let self = self else { return }
-                let rect = self.playerLayer.videoRect
-                if rect != .zero {
-                    self.onVideoRectChanged(rect)
-                }
-            }
+            lastPublishedVideoRect = .zero
+            videoRectRetryCount = 0
         }
+        publishVideoRectWhenReady()
+    }
+
+    private func publishVideoRectWhenReady() {
+        videoRectRetryWorkItem?.cancel()
+
+        let layerRect = playerLayer.videoRect
+        let presentationSize = playerLayer.player?.currentItem?.presentationSize ?? .zero
+        let fittedRect = DrawingCanvasGeometry.aspectFitRect(
+            contentSize: presentationSize,
+            containerSize: bounds.size
+        )
+        let resolvedRect: CGRect
+        if playerLayer.isReadyForDisplay,
+           layerRect.width > 0,
+           layerRect.height > 0 {
+            resolvedRect = layerRect
+        } else {
+            resolvedRect = fittedRect
+        }
+
+        if resolvedRect.width > 0, resolvedRect.height > 0 {
+            videoRectRetryCount = 0
+            guard !approximatelyEqual(resolvedRect, lastPublishedVideoRect) else { return }
+            lastPublishedVideoRect = resolvedRect
+            DispatchQueue.main.async { [weak self] in
+                self?.onVideoRectChanged(resolvedRect)
+            }
+            return
+        }
+
+        guard videoRectRetryCount < 100 else { return }
+        videoRectRetryCount += 1
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.publishVideoRectWhenReady()
+        }
+        videoRectRetryWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
+    }
+
+    private func approximatelyEqual(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+        abs(lhs.minX - rhs.minX) < 0.5 &&
+            abs(lhs.minY - rhs.minY) < 0.5 &&
+            abs(lhs.width - rhs.width) < 0.5 &&
+            abs(lhs.height - rhs.height) < 0.5
     }
 }
