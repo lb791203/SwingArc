@@ -44,7 +44,9 @@ struct TwoStageScanBudgetSmoke {
 
         precondition(Set(requestedInOrder).count == requestedInOrder.count)
         let sortedUnion = cached.sorted()
-        precondition(sortedUnion == Array(sortedUnion.first!...sortedUnion.last!))
+        precondition(zip(sortedUnion, sortedUnion.dropFirst()).allSatisfy {
+            $1 - $0 >= 5
+        })
         let finalPlan = FineSwingSamplingPlan.frames(
             window: windows.last!,
             sourceFrameRate: 60,

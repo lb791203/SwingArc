@@ -39,7 +39,34 @@
 		D60000000000000000000007 /* LiveSwingTriggerDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D60000000000000000000008 /* LiveSwingTriggerDetector.swift */; };
 		D60000000000000000000009 /* LivePoseSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6000000000000000000000A /* LivePoseSampler.swift */; };
 		D6000000000000000000000B /* CapturedVideoStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6000000000000000000000C /* CapturedVideoStore.swift */; };
+		D70000000000000000000001 /* CompactPlaybackPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D70000000000000000000002 /* CompactPlaybackPolicy.swift */; };
 		E70000000000000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E70000000000000000000002 /* PrivacyInfo.xcprivacy */; };
+		F80000000000000000000001 /* SwingObservationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000002 /* SwingObservationModels.swift */; };
+		F80000000000000000000003 /* SwingMetricModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000004 /* SwingMetricModels.swift */; };
+		F80000000000000000000005 /* SwingInputQualityEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000006 /* SwingInputQualityEvaluator.swift */; };
+		F80000000000000000000007 /* SwingPoseObservationAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000008 /* SwingPoseObservationAdapter.swift */; };
+		F80000000000000000000009 /* SwingTrajectoryTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000A /* SwingTrajectoryTracker.swift */; };
+		F8000000000000000000000B /* GolfObjectObservationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000C /* GolfObjectObservationProvider.swift */; };
+		F8000000000000000000000D /* CoreMLGolfObjectDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */; };
+		F8000000000000000000000F /* SwingMetricEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000010 /* SwingMetricEngine.swift */; };
+		F80000000000000000000011 /* SimplifiedSwingFeedbackModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000012 /* SimplifiedSwingFeedbackModels.swift */; };
+		F80000000000000000000013 /* SwingFeedbackAssembler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000014 /* SwingFeedbackAssembler.swift */; };
+		F80000000000000000000015 /* SwingAnalysisArtifactBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000016 /* SwingAnalysisArtifactBuilder.swift */; };
+		F80000000000000000000017 /* SwingFeedbackPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000018 /* SwingFeedbackPipeline.swift */; };
+		F80000000000000000000019 /* SwingTrajectoryOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000001A /* SwingTrajectoryOverlay.swift */; };
+		F8000000000000000000001B /* SimplifiedSwingFeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8000000000000000000001C /* SimplifiedSwingFeedbackView.swift */; };
+		A90000000000000000000001 /* AnnotationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000002 /* AnnotationModels.swift */; };
+		A90000000000000000000003 /* AnnotationWorkspaceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000004 /* AnnotationWorkspaceState.swift */; };
+		A90000000000000000000005 /* ExactVideoFrameProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000006 /* ExactVideoFrameProvider.swift */; };
+		A90000000000000000000007 /* AnnotationPackageValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000008 /* AnnotationPackageValidator.swift */; };
+		A90000000000000000000009 /* AnnotationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9000000000000000000000A /* AnnotationStore.swift */; };
+		A9000000000000000000000B /* AnnotationExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9000000000000000000000C /* AnnotationExportService.swift */; };
+		A9000000000000000000000D /* AnnotationFrameCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9000000000000000000000E /* AnnotationFrameCanvas.swift */; };
+		A9000000000000000000000F /* AnnotationWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000010 /* AnnotationWorkspaceView.swift */; };
+		A90000000000000000000011 /* AnnotationPredictionAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000012 /* AnnotationPredictionAdapter.swift */; };
+		B00000000000000000000001 /* PPointCorrectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* PPointCorrectionState.swift */; };
+		B00000000000000000000003 /* PPointCorrectionWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000004 /* PPointCorrectionWorkspace.swift */; };
+		B00000000000000000000005 /* LegacyAnnotationMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000006 /* LegacyAnnotationMigration.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -76,7 +103,34 @@
 		D60000000000000000000008 /* LiveSwingTriggerDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSwingTriggerDetector.swift; sourceTree = "<group>"; };
 		D6000000000000000000000A /* LivePoseSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePoseSampler.swift; sourceTree = "<group>"; };
 		D6000000000000000000000C /* CapturedVideoStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturedVideoStore.swift; sourceTree = "<group>"; };
+		D70000000000000000000002 /* CompactPlaybackPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactPlaybackPolicy.swift; sourceTree = "<group>"; };
 		E70000000000000000000002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		F80000000000000000000002 /* SwingObservationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingObservationModels.swift; sourceTree = "<group>"; };
+		F80000000000000000000004 /* SwingMetricModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingMetricModels.swift; sourceTree = "<group>"; };
+		F80000000000000000000006 /* SwingInputQualityEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingInputQualityEvaluator.swift; sourceTree = "<group>"; };
+		F80000000000000000000008 /* SwingPoseObservationAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingPoseObservationAdapter.swift; sourceTree = "<group>"; };
+		F8000000000000000000000A /* SwingTrajectoryTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingTrajectoryTracker.swift; sourceTree = "<group>"; };
+		F8000000000000000000000C /* GolfObjectObservationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GolfObjectObservationProvider.swift; sourceTree = "<group>"; };
+		F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreMLGolfObjectDetector.swift; sourceTree = "<group>"; };
+		F80000000000000000000010 /* SwingMetricEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingMetricEngine.swift; sourceTree = "<group>"; };
+		F80000000000000000000012 /* SimplifiedSwingFeedbackModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimplifiedSwingFeedbackModels.swift; sourceTree = "<group>"; };
+		F80000000000000000000014 /* SwingFeedbackAssembler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingFeedbackAssembler.swift; sourceTree = "<group>"; };
+		F80000000000000000000016 /* SwingAnalysisArtifactBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingAnalysisArtifactBuilder.swift; sourceTree = "<group>"; };
+		F80000000000000000000018 /* SwingFeedbackPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingFeedbackPipeline.swift; sourceTree = "<group>"; };
+		F8000000000000000000001A /* SwingTrajectoryOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwingTrajectoryOverlay.swift; sourceTree = "<group>"; };
+		F8000000000000000000001C /* SimplifiedSwingFeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimplifiedSwingFeedbackView.swift; sourceTree = "<group>"; };
+		A90000000000000000000002 /* AnnotationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationModels.swift; sourceTree = "<group>"; };
+		A90000000000000000000004 /* AnnotationWorkspaceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationWorkspaceState.swift; sourceTree = "<group>"; };
+		A90000000000000000000006 /* ExactVideoFrameProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExactVideoFrameProvider.swift; sourceTree = "<group>"; };
+		A90000000000000000000008 /* AnnotationPackageValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationPackageValidator.swift; sourceTree = "<group>"; };
+		A9000000000000000000000A /* AnnotationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationStore.swift; sourceTree = "<group>"; };
+		A9000000000000000000000C /* AnnotationExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationExportService.swift; sourceTree = "<group>"; };
+		A9000000000000000000000E /* AnnotationFrameCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationFrameCanvas.swift; sourceTree = "<group>"; };
+		A90000000000000000000010 /* AnnotationWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationWorkspaceView.swift; sourceTree = "<group>"; };
+		A90000000000000000000012 /* AnnotationPredictionAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationPredictionAdapter.swift; sourceTree = "<group>"; };
+		B00000000000000000000002 /* PPointCorrectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PPointCorrectionState.swift; sourceTree = "<group>"; };
+		B00000000000000000000004 /* PPointCorrectionWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PPointCorrectionWorkspace.swift; sourceTree = "<group>"; };
+		B00000000000000000000006 /* LegacyAnnotationMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyAnnotationMigration.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -120,7 +174,14 @@
 				A30000000000000000000008 /* PracticeModels.swift */,
 				D60000000000000000000002 /* CameraRecordingReadiness.swift */,
 				D60000000000000000000004 /* FrameExtractionTolerancePolicy.swift */,
+				D70000000000000000000002 /* CompactPlaybackPolicy.swift */,
 				D60000000000000000000006 /* LiveSwingCaptureModels.swift */,
+				F80000000000000000000002 /* SwingObservationModels.swift */,
+				F80000000000000000000004 /* SwingMetricModels.swift */,
+				F80000000000000000000012 /* SimplifiedSwingFeedbackModels.swift */,
+				A90000000000000000000002 /* AnnotationModels.swift */,
+				A90000000000000000000004 /* AnnotationWorkspaceState.swift */,
+				B00000000000000000000002 /* PPointCorrectionState.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -139,6 +200,21 @@
 				D60000000000000000000008 /* LiveSwingTriggerDetector.swift */,
 				D6000000000000000000000A /* LivePoseSampler.swift */,
 				D6000000000000000000000C /* CapturedVideoStore.swift */,
+				F80000000000000000000006 /* SwingInputQualityEvaluator.swift */,
+				F80000000000000000000008 /* SwingPoseObservationAdapter.swift */,
+				F8000000000000000000000A /* SwingTrajectoryTracker.swift */,
+				F8000000000000000000000C /* GolfObjectObservationProvider.swift */,
+				F8000000000000000000000E /* CoreMLGolfObjectDetector.swift */,
+				F80000000000000000000010 /* SwingMetricEngine.swift */,
+				F80000000000000000000014 /* SwingFeedbackAssembler.swift */,
+				F80000000000000000000016 /* SwingAnalysisArtifactBuilder.swift */,
+				F80000000000000000000018 /* SwingFeedbackPipeline.swift */,
+				A90000000000000000000006 /* ExactVideoFrameProvider.swift */,
+				A90000000000000000000008 /* AnnotationPackageValidator.swift */,
+				A9000000000000000000000A /* AnnotationStore.swift */,
+				A9000000000000000000000C /* AnnotationExportService.swift */,
+				A90000000000000000000012 /* AnnotationPredictionAdapter.swift */,
+				B00000000000000000000006 /* LegacyAnnotationMigration.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -157,6 +233,11 @@
 				A3000000000000000000000E /* PracticeHomeView.swift */,
 				A30000000000000000000010 /* PracticeSessionView.swift */,
 				C40000000000000000000002 /* BrandMarkView.swift */,
+				F8000000000000000000001A /* SwingTrajectoryOverlay.swift */,
+				F8000000000000000000001C /* SimplifiedSwingFeedbackView.swift */,
+				A9000000000000000000000E /* AnnotationFrameCanvas.swift */,
+				A90000000000000000000010 /* AnnotationWorkspaceView.swift */,
+				B00000000000000000000004 /* PPointCorrectionWorkspace.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -274,7 +355,34 @@
 				D60000000000000000000007 /* LiveSwingTriggerDetector.swift in Sources */,
 				D60000000000000000000009 /* LivePoseSampler.swift in Sources */,
 				D6000000000000000000000B /* CapturedVideoStore.swift in Sources */,
+				D70000000000000000000001 /* CompactPlaybackPolicy.swift in Sources */,
+				F80000000000000000000001 /* SwingObservationModels.swift in Sources */,
+				F80000000000000000000003 /* SwingMetricModels.swift in Sources */,
+				F80000000000000000000011 /* SimplifiedSwingFeedbackModels.swift in Sources */,
+				F80000000000000000000005 /* SwingInputQualityEvaluator.swift in Sources */,
+				F80000000000000000000007 /* SwingPoseObservationAdapter.swift in Sources */,
+				F80000000000000000000009 /* SwingTrajectoryTracker.swift in Sources */,
+				F8000000000000000000000B /* GolfObjectObservationProvider.swift in Sources */,
+				F8000000000000000000000D /* CoreMLGolfObjectDetector.swift in Sources */,
+				F8000000000000000000000F /* SwingMetricEngine.swift in Sources */,
+				F80000000000000000000013 /* SwingFeedbackAssembler.swift in Sources */,
+				F80000000000000000000015 /* SwingAnalysisArtifactBuilder.swift in Sources */,
+				F80000000000000000000017 /* SwingFeedbackPipeline.swift in Sources */,
+				F80000000000000000000019 /* SwingTrajectoryOverlay.swift in Sources */,
+				F8000000000000000000001B /* SimplifiedSwingFeedbackView.swift in Sources */,
 				C40000000000000000000001 /* BrandMarkView.swift in Sources */,
+				A90000000000000000000001 /* AnnotationModels.swift in Sources */,
+				A90000000000000000000003 /* AnnotationWorkspaceState.swift in Sources */,
+				A90000000000000000000005 /* ExactVideoFrameProvider.swift in Sources */,
+				A90000000000000000000007 /* AnnotationPackageValidator.swift in Sources */,
+				A90000000000000000000009 /* AnnotationStore.swift in Sources */,
+				A9000000000000000000000B /* AnnotationExportService.swift in Sources */,
+				A9000000000000000000000D /* AnnotationFrameCanvas.swift in Sources */,
+				A9000000000000000000000F /* AnnotationWorkspaceView.swift in Sources */,
+				A90000000000000000000011 /* AnnotationPredictionAdapter.swift in Sources */,
+				B00000000000000000000001 /* PPointCorrectionState.swift in Sources */,
+				B00000000000000000000003 /* PPointCorrectionWorkspace.swift in Sources */,
+				B00000000000000000000005 /* LegacyAnnotationMigration.swift in Sources */,
 			);
 		};
 /* End PBXSourcesBuildPhase section */

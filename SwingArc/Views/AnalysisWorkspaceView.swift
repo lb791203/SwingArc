@@ -12,7 +12,6 @@ struct AnalysisWorkspaceView: View {
     @Binding var showSpineAngle: Bool
     @Binding var showGrid: Bool
     @Binding var practiceCameraView: PracticeCameraView?
-    @Binding var feedbackConfiguration: FeedbackConfiguration?
     let saveStatus: WorkspaceSaveStatus
     let onBack: () -> Void
     let onSelectProject: (LocalProjectSummary) -> Void
@@ -20,7 +19,7 @@ struct AnalysisWorkspaceView: View {
     let onAnalyze: () -> Void
     let onCancelAnalysis: () -> Void
     let onSetManualStage: (SwingStage) -> Void
-    let feedback: PriorityFeedback?
+    let onCorrectPPoints: () -> Void
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var interactionMode: WorkspaceInteractionMode = .idle
@@ -31,14 +30,35 @@ struct AnalysisWorkspaceView: View {
     @State private var showsInspector = true
     @State private var showsResultsSheet = false
     @State private var adjustmentStage: SwingStage?
+    @State private var expandedFeedbackCategory: SwingFeedbackCategory?
 
     private var presentation: AnalysisWorkspacePresentation {
         AnalysisWorkspacePresentation(state: playbackManager.analysisState)
     }
 
-    private var techniquePresentation: TechniqueFeedbackPresentation? {
-        guard let feedback, let analysis = playbackManager.analysisResult else { return nil }
-        return TechniqueFeedbackPresentation.make(feedback: feedback, analysis: analysis)
+    private var simplifiedFeedback: SimplifiedSwingFeedback? {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if SimplifiedFeedbackPreview.isEnabled(arguments) {
+            return SimplifiedFeedbackPreview.feedback
+        }
+        #endif
+
+        return playbackManager.simplifiedFeedback(
+            view: practiceCameraView,
+            manualMarkers: keyframes
+        )
+    }
+
+    private var trajectoryStageTimes: [SwingTrajectoryStageTime] {
+        playbackManager.correctedDetections(manualMarkers: keyframes).compactMap {
+            guard let time = $0.time else { return nil }
+            return SwingTrajectoryStageTime(stage: $0.stage, time: time)
+        }
+    }
+
+    private var trajectoryFrames: [SwingFrameObservation] {
+        playbackManager.analysisOutput?.observationFrames ?? []
     }
 
     var body: some View {
@@ -89,17 +109,60 @@ struct AnalysisWorkspaceView: View {
         .ignoresSafeArea(edges: .bottom)
         .sheet(isPresented: $showsResultsSheet) {
             NavigationStack {
-                StageInspectorView(
-                    presentation: presentation,
-                    keyframes: keyframes,
-                    sourceFrameRate: playbackManager.sourceFrameRate,
-                    onSeek: { time in
-                        playbackManager.seek(to: time)
-                    },
-                    onAdjust: openAdjustment
-                )
-                .padding(16)
-                .background(AnalysisTheme.chrome.ignoresSafeArea())
+                Group {
+                    if let simplifiedFeedback {
+                        SimplifiedSwingFeedbackView(
+                            feedback: simplifiedFeedback,
+                            expandedCategory: $expandedFeedbackCategory,
+                            onSelectStage: selectStage,
+                            onAdjustStage: openAdjustment
+                        )
+                    } else if practiceCameraView == nil,
+                              playbackManager.analysisOutput != nil {
+                        VStack(spacing: 18) {
+                            Spacer()
+
+                            Image(systemName: "camera.viewfinder")
+                                .font(.system(size: 34, weight: .semibold))
+                                .foregroundStyle(AnalysisTheme.proTourSignal)
+
+                            Text("选择拍摄视角")
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                                .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+
+                            Text("用于正确解释动作，不会重新分析视频")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+
+                            HStack(spacing: 12) {
+                                cameraViewButton(
+                                    title: "正后方 DTL",
+                                    view: .downTheLine
+                                )
+                                cameraViewButton(
+                                    title: "正面 Face-on",
+                                    view: .faceOn
+                                )
+                            }
+                            .padding(.horizontal, 20)
+
+                            Spacer()
+                        }
+                        .background(AnalysisTheme.proTourBackground)
+                    } else {
+                        ContentUnavailableView(
+                            "暂无动作反馈",
+                            systemImage: "figure.golf",
+                            description: Text(
+                                practiceCameraView == nil
+                                    ? "缺少拍摄视角，无法生成可靠的动作结论。"
+                                    : "请先完成视频分析。"
+                            )
+                        )
+                        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                        .background(AnalysisTheme.proTourBackground)
+                    }
+                }
                 .navigationTitle("分析结果")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -108,13 +171,23 @@ struct AnalysisWorkspaceView: View {
                     }
                 }
             }
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
         .task(id: project.id) {
             #if DEBUG
+            let arguments = ProcessInfo.processInfo.arguments
+            if SimplifiedFeedbackPreview.isEnabled(arguments) {
+                if SimplifiedFeedbackPreview.expandsHandPath(arguments) {
+                    expandedFeedbackCategory = .handPath
+                }
+                try? await Task.sleep(for: .milliseconds(250))
+                showsResultsSheet = true
+                return
+            }
+
             guard PracticePreviewConfiguration.autoAnalyzes(
-                for: ProcessInfo.processInfo.arguments
+                for: arguments
             ) else { return }
 
             try? await Task.sleep(for: .milliseconds(250))
@@ -146,6 +219,7 @@ struct AnalysisWorkspaceView: View {
                 onToggleProjectSidebar: { showsProjectSidebar.toggle() },
                 onToggleInspector: { showsInspector.toggle() },
                 onShowResults: showResults(isRegularLayout: isRegularLayout),
+                onCorrectPPoints: onCorrectPPoints,
                 onExport: onExport
             )
 
@@ -163,7 +237,10 @@ struct AnalysisWorkspaceView: View {
                     showGrid: showGrid,
                     interactionMode: interactionMode,
                     showsFullscreenButton: false,
-                    onEnterFullscreen: {}
+                    onEnterFullscreen: {},
+                    trajectoryCategory: expandedFeedbackCategory,
+                    trajectoryFrames: trajectoryFrames,
+                    trajectoryStageTimes: trajectoryStageTimes
                 )
 
                 if interactionMode == .idle, !isRegularLayout {
@@ -192,22 +269,6 @@ struct AnalysisWorkspaceView: View {
             }
             .frame(maxHeight: .infinity)
             .animation(.easeInOut(duration: 0.2), value: interactionMode)
-
-            if let techniquePresentation {
-                TechniqueFeedbackCard(
-                    presentation: techniquePresentation,
-                    onSelectEvidence: { stage in
-                        if let marker = keyframes.first(where: { $0.stage == stage.rawValue }) {
-                            playbackManager.seek(to: marker.time)
-                        } else if let time = presentation.detection(for: stage)?.time {
-                            playbackManager.seek(to: time)
-                        }
-                    }
-                )
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(AnalysisTheme.chrome)
-            }
 
             if isRegularLayout {
                 StageTimelineView(
@@ -266,7 +327,10 @@ struct AnalysisWorkspaceView: View {
                 showGrid: showGrid,
                 interactionMode: interactionMode,
                 showsFullscreenButton: false,
-                onEnterFullscreen: {}
+                onEnterFullscreen: {},
+                trajectoryCategory: expandedFeedbackCategory,
+                trajectoryFrames: trajectoryFrames,
+                trajectoryStageTimes: trajectoryStageTimes
             )
             .ignoresSafeArea()
 
@@ -321,6 +385,14 @@ struct AnalysisWorkspaceView: View {
             }
 
             Spacer(minLength: 0)
+
+            Button(action: onCorrectPPoints) {
+                Text("修正 P 点")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(minWidth: 72, minHeight: 42)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("修正 P 点")
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 16)
@@ -406,8 +478,13 @@ struct AnalysisWorkspaceView: View {
     }
 
     private var mobileReplayOverlayControls: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: CompactPlaybackPolicy.sectionSpacing) {
             mobileReplayActionRow
+
+            CompactPlaybackControlsView(
+                playbackManager: playbackManager,
+                interactionMode: $interactionMode
+            )
 
             MobileReplayTimelineView(
                 playbackManager: playbackManager,
@@ -416,6 +493,8 @@ struct AnalysisWorkspaceView: View {
         }
         .padding(.top, 34)
         .padding(.bottom, 10)
+        .contentShape(Rectangle())
+        .onTapGesture { }
         .background(alignment: .bottom) {
             LinearGradient(
                 colors: [.clear, .black.opacity(0.34), .black.opacity(0.84)],
@@ -463,7 +542,7 @@ struct AnalysisWorkspaceView: View {
             Button(action: toggleDrawingMode) {
                 HStack(spacing: 7) {
                     Image(systemName: "pencil.tip")
-                    Text("标注")
+                    Text("画线")
                 }
                 .font(.system(size: 15, weight: .bold))
                 .padding(.horizontal, 20)
@@ -485,7 +564,7 @@ struct AnalysisWorkspaceView: View {
                 )
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(interactionMode == .drawing ? "结束标注" : "开始标注")
+            .accessibilityLabel(interactionMode == .drawing ? "结束画线" : "开始画线")
 
             Spacer(minLength: 20)
 
@@ -519,6 +598,8 @@ struct AnalysisWorkspaceView: View {
             return "视频读取失败，请重新导入"
         case .insufficientPoseEvidence:
             return "未识别到清晰的人体姿势"
+        case .insufficientStageEvidence:
+            return "人体已识别，但未能自动确定完整 P1–P8。你可以手动设置 P 点。"
         case .noStableGolfer:
             return "无法持续锁定主球员"
         case .noSwingMotion:
@@ -535,6 +616,8 @@ struct AnalysisWorkspaceView: View {
             return "未找到击球瞬间"
         case .missingPostImpactBoundary:
             return "未找到击球后释放边界"
+        case .unsupportedInput:
+            return AnalysisFailurePresentation(failure: failure).message
         case .analysisCancelled:
             return "AI 分析已取消"
         }
@@ -544,10 +627,43 @@ struct AnalysisWorkspaceView: View {
         {
             if isRegularLayout {
                 showsInspector = true
-            } else {
-                showsResultsSheet = true
             }
+            showsResultsSheet = true
         }
+    }
+
+    private func selectStage(_ stage: SwingStage) {
+        playbackManager.pause()
+        if let marker = keyframes.first(where: { $0.stage == stage.rawValue }) {
+            playbackManager.seek(to: marker.time)
+        } else if let time = presentation.detection(for: stage)?.time {
+            playbackManager.seek(to: time)
+        }
+    }
+
+    private func cameraViewButton(
+        title: String,
+        view: PracticeCameraView
+    ) -> some View {
+        Button {
+            practiceCameraView = view
+        } label: {
+            Text(title)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(
+                    view == .faceOn
+                        ? Color.black
+                        : AnalysisTheme.proTourPrimaryText
+                )
+                .frame(maxWidth: .infinity, minHeight: 54)
+                .background(
+                    view == .faceOn
+                        ? AnalysisTheme.proTourSignal
+                        : AnalysisTheme.proTourSurface,
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private func toggleDrawingMode() {
@@ -583,13 +699,14 @@ struct FullscreenVideoPlaybackView: View {
     let showSpineAngle: Bool
     let showGrid: Bool
     let keyframes: [KeyframeMarker]
-    @Binding var practiceCameraView: PracticeCameraView?
-    @Binding var feedbackConfiguration: FeedbackConfiguration?
+    let practiceCameraView: PracticeCameraView?
+    let onAdjustStage: (SwingStage) -> Void
     let onDismiss: () -> Void
 
     @State private var controlsVisible = true
     @State private var hideTask: Task<Void, Never>?
-    @State private var showsFeedbackConfiguration = false
+    @State private var showsFeedback = false
+    @State private var expandedFeedbackCategory: SwingFeedbackCategory?
     @State private var inertTool: DrawingTool = .line
     @State private var inertColor: Color = .white
     @State private var inertWidth: CGFloat = 3
@@ -629,14 +746,27 @@ struct FullscreenVideoPlaybackView: View {
         .onDisappear {
             hideTask?.cancel()
         }
-        .fullScreenCover(isPresented: $showsFeedbackConfiguration) {
-            SwingFeedbackConfigurationView(
-                practiceCameraView: $practiceCameraView,
-                configuration: $feedbackConfiguration,
-                analysisState: playbackManager.analysisState,
-                sourceFrameRate: playbackManager.sourceFrameRate,
-                onDismiss: { showsFeedbackConfiguration = false }
-            )
+        .sheet(isPresented: $showsFeedback) {
+            if let feedback = playbackManager.simplifiedFeedback(
+                view: practiceCameraView,
+                manualMarkers: keyframes
+            ) {
+                SimplifiedSwingFeedbackView(
+                    feedback: feedback,
+                    expandedCategory: $expandedFeedbackCategory,
+                    onSelectStage: { stage in
+                        if let marker = keyframes.first(where: { $0.stage == stage.rawValue }) {
+                            playbackManager.seek(to: marker.time)
+                        } else if let time = AnalysisWorkspacePresentation(
+                            state: playbackManager.analysisState
+                        ).detection(for: stage)?.time {
+                            playbackManager.seek(to: time)
+                        }
+                    },
+                    onAdjustStage: onAdjustStage
+                )
+                .presentationDetents([.large])
+            }
         }
         .onChange(of: playbackManager.isPlaying) { _, isPlaying in
             if isPlaying {
@@ -660,11 +790,11 @@ struct FullscreenVideoPlaybackView: View {
             Spacer()
 
             Button {
-                showsFeedbackConfiguration = true
+                showsFeedback = true
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "ear.and.waveform")
-                    Text(activeMetricTitle)
+                    Image(systemName: "figure.golf")
+                    Text("动作反馈")
                 }
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white)
@@ -673,7 +803,7 @@ struct FullscreenVideoPlaybackView: View {
             }
             .buttonStyle(.plain)
             .background(.black.opacity(0.62), in: Capsule())
-            .accessibilityLabel("选择回放分析参数")
+            .accessibilityLabel("查看动作反馈")
 
             SwingPhaseRailView(
                 keyframes: keyframes,
@@ -693,16 +823,6 @@ struct FullscreenVideoPlaybackView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-    }
-
-    private var activeMetricTitle: String {
-        guard let practiceCameraView,
-              let feedbackConfiguration,
-              SwingFeedbackProfiles.profile(for: practiceCameraView).contains(feedbackConfiguration.activeMetric)
-        else {
-            return "选择分析视角"
-        }
-        return feedbackConfiguration.activeMetric.title
     }
 
     private func chromeButton(
@@ -771,6 +891,9 @@ struct VideoCanvasView: View {
     let interactionMode: WorkspaceInteractionMode
     let showsFullscreenButton: Bool
     let onEnterFullscreen: () -> Void
+    var trajectoryCategory: SwingFeedbackCategory? = nil
+    var trajectoryFrames: [SwingFrameObservation] = []
+    var trajectoryStageTimes: [SwingTrajectoryStageTime] = []
 
     @State private var committedScale: CGFloat = 1
     @State private var renderedVideoRect: CGRect = .zero
@@ -810,6 +933,17 @@ struct VideoCanvasView: View {
                         showHeadStability: showHeadStability,
                         showSpineAngle: showSpineAngle
                     )
+
+                    if let trajectoryCategory,
+                       !trajectoryFrames.isEmpty,
+                       !renderedVideoRect.isEmpty {
+                        SwingTrajectoryOverlay(
+                            category: trajectoryCategory,
+                            frames: trajectoryFrames,
+                            stageTimes: trajectoryStageTimes,
+                            videoRect: renderedVideoRect
+                        )
+                    }
                 }
                 .scaleEffect(scale)
                 .onTapGesture(count: 2) {

@@ -111,7 +111,8 @@ enum ManualStageDetectionPolicy {
         let availableFrames = Set(availablePoseSamples.compactMap(\.sourceFrameIndex))
         return automatic.map { detection in
             guard let marker = manualByStage[detection.stage] else { return detection }
-            let frame = Int((marker.time * sourceFrameRate).rounded())
+            let frame = marker.sourceFrameIndex
+                ?? Int((marker.time * sourceFrameRate).rounded())
             return SwingStageDetection(
                 stage: detection.stage,
                 time: marker.time,
@@ -120,7 +121,12 @@ enum ManualStageDetectionPolicy {
                 status: availableFrames.contains(frame) ? .confirmed : .lowConfidence,
                 hasClubEvidence: detection.hasClubEvidence,
                 hasBallEvidence: detection.hasBallEvidence,
-                hasBallChangeEvidence: detection.hasBallChangeEvidence
+                hasBallChangeEvidence: detection.hasBallChangeEvidence,
+                evidence: StageEvidenceSummary(
+                    sources: [.manual],
+                    detectedPointCount: 0,
+                    estimatedPointCount: 0
+                )
             )
         }
     }
@@ -131,6 +137,19 @@ enum ManualStageDetectionPolicy {
 /// produce no result and are presented as unresolved by the caller.
 enum SwingTechniqueEvaluator {
     static let minimumAggregateConfidence: Float = 0.65
+
+    static func measuredMetricEvidence(
+        _ id: SwingMetricID,
+        metrics: [SwingMetricValue]
+    ) -> Double? {
+        guard id.isMotionAnalysisOutput,
+              let metric = metrics.first(where: { $0.id == id }),
+              metric.availability == .measured,
+              metric.confidence >= Double(minimumAggregateConfidence),
+              let value = metric.value,
+              value.isFinite else { return nil }
+        return value
+    }
 
     static func evaluate(
         samples: [SwingPoseSample],

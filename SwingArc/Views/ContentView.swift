@@ -19,7 +19,6 @@ struct ContentView: View {
     @State private var activeProject: LocalProjectSummary?
     @State private var currentProjectURL: URL?
     @State private var practiceCameraView: PracticeCameraView?
-    @State private var feedbackConfiguration: FeedbackConfiguration?
     @State private var saveStatus: WorkspaceSaveStatus = .idle
 
     @State private var drawings: [DrawingElement] = []
@@ -35,6 +34,7 @@ struct ContentView: View {
     @State private var showProjectLibrary = false
     @State private var showVideoPicker = false
     @State private var showManualCapture = false
+    @State private var showPPointCorrection = false
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var showExportActions = false
     @State private var sharePayload: SharePayload?
@@ -45,7 +45,8 @@ struct ContentView: View {
     init() {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let previewView = PracticePreviewConfiguration.view(for: arguments) {
+        if PracticePreviewConfiguration.importPath(for: arguments) == nil,
+           let previewView = PracticePreviewConfiguration.view(for: arguments) {
             _selectedPracticeView = State(initialValue: previewView)
         }
         if PracticePreviewConfiguration.showsLibrary(for: arguments) {
@@ -72,7 +73,6 @@ struct ContentView: View {
                     showSpineAngle: $showSpineAngle,
                     showGrid: $showGrid,
                     practiceCameraView: $practiceCameraView,
-                    feedbackConfiguration: $feedbackConfiguration,
                     saveStatus: saveStatus,
                     onBack: closeWorkspace,
                     onSelectProject: openProject,
@@ -80,10 +80,10 @@ struct ContentView: View {
                     onAnalyze: runAISwingAnalysis,
                     onCancelAnalysis: playbackManager.cancelAnalysis,
                     onSetManualStage: saveManualStage,
-                    feedback: playbackManager.priorityFeedback(
-                        view: practiceCameraView,
-                        manualMarkers: keyframes
-                    )
+                    onCorrectPPoints: {
+                        playbackManager.pause()
+                        showPPointCorrection = true
+                    }
                 )
             } else if showProjectLibrary {
                 ProjectLibraryView(
@@ -116,7 +116,12 @@ struct ContentView: View {
                   ) else { return }
 
             didLoadPreviewImport = true
-            loadVideoFromURL(URL(fileURLWithPath: path))
+            loadVideoFromURL(
+                URL(fileURLWithPath: path),
+                practiceView: PracticePreviewConfiguration.view(
+                    for: ProcessInfo.processInfo.arguments
+                )
+            )
             #endif
         }
         .onChange(of: drawings) { _, _ in persistCurrentProject() }
@@ -127,7 +132,7 @@ struct ContentView: View {
         .onChange(of: showHeadStability) { _, _ in persistCurrentProject() }
         .onChange(of: showSpineAngle) { _, _ in persistCurrentProject() }
         .onChange(of: showGrid) { _, _ in persistCurrentProject() }
-        .onChange(of: feedbackConfiguration) { _, _ in persistCurrentProject() }
+        .onChange(of: practiceCameraView) { _, _ in persistCurrentProject() }
         .fullScreenCover(item: $selectedPracticeView) { practiceView in
             PracticeSessionView(
                 view: practiceView,
@@ -148,6 +153,21 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showManualCapture) {
             CameraView { temporaryURL in
                 persistCapturedVideo(temporaryURL)
+            }
+        }
+        .fullScreenCover(isPresented: $showPPointCorrection) {
+            if let currentProjectURL {
+                PPointCorrectionWorkspace(
+                    videoURL: currentProjectURL,
+                    prediction: AnnotationPredictionAdapter.snapshot(
+                        detections: playbackManager.analysisOutput?.result.detections ?? [],
+                        frames: playbackManager.analysisOutput?.observationFrames ?? []
+                    ),
+                    manualMarkers: keyframes,
+                    initialTime: playbackManager.currentTime,
+                    onClose: { showPPointCorrection = false },
+                    onSave: savePPointCorrection
+                )
             }
         }
         .sheet(item: $sharePayload) { payload in
@@ -262,7 +282,6 @@ struct ContentView: View {
         showHeadStability = false
         showSpineAngle = false
         showGrid = false
-        feedbackConfiguration = nil
         saveStatus = .idle
 
         let didLoad = playbackManager.loadVideo(url: url)
@@ -277,7 +296,6 @@ struct ContentView: View {
             showGrid = saved.showGrid
             self.practiceCameraView = practiceView ?? saved.practiceCameraView
             stageCorrections = saved.stageCorrections
-            feedbackConfiguration = saved.feedbackConfiguration
         } else {
             self.practiceCameraView = practiceView
         }
@@ -302,6 +320,7 @@ struct ContentView: View {
         activeProject = summary
         projects = LocalProjectStore.projects()
         saveStatus = .saved
+        migrateLegacyAnnotationIfNeeded(for: url)
 
         if didLoad, AutomaticAnalysisPolicy.shouldAnalyze(event: origin) {
             DispatchQueue.main.async {
@@ -324,8 +343,7 @@ struct ContentView: View {
                 showSpineAngle: showSpineAngle,
                 showGrid: showGrid,
                 practiceCameraView: practiceCameraView,
-                stageCorrections: stageCorrections,
-                feedbackConfiguration: feedbackConfiguration
+                stageCorrections: stageCorrections
             ),
             for: videoURL
         )
@@ -338,6 +356,76 @@ struct ContentView: View {
         activeProject = project
         projects = LocalProjectStore.projects()
         saveStatus = saved ? .saved : .failed
+    }
+
+    private func migrateLegacyAnnotationIfNeeded(for videoURL: URL) {
+        Task {
+            do {
+                let mediaSHA256 = try await Task.detached(
+                    priority: .utility
+                ) {
+                    try AnnotationStore.mediaSHA256(url: videoURL)
+                }.value
+                guard currentProjectURL == videoURL,
+                      !LegacyAnnotationMigration.isCompleted(
+                          mediaSHA256: mediaSHA256
+                      ) else {
+                    return
+                }
+
+                let store = AnnotationStore()
+                guard let package = try store.load(
+                    mediaSHA256: mediaSHA256
+                ) else {
+                    LegacyAnnotationMigration.markCompleted(
+                        mediaSHA256: mediaSHA256
+                    )
+                    return
+                }
+
+                let frameSession = ExactVideoFrameSession()
+                let metadata = try await frameSession.open(url: videoURL)
+                guard metadata.timelineSHA256
+                    == package.media.timelineSHA256 else {
+                    throw AnnotationStoreError.mediaIdentityMismatch
+                }
+                var frameTimes: [Int: Double] = [:]
+                for frame in LegacyAnnotationMigration.sourceFrameIndices(
+                    package: package
+                ) {
+                    if let time = await frameSession.presentationTimeSeconds(
+                        at: frame
+                    ) {
+                        frameTimes[frame] = time
+                    }
+                }
+
+                guard currentProjectURL == videoURL else { return }
+                let migrated = LegacyAnnotationMigration.migrate(
+                    package: package,
+                    frameTimes: frameTimes,
+                    existingMarkers: keyframes
+                )
+
+                if migrated.sanitizedPackage != package {
+                    try store.save(
+                        migrated.sanitizedPackage,
+                        expectedMediaSHA256: mediaSHA256
+                    )
+                }
+                if migrated.markers != keyframes {
+                    keyframes = migrated.markers
+                    persistCurrentProject()
+                }
+                guard saveStatus != .failed else { return }
+                LegacyAnnotationMigration.markCompleted(
+                    mediaSHA256: mediaSHA256
+                )
+            } catch {
+                guard currentProjectURL == videoURL else { return }
+                statusMessage = "已有 P 点修正未能迁移，原数据仍保留。"
+            }
+        }
     }
 
     private var projectStatus: LocalProjectStatus {
@@ -367,25 +455,75 @@ struct ContentView: View {
         playbackManager.pause()
         playbackManager.analyzeSwing { result in
             keyframes = StageMarkerMerger.merge(existing: keyframes, automatic: result.detectedMarkers)
+            guard let currentProjectURL else { return }
+            playbackManager.refineManualPPoints(
+                videoURL: currentProjectURL,
+                manualMarkers: keyframes
+            )
         }
     }
 
     private func saveManualStage(_ stage: SwingStage) {
-        let marker = KeyframeMarker(time: playbackManager.currentTime, stage: stage, source: .manual)
+        let sourceFrameIndex: Int?
+        if playbackManager.sourceFrameRate > 0 {
+            sourceFrameIndex = Int(
+                (playbackManager.currentTime * playbackManager.sourceFrameRate).rounded()
+            )
+        } else {
+            sourceFrameIndex = nil
+        }
+        saveManualStage(
+            stage,
+            time: playbackManager.currentTime,
+            sourceFrameIndex: sourceFrameIndex
+        )
+    }
+
+    private func savePPointCorrection(
+        code: PPointCode,
+        sourceFrameIndex: Int,
+        time: Double,
+        image: CGImage
+    ) {
+        guard SwingStage.pStages.indices.contains(code.ordinal) else { return }
+        let stage = SwingStage.pStages[code.ordinal]
+        saveManualStage(
+            stage,
+            time: time,
+            sourceFrameIndex: sourceFrameIndex
+        )
+        playbackManager.seek(to: time)
+        playbackManager.refineManualPPoint(
+            image: image,
+            sourceFrameIndex: sourceFrameIndex,
+            time: time
+        )
+    }
+
+    private func saveManualStage(
+        _ stage: SwingStage,
+        time: Double,
+        sourceFrameIndex: Int?
+    ) {
+        let marker = KeyframeMarker(
+            time: time,
+            stage: stage,
+            source: .manual,
+            sourceFrameIndex: sourceFrameIndex
+        )
         keyframes.removeAll { $0.stage == stage.rawValue }
         keyframes.append(marker)
         keyframes.sort { $0.time < $1.time }
         guard let view = practiceCameraView,
               let automaticFrame = playbackManager.analysisOutput?.result.detections
                 .first(where: { $0.stage == stage })?.sourceFrameIndex,
-              playbackManager.sourceFrameRate > 0 else { return }
-        let manualFrame = Int((playbackManager.currentTime * playbackManager.sourceFrameRate).rounded())
+              let sourceFrameIndex else { return }
         stageCorrections.removeAll { $0.stage == stage && $0.view == view }
         stageCorrections.append(StageCorrection(
             stage: stage,
             view: view,
             automaticFrameIndex: automaticFrame,
-            manualFrameIndex: manualFrame
+            manualFrameIndex: sourceFrameIndex
         ))
     }
 

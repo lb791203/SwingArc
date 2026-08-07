@@ -15,5 +15,13 @@ struct AnalysisWorkspacePresentationSmoke {
         precondition(completed.markers.count == 1)
         precondition(completed.allowsPoseOverlays)
         precondition(completed.unresolvedStages.contains(.impact))
+
+        precondition(SwingFeedbackCategory.allCases == [
+            .setup,
+            .bodyStability,
+            .handPath,
+            .swingPlane,
+            .impactAndRelease
+        ])
     }
 }

@@ -125,17 +125,31 @@ struct KeyframeMarker: Identifiable, Codable, Equatable {
     let time: Double // 视频时间（秒）
     let stage: String // SwingStage rawValue
     let source: KeyframeSource
+    let sourceFrameIndex: Int?
     
-    init(id: UUID = UUID(), time: Double, stage: SwingStage, source: KeyframeSource = .automatic) {
+    init(
+        id: UUID = UUID(),
+        time: Double,
+        stage: SwingStage,
+        source: KeyframeSource = .automatic,
+        sourceFrameIndex: Int? = nil
+    ) {
         self.id = id
         self.time = time
         self.stage = stage.rawValue
         self.source = source
+        self.sourceFrameIndex = sourceFrameIndex
     }
 
     var isLocked: Bool { source == .manual }
 
-    private enum CodingKeys: String, CodingKey { case id, time, stage, source }
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case time
+        case stage
+        case source
+        case sourceFrameIndex
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -143,6 +157,10 @@ struct KeyframeMarker: Identifiable, Codable, Equatable {
         time = try container.decode(Double.self, forKey: .time)
         stage = try container.decode(String.self, forKey: .stage)
         source = try container.decodeIfPresent(KeyframeSource.self, forKey: .source) ?? .automatic
+        sourceFrameIndex = try container.decodeIfPresent(
+            Int.self,
+            forKey: .sourceFrameIndex
+        )
     }
 
     func encode(to encoder: Encoder) throws {
@@ -151,6 +169,10 @@ struct KeyframeMarker: Identifiable, Codable, Equatable {
         try container.encode(time, forKey: .time)
         try container.encode(stage, forKey: .stage)
         try container.encode(source, forKey: .source)
+        try container.encodeIfPresent(
+            sourceFrameIndex,
+            forKey: .sourceFrameIndex
+        )
     }
 }
 
@@ -289,9 +311,52 @@ enum DrawingInteractionPolicy {
 enum DrawingCanvasGeometry {
     static func interactionRect(videoRect: CGRect, canvasSize: CGSize) -> CGRect {
         guard videoRect.width > 0, videoRect.height > 0 else {
-            return CGRect(origin: .zero, size: canvasSize)
+            // The AVPlayer layer can briefly report no video rect while a
+            // stored project is reopening. Rendering against the whole canvas
+            // during that window makes persisted normalized points jump and
+            // grow, so wait for a real video rect instead.
+            return .zero
         }
-        return videoRect
+        return videoRect.intersection(CGRect(origin: .zero, size: canvasSize))
+    }
+
+    static func aspectFitRect(contentSize: CGSize, containerSize: CGSize) -> CGRect {
+        guard contentSize.width > 0,
+              contentSize.height > 0,
+              containerSize.width > 0,
+              containerSize.height > 0 else {
+            return .zero
+        }
+
+        let scale = min(
+            containerSize.width / contentSize.width,
+            containerSize.height / contentSize.height
+        )
+        let fittedSize = CGSize(
+            width: contentSize.width * scale,
+            height: contentSize.height * scale
+        )
+        return CGRect(
+            x: (containerSize.width - fittedSize.width) / 2,
+            y: (containerSize.height - fittedSize.height) / 2,
+            width: fittedSize.width,
+            height: fittedSize.height
+        )
+    }
+}
+
+/// Circles are persisted as a center point plus a point on the circumference.
+/// Keeping the conversion in one place prevents the editing canvas and media
+/// exporters from interpreting the same two points as different geometries.
+enum DrawingCircleGeometry {
+    static func bounds(center: CGPoint, edge: CGPoint) -> CGRect {
+        let radius = hypot(edge.x - center.x, edge.y - center.y)
+        return CGRect(
+            x: center.x - radius,
+            y: center.y - radius,
+            width: radius * 2,
+            height: radius * 2
+        )
     }
 }
 

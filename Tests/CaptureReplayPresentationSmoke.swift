@@ -31,11 +31,20 @@ struct CaptureReplayPresentationSmoke {
         )
         precondition(mobileTimeline.contains("ForEach(SwingStage.allCases)"))
         precondition(mobileTimeline.contains("SwingStagePoseGlyph"))
+        precondition(mobileTimeline.contains("MobileReplayStageStripPolicy.stageSpacing"))
+        precondition(mobileTimeline.contains("MobileReplayStageStripPolicy.glyphWidth"))
+        precondition(mobileTimeline.contains(".frame(height: MobileReplayStageStripPolicy.buttonHeight)"))
+        precondition(mobileTimeline.contains(".contentShape(RoundedRectangle"))
+        precondition(mobileTimeline.contains(".onTapGesture { }"))
+        precondition(mobileTimeline.contains("let current = currentStage == stage"))
+        precondition(!mobileTimeline.contains(".frame(maxHeight: .infinity, alignment: .bottom)"))
         precondition(!mobileTimeline.contains("Text(stage.pNumber)"))
         precondition(!mobileTimeline.contains("Image(systemName: \"figure.golf\")"))
         precondition(mobileTimeline.contains(".allowsHitTesting(marker != nil)"))
         precondition(!mobileTimeline.contains(".disabled(marker == nil)"))
-        precondition(components.contains("struct SwingStagePoseGlyph"))
+        precondition(components.contains("private struct SwingStagePoseGlyph"))
+        precondition(components.contains("Image(SwingStageGlyphAsset.name(for: stage))"))
+        precondition(components.contains("private enum SwingStageGlyphAsset"))
         precondition(components.contains("private enum SwingStagePoseCue"))
         for cue in [
             "准备：双膝微屈，杆头落在球后",
@@ -55,6 +64,26 @@ struct CaptureReplayPresentationSmoke {
         precondition(components.contains("case .address:"))
         precondition(components.contains("case .shaftParallelDownswing:"))
         precondition(components.contains("case .finish:"))
+        for stageNumber in 1...8 {
+            let assetName = "PStage\(stageNumber)"
+            let assetDirectory = root.appending(path: "SwingArc/Assets.xcassets/\(assetName).imageset")
+            precondition(
+                components.contains("return \"\(assetName)\""),
+                "P\(stageNumber) must render the approved image asset."
+            )
+            precondition(
+                FileManager.default.fileExists(
+                    atPath: assetDirectory.appending(path: "p_stage_\(stageNumber).png").path
+                ),
+                "Missing approved P\(stageNumber) PNG asset."
+            )
+            precondition(
+                FileManager.default.fileExists(
+                    atPath: assetDirectory.appending(path: "Contents.json").path
+                ),
+                "Missing P\(stageNumber) asset catalog metadata."
+            )
+        }
         precondition(!workspace.contains("showsFullscreenPlayback"))
         precondition(!workspace.contains("arrow.up.left.and.arrow.down.right"))
         precondition(!library.contains("showsNewProjectSheet"))
@@ -93,7 +122,7 @@ struct CaptureReplayPresentationSmoke {
         precondition(practiceSession.contains("onOpenLastClip(clipURL)"))
         precondition(!content.contains("showCameraView"))
         precondition(workspace.contains("mobileReplayActionRow"))
-        precondition(workspace.contains("Text(\"标注\")"))
+        precondition(workspace.contains("Text(\"画线\")"))
         let mobileActionRow = section(
             from: "private var mobileReplayActionRow",
             until: "private func toggleWorkspacePlayback",

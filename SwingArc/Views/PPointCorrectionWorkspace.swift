@@ -1,0 +1,384 @@
+import CoreMedia
+import SwiftUI
+
+struct PPointCorrectionWorkspace: View {
+    let videoURL: URL
+    let prediction: AnnotationPredictionSnapshot
+    let manualMarkers: [KeyframeMarker]
+    let initialTime: Double
+    let onClose: () -> Void
+    let onSave: (PPointCode, Int, Double, CGImage) -> Void
+
+    @StateObject private var frameController = AnnotationFrameController()
+    @State private var correctionState: PPointCorrectionState?
+    @State private var preparationError: String?
+
+    var body: some View {
+        Group {
+            if let state = correctionState {
+                correctionContent(state)
+            } else {
+                preparationView
+            }
+        }
+        .background(AnalysisTheme.proTourBackground.ignoresSafeArea())
+        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+        .ignoresSafeArea()
+        .overlay(alignment: .top) {
+            topChrome
+                .safeAreaPadding(.top, 4)
+        }
+        .task(id: videoURL) {
+            await prepare()
+        }
+        .alert(
+            "无法修正 P 点",
+            isPresented: Binding(
+                get: { preparationError != nil },
+                set: { if !$0 { preparationError = nil } }
+            )
+        ) {
+            Button("好") { preparationError = nil }
+        } message: {
+            Text(preparationError ?? "")
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var topChrome: some View {
+        VStack(spacing: 2) {
+            HStack {
+                Button("关闭", action: onClose)
+                    .font(.system(size: 15, weight: .semibold))
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 38)
+                    .background(
+                        .black.opacity(0.30),
+                        in: Capsule()
+                    )
+                    .accessibilityLabel("关闭 P 点修正")
+
+                Spacer()
+
+                VStack(spacing: 0) {
+                    Text("P 点修正")
+                        .font(.system(size: 17, weight: .bold))
+                    Text("当前视频")
+                        .font(.caption2)
+                        .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+                }
+
+                Spacer()
+
+                Color.clear
+                    .frame(width: 54, height: 38)
+            }
+            .padding(.horizontal, 12)
+
+            if let state = correctionState {
+                stageSelector(state)
+            }
+        }
+        .padding(.bottom, 8)
+        .background(
+            LinearGradient(
+                colors: [.black.opacity(0.54), .black.opacity(0.18), .clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .padding(.bottom, -18)
+        )
+    }
+
+    private var preparationView: some View {
+        VStack(spacing: 14) {
+            ProgressView()
+                .controlSize(.large)
+                .tint(AnalysisTheme.proTourSignal)
+            Text("正在建立精确源帧")
+                .font(.headline)
+            Text("保留自动结果，只修正错误的 P 点")
+                .font(.caption)
+                .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func correctionContent(_ state: PPointCorrectionState) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black
+            if let image = frameController.currentFrame?.image {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ProgressView()
+                    .tint(AnalysisTheme.proTourSignal)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            if frameController.isLoading {
+                ProgressView()
+                    .tint(AnalysisTheme.proTourSignal)
+                    .padding(12)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityLabel("当前 P 点源帧")
+        .overlay(alignment: .bottom) {
+            correctionControls(state)
+                .padding(.horizontal, 12)
+                .safeAreaPadding(.bottom, 24)
+        }
+    }
+
+    private func stageSelector(_ state: PPointCorrectionState) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(PPointCode.allCases) { code in
+                    let selection = state.selection(for: code)
+                    Button {
+                        select(code)
+                    } label: {
+                        VStack(spacing: 3) {
+                            Text(code.rawValue)
+                                .font(.system(size: 14, weight: .black, design: .monospaced))
+                            Circle()
+                                .fill(statusColor(selection.source))
+                                .frame(width: 5, height: 5)
+                        }
+                        .frame(width: 38, height: 42)
+                        .foregroundStyle(
+                            state.selectedCode == code
+                                ? AnalysisTheme.proTourBackground
+                                : AnalysisTheme.proTourPrimaryText
+                        )
+                        .background(
+                            state.selectedCode == code
+                                ? AnalysisTheme.proTourSignal.opacity(0.86)
+                                : .black.opacity(0.28),
+                            in: RoundedRectangle(cornerRadius: 11)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 11)
+                                .stroke(.white.opacity(0.16), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(
+                        "\(code.rawValue)，\(statusLabel(selection.source))"
+                    )
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    private func correctionControls(_ state: PPointCorrectionState) -> some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text(
+                    "帧 \(state.currentSourceFrameIndex + 1) / " +
+                        "\(frameController.frameCount)"
+                )
+                .monospacedDigit()
+
+                Spacer()
+
+                let selection = state.selection(for: state.selectedCode)
+                Label(
+                    statusLabel(selection.source),
+                    systemImage: selection.source == .manual
+                        ? "lock.fill"
+                        : "sparkles"
+                )
+                .foregroundStyle(statusColor(selection.source))
+            }
+            .font(.caption)
+            .shadow(color: .black.opacity(0.9), radius: 3)
+
+            HStack(spacing: 9) {
+                stepButton(-5, title: "−5")
+                stepButton(-1, title: "−1")
+                stepButton(1, title: "+1")
+                stepButton(5, title: "+5")
+            }
+
+            Button {
+                saveSelectedStage()
+            } label: {
+                Text("设为 \(state.selectedCode.rawValue)")
+                    .font(.system(size: 16, weight: .bold))
+                    .frame(maxWidth: .infinity, minHeight: 46)
+                    .foregroundStyle(AnalysisTheme.proTourBackground)
+                    .background(
+                        AnalysisTheme.proTourSignal.opacity(0.84),
+                        in: RoundedRectangle(cornerRadius: 13)
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(frameController.currentFrame == nil)
+            .accessibilityLabel(
+                "将当前帧设为 \(state.selectedCode.rawValue)"
+            )
+        }
+    }
+
+    private func stepButton(_ amount: Int, title: String) -> some View {
+        Button {
+            step(amount)
+        } label: {
+            Text(title)
+                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                .frame(maxWidth: .infinity, minHeight: 42)
+                .background(
+                    .black.opacity(0.28),
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(.white.opacity(0.18), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("移动 \(title) 帧")
+    }
+
+    @MainActor
+    private func prepare() async {
+        await frameController.open(url: videoURL)
+        guard frameController.frameCount > 0 else {
+            preparationError = frameController.errorMessage ?? "无法读取视频源帧。"
+            return
+        }
+
+        let predicted: [PPointCode: Int] = Dictionary(
+            uniqueKeysWithValues: prediction.stages.compactMap { selection in
+                guard let code = PPointCode(rawValue: selection.stage),
+                      let frame = selection.sourceFrameIndex else {
+                    return nil
+                }
+                return (code, frame)
+            }
+        )
+        let suggested: [PPointCode: Int] = Dictionary(
+            uniqueKeysWithValues: prediction.stages.compactMap { selection in
+                guard let code = PPointCode(rawValue: selection.stage),
+                      let frame = selection.suggestedSourceFrameIndex else {
+                    return nil
+                }
+                return (code, frame)
+            }
+        )
+        var manual: [PPointCode: Int] = [:]
+        for marker in manualMarkers where marker.source == .manual {
+            guard let code = Self.code(for: marker.stage) else {
+                continue
+            }
+            let frame: Int?
+            if let exactFrame = marker.sourceFrameIndex,
+               (0..<frameController.frameCount).contains(exactFrame) {
+                frame = exactFrame
+            } else {
+                frame = await frameController.nearestSourceFrameIndex(
+                    at: marker.time
+                )
+            }
+            guard let frame else { continue }
+            manual[code] = frame
+        }
+
+        var initial = PPointCorrectionState(
+            frameCount: frameController.frameCount,
+            predictedFrames: predicted,
+            suggestedFrames: suggested,
+            manualFrames: manual
+        )
+        if predicted.isEmpty,
+           suggested.isEmpty,
+           manual.isEmpty,
+           let initialFrame = await frameController.nearestSourceFrameIndex(
+               at: initialTime
+           ) {
+            PPointCorrectionReducer.reduce(
+                state: &initial,
+                action: .step(initialFrame)
+            )
+        }
+        correctionState = initial
+        _ = await frameController.show(
+            index: initial.currentSourceFrameIndex
+        )
+    }
+
+    private func select(_ code: PPointCode) {
+        guard var state = correctionState else { return }
+        PPointCorrectionReducer.reduce(state: &state, action: .select(code))
+        correctionState = state
+        show(frame: state.currentSourceFrameIndex)
+    }
+
+    private func step(_ amount: Int) {
+        guard var state = correctionState else { return }
+        PPointCorrectionReducer.reduce(state: &state, action: .step(amount))
+        correctionState = state
+        show(frame: state.currentSourceFrameIndex)
+    }
+
+    private func show(frame: Int) {
+        Task {
+            _ = await frameController.show(index: frame)
+        }
+    }
+
+    private func saveSelectedStage() {
+        guard var state = correctionState,
+              let frame = frameController.currentFrame,
+              frame.sourceFrameIndex == state.currentSourceFrameIndex else {
+            return
+        }
+        PPointCorrectionReducer.reduce(
+            state: &state,
+            action: .setSelectedStage
+        )
+        correctionState = state
+        onSave(
+            state.selectedCode,
+            state.currentSourceFrameIndex,
+            frame.presentationTime.seconds,
+            frame.image
+        )
+    }
+
+    private func statusColor(
+        _ source: PPointSelectionSource
+    ) -> Color {
+        switch source {
+        case .manual:
+            return AnalysisTheme.proTourSignal
+        case .automatic:
+            return AnalysisTheme.proTourPrimaryText
+        case .unresolved:
+            return AnalysisTheme.proTourPaused
+        }
+    }
+
+    private func statusLabel(
+        _ source: PPointSelectionSource
+    ) -> String {
+        switch source {
+        case .manual: return "人工修正"
+        case .automatic: return "自动识别"
+        case .unresolved: return "待修正"
+        }
+    }
+
+    private static func code(for stageRawValue: String) -> PPointCode? {
+        guard let stage = SwingStage(rawValue: stageRawValue),
+              let index = SwingStage.pStages.firstIndex(of: stage) else {
+            return nil
+        }
+        return PPointCode.allCases[index]
+    }
+}

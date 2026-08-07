@@ -110,6 +110,8 @@ struct AnalysisFailurePresentation: Equatable {
             return "视频读取失败，请重新导入。"
         case .insufficientPoseEvidence:
             return "未检测到清晰人体。请选择全身入镜、光线充足的视频；手工标注不会被清除。"
+        case .insufficientStageEvidence:
+            return "人体已识别，但未能自动确定完整 P1–P8。你可以手动设置 P 点。"
         case .noStableGolfer:
             return "无法持续锁定主球员。请使用固定机位、全身入镜且避免多人遮挡的视频。"
         case .noSwingMotion:
@@ -130,6 +132,24 @@ struct AnalysisFailurePresentation: Equatable {
             return "找不到击球后动作边界"
         case .incompleteSwingClip:
             return "视频缺少完整挥杆前段或后段"
+        case let .unsupportedInput(issues):
+            let guidance = issues.map { issue in
+                switch issue {
+                case .personNotStable:
+                    return "人物检测不稳定，请保持单人入镜并避免遮挡"
+                case .fullBodyNotVisible:
+                    return "请确保人物全身入镜"
+                case .clubNotVisible:
+                    return "球杆不可见，请调整机位和光线"
+                case .clubVisibilityNotAssessed:
+                    return "暂时无法确认球杆可见性"
+                case .cameraMoved:
+                    return "机位不稳定，请固定手机"
+                case .motionBlur:
+                    return "画面运动模糊，请提高光线或帧率"
+                }
+            }.joined(separator: "；")
+            return "当前视频不适合自动分析：\(guidance)。视频仍可播放和手工标注。"
         case .analysisCancelled:
             return "分析已取消"
         }
@@ -363,6 +383,53 @@ enum FullscreenPlaybackPolicy {
     static let showsWorkspaceChrome = false
     static let showsTimeLabels = false
     static let showsTransportButtons = false
+}
+
+/// Keeps the eight mobile P-stage controls compact while leaving a real gap
+/// between adjacent hit regions. The glyph can shrink without shrinking the
+/// control below the standard 44-point vertical touch target.
+enum MobileReplayStageStripPolicy {
+    static let stackSpacing: CGFloat = 8
+    static let stageSpacing: CGFloat = 4
+    static let buttonHeight: CGFloat = 44
+    static let glyphWidth: CGFloat = 38
+    static let glyphHeight: CGFloat = 34
+    static let currentIndicatorWidth: CGFloat = 14
+    static let currentIndicatorHeight: CGFloat = 2
+}
+
+enum ReplayStageSelectionPolicy {
+    static func currentStage(
+        at currentTime: Double,
+        keyframes: [KeyframeMarker],
+        tolerance: Double
+    ) -> SwingStage? {
+        guard currentTime.isFinite,
+              currentTime >= 0,
+              tolerance.isFinite,
+              tolerance >= 0 else {
+            return nil
+        }
+
+        let candidates = SwingStage.pStages.enumerated().compactMap {
+            index, stage -> (stage: SwingStage, distance: Double, index: Int)? in
+            guard let marker = keyframes.first(where: { $0.stage == stage.rawValue }),
+                  marker.time.isFinite else {
+                return nil
+            }
+            return (stage, abs(currentTime - marker.time), index)
+        }
+
+        guard let nearest = candidates.min(by: { left, right in
+            if abs(left.distance - right.distance) <= 0.000_000_001 {
+                return left.index < right.index
+            }
+            return left.distance < right.distance
+        }), nearest.distance <= tolerance else {
+            return nil
+        }
+        return nearest.stage
+    }
 }
 
 enum FullscreenReplayTap: Equatable {

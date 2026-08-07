@@ -210,13 +210,7 @@ enum MediaExportService {
         switch drawing.tool {
         case .circle:
             let second = points.dropFirst().first ?? first
-            let rect = CGRect(
-                x: min(first.x, second.x),
-                y: min(first.y, second.y),
-                width: abs(second.x - first.x),
-                height: abs(second.y - first.y)
-            )
-            path.append(UIBezierPath(ovalIn: rect))
+            path.append(UIBezierPath(ovalIn: DrawingCircleGeometry.bounds(center: first, edge: second)))
         case .angle:
             path.move(to: first)
             for point in points.dropFirst() { path.addLine(to: point) }

@@ -3,6 +3,7 @@ import Foundation
 @main
 struct SwingTemporalEvidenceSmoke {
     static func main() {
+        verifyRawPoseIsPreserved()
         verifyFrameRateInvariantBoundaries()
         verifyBoundaryAdjacentNoiseDoesNotMoveBoundaries()
         verifyBoundaryAdjacentWrongDirectionDoesNotMoveBoundaries()
@@ -17,6 +18,53 @@ struct SwingTemporalEvidenceSmoke {
         verifyHorizontalFollowThroughPlateau()
         verifyPostImpactPlateauToleratesFutureVisionNoise()
         verifySupportingTemporalEvidence()
+    }
+
+    private static func verifyRawPoseIsPreserved() {
+        let raw = pose(wristX: 0.20)
+        let tracked = pose(wristX: 0.30)
+        let evidence = SwingFeatureExtractor.extract(frames: [
+            SwingFrameSample(
+                sourceFrameIndex: 101,
+                time: 1.0,
+                pose: tracked,
+                rawPose: raw,
+                objectEvidence: .empty
+            )
+        ])
+        precondition(evidence.first?.sourceFrameIndex == 101)
+        precondition(evidence.first?.pose?.leftWrist?.x == 0.30)
+        precondition(evidence.first?.rawPose?.leftWrist?.x == 0.20)
+
+        let predictedOnly = SwingFeatureExtractor.extract(frames: [
+            SwingFrameSample(
+                sourceFrameIndex: 102,
+                time: 1.1,
+                pose: tracked,
+                rawPose: nil,
+                objectEvidence: .empty
+            )
+        ])
+        precondition(predictedOnly.first?.pose != nil)
+        precondition(predictedOnly.first?.rawPose == nil)
+    }
+
+    private static func pose(wristX: CGFloat) -> SwingPoseSample {
+        SwingPoseSample(
+            time: 1.0,
+            leftWrist: CGPoint(x: wristX, y: 0.4),
+            rightWrist: nil,
+            leftElbow: CGPoint(x: 0.3, y: 0.35),
+            rightElbow: nil,
+            leftShoulder: CGPoint(x: 0.4, y: 0.3),
+            rightShoulder: CGPoint(x: 0.6, y: 0.3),
+            leftHip: CGPoint(x: 0.45, y: 0.6),
+            rightHip: CGPoint(x: 0.55, y: 0.6),
+            head: CGPoint(x: 0.5, y: 0.15),
+            spineAngle: 0,
+            aggregateConfidence: 0.9,
+            sourceFrameIndex: 101
+        )
     }
 
     private static func verifyTopPlateauEndsAtLastNearStationaryFrame() {

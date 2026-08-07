@@ -590,6 +590,9 @@ struct SwingVideoAnalysisOutput: Equatable {
     let sourceFrameRate: Double
     let elapsedSeconds: Double
     let trackingDiagnostics: PrimaryGolferTrackingDiagnostics
+    /// Fine-frame observations after body and available golf-object points
+    /// have been merged and temporally tracked. Point state and source remain.
+    let observationFrames: [SwingFrameObservation]
 
     init(
         result: SwingAnalysisResult,
@@ -598,7 +601,8 @@ struct SwingVideoAnalysisOutput: Equatable {
         adaptiveWindow: SwingWindow,
         sourceFrameRate: Double,
         elapsedSeconds: Double,
-        trackingDiagnostics: PrimaryGolferTrackingDiagnostics = .init()
+        trackingDiagnostics: PrimaryGolferTrackingDiagnostics = .init(),
+        observationFrames: [SwingFrameObservation] = []
     ) {
         self.result = result
         self.poseSamples = poseSamples
@@ -607,6 +611,7 @@ struct SwingVideoAnalysisOutput: Equatable {
         self.sourceFrameRate = sourceFrameRate
         self.elapsedSeconds = elapsedSeconds
         self.trackingDiagnostics = trackingDiagnostics
+        self.observationFrames = observationFrames
     }
 }
 
@@ -767,8 +772,13 @@ final class FineFrameImageCache {
 final class SwingVideoAnalysisEngine: @unchecked Sendable {
     typealias ProgressHandler = @Sendable (SwingAnalysisProgressUpdate) -> Void
 
+    private let motionBlurDisposition: SwingMotionBlurDisposition
     private let diagnosticsLock = NSLock()
     private var storedTrackingDiagnostics = PrimaryGolferTrackingDiagnostics()
+
+    init(motionBlurDisposition: SwingMotionBlurDisposition = .warning) {
+        self.motionBlurDisposition = motionBlurDisposition
+    }
 
     var latestTrackingDiagnostics: PrimaryGolferTrackingDiagnostics {
         diagnosticsLock.lock()
@@ -853,12 +863,28 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         guard let videoTrack = asset.tracks(withMediaType: .video).first else {
             return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)
         }
-        let nominalFrameRate = Double(videoTrack.nominalFrameRate)
-        guard nominalFrameRate.isFinite, nominalFrameRate > 0 else {
+        let metadataFrameRate = Double(videoTrack.nominalFrameRate)
+        guard metadataFrameRate.isFinite, metadataFrameRate > 0 else {
             return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)
         }
+        let sourceFrameTimeline: SourceFrameTimeline?
+        if SourceFrameTimelineLoadingPolicy.canUseConstantTimeline(
+            metadataFrameRate: metadataFrameRate
+        ) {
+            sourceFrameTimeline = SourceFrameTimeline(
+                duration: duration,
+                constantFrameRate: metadataFrameRate
+            )
+        } else {
+            sourceFrameTimeline = try? ExactVideoFrameProvider.load(url: url).timeline
+        }
+        guard let sourceFrameTimeline else {
+            return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)
+        }
+        let sourceFrameRate = sourceFrameTimeline.averageFrameRate
+            ?? metadataFrameRate
         guard let decodeTolerance = FrameExtractionTolerancePolicy.halfFrameTime(
-            sourceFrameRate: nominalFrameRate
+            sourceFrameRate: sourceFrameRate
         ) else {
             return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)
         }
@@ -880,22 +906,19 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             min(coarseScanWindow.endTime, coarseScanWindow.startTime + $0)
         }
         var coarseSamples: [CoarseSwingSample] = []
-        let maximumSourceFrameIndex = SourceFrameBounds.maximumSourceFrameIndex(
-            duration: duration,
-            sourceFrameRate: nominalFrameRate
-        )
+        var coarseQualityFrames: [(time: Double, frame: SwingInputQualityFrame)] = []
         publish(.locating, progress: 0, runID: runID, gate: gate, handler: progress)
 
         for (index, seconds) in coarseTimes.enumerated() {
             guard gate.isActive(runID) else { return .cancelled }
-            let requestedSourceFrameIndex = min(
-                maximumSourceFrameIndex,
-                max(0, Int((seconds * nominalFrameRate).rounded()))
-            )
-            let sample: CoarseSwingSample? = autoreleasepool {
+            guard let requestedSourceFrameIndex = sourceFrameTimeline
+                .nearestSourceFrameIndex(at: seconds) else {
+                return activeFrameExtractionFailure(runID: runID, gate: gate)
+            }
+            let extraction: (sample: CoarseSwingSample, quality: SwingInputQualityFrame)? = autoreleasepool {
                 guard let requestedTime = FrameExtractionTolerancePolicy.decodeRequestTime(
                     sourceFrameIndex: requestedSourceFrameIndex,
-                    sourceFrameRate: nominalFrameRate
+                    sourceFrameTimeline: sourceFrameTimeline
                 ) else { return nil }
                 var actualTime = CMTime.invalid
                 guard let image = try? generator.copyCGImage(
@@ -904,10 +927,9 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 ),
                 actualTime.isValid,
                 actualTime.seconds.isFinite,
-                case .matched = SourceFrameMatchPolicy.validate(
+                sourceFrameTimeline.matches(
                     requestedSourceFrameIndex: requestedSourceFrameIndex,
-                    actualTime: actualTime.seconds,
-                    sourceFrameRate: nominalFrameRate
+                    actualTime: actualTime
                 ) else { return nil }
                 let actualSeconds = actualTime.seconds
                 let selectedPose = trackedPoseDetector.selectPose(
@@ -915,15 +937,56 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                     time: actualSeconds,
                     recordsCoreAnchorCandidate: true
                 )
-                return CoarseSwingSample(
-                    time: actualSeconds,
-                    pose: selectedPose.map { SwingPoseSample(time: actualSeconds, pose: $0) }
+                let subjectCenter = selectedPose.flatMap { pose -> SwingInputQualityPoint? in
+                    let center: CGPoint?
+                    if let shoulder = pose.shoulderMid, let hip = pose.hipMid {
+                        center = CGPoint(
+                            x: (shoulder.x + hip.x) / 2,
+                            y: (shoulder.y + hip.y) / 2
+                        )
+                    } else {
+                        center = pose.hipMid ?? pose.shoulderMid
+                    }
+                    return center.map {
+                        SwingInputQualityPoint(x: Double($0.x), y: Double($0.y))
+                    }
+                }
+                let luminance = SwingInputQualityEvaluator.luminanceGrid(from: image)
+                let blurScore = luminance.map {
+                    SwingInputQualityEvaluator.blurScore(
+                        luminance: $0.values,
+                        width: $0.width,
+                        height: $0.height
+                    )
+                } ?? 0
+                return (
+                    sample: CoarseSwingSample(
+                        time: actualSeconds,
+                        pose: selectedPose.map {
+                            SwingPoseSample(
+                                time: actualSeconds,
+                                sourceFrameIndex: requestedSourceFrameIndex,
+                                pose: $0
+                            )
+                        }
+                    ),
+                    quality: SwingInputQualityFrame(
+                        poseDetected: selectedPose != nil,
+                        fullBodyVisible: selectedPose.map {
+                            SwingInputQualityEvaluator.isFullBodyVisible(
+                                landmarks: Set($0.keypoints.keys)
+                            )
+                        } ?? false,
+                        subjectCenter: subjectCenter,
+                        blurScore: blurScore
+                    )
                 )
             }
-            guard let sample else {
+            guard let extraction else {
                 return activeFrameExtractionFailure(runID: runID, gate: gate)
             }
-            coarseSamples.append(sample)
+            coarseSamples.append(extraction.sample)
+            coarseQualityFrames.append((extraction.sample.time, extraction.quality))
             publish(
                 .locating,
                 progress: Double(index + 1) / Double(max(1, coarseTimes.count)) * 0.20,
@@ -942,6 +1005,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             samples: coarseSamples,
             sourceDuration: duration
         )
+        var requiresFullCoarseFallback = false
         if candidateWindow == nil {
             let rankedAttempts = SwingAttemptSelectionPolicy.rankedAttempts(
                 in: attempts,
@@ -949,11 +1013,11 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             )
             if !rankedAttempts.isEmpty {
                 shouldStoreLocalDiagnostics = false
-                var firstFailure: AnalysisFailure?
-                var firstFailureDiagnostics: PrimaryGolferTrackingDiagnostics?
-                for attempt in rankedAttempts {
+                candidateAnalysis: for attempt in rankedAttempts {
                     guard gate.isActive(runID) else { return .cancelled }
-                    let candidateEngine = SwingVideoAnalysisEngine()
+                    let candidateEngine = SwingVideoAnalysisEngine(
+                        motionBlurDisposition: motionBlurDisposition
+                    )
                     let outcome = candidateEngine.analyze(
                         url: url,
                         runID: runID,
@@ -965,37 +1029,66 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                         progress: progress
                     )
                     switch outcome {
-                    case .completed, .cancelled:
+                    case let .completed(output):
+                        guard CandidateAttemptAcceptancePolicy.hasUsableStages(
+                            output.result
+                        ) else {
+                            requiresFullCoarseFallback = true
+                            break candidateAnalysis
+                        }
                         storeTrackingDiagnostics(candidateEngine.latestTrackingDiagnostics)
                         return outcome
-                    case let .failed(failure):
-                        if firstFailure == nil {
-                            firstFailure = failure
-                            firstFailureDiagnostics = candidateEngine.latestTrackingDiagnostics
-                        }
+                    case .cancelled:
+                        return outcome
+                    case .failed:
+                        continue
                     }
                 }
-                if let firstFailureDiagnostics {
-                    storeTrackingDiagnostics(firstFailureDiagnostics)
-                }
-                return activeFailure(
-                    firstFailure ?? .noSwingMotion,
-                    runID: runID,
-                    gate: gate
-                )
+                // A segmented sub-window that completes with zero P points is
+                // not a usable success. Reuse this already-decoded full coarse
+                // Vision pass below; do not rescan every partial slow-motion
+                // segment or discard the complete body motion.
+                shouldStoreLocalDiagnostics = true
             }
         }
-        let coreSamples: [CoarseSwingSample]
-        if candidateWindow == nil,
-           let preferredAttempt = SwingAttemptSelectionPolicy.preferredAttempt(
-            in: attempts,
-            samples: coarseSamples
-        ) {
-            coreSamples = coarseSamples.filter {
-                $0.time >= preferredAttempt.startTime && $0.time <= preferredAttempt.endTime
-            }
+        let preferredAttempt: SwingAttempt?
+        if candidateWindow == nil {
+            preferredAttempt = SwingAttemptSelectionPolicy.preferredAttempt(
+                in: attempts,
+                samples: coarseSamples
+            )
         } else {
-            coreSamples = coarseSamples
+            preferredAttempt = nil
+        }
+        let coreSamples = CoarseFallbackSelectionPolicy.samples(
+            all: coarseSamples,
+            preferredAttempt: preferredAttempt,
+            requiresFullSequence: requiresFullCoarseFallback
+        )
+        let coarseFallbackPoseSamples = coreSamples.compactMap(\.pose)
+
+        let qualityStartTime = coreSamples.first?.time ?? coarseScanWindow.startTime
+        let qualityEndTime = coreSamples.last?.time ?? coarseScanWindow.endTime
+        let qualityFrames: [SwingInputQualityFrame] = coarseQualityFrames.compactMap {
+            sample -> SwingInputQualityFrame? in
+            guard sample.time >= qualityStartTime,
+                  sample.time <= qualityEndTime else { return nil }
+            return sample.frame
+        }
+        let qualitySignals = SwingInputQualityEvaluator.summarize(
+            frames: qualityFrames,
+            clubCoverage: nil
+        )
+        let qualityReport = SwingInputQualityEvaluator.evaluate(
+            qualitySignals,
+            motionBlurDisposition: motionBlurDisposition
+        )
+        guard qualityReport.isSupported else {
+            return activeFailure(
+                .unsupportedInput(qualityReport.blockingIssues),
+                runID: runID,
+                gate: gate
+            )
         }
 
         let core: SwingCore
@@ -1011,25 +1104,52 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         var window = AdaptiveSwingWindowPlanner.initialWindow(core: core, duration: duration)
         var samplesByFrame: [Int: SwingFrameSample] = [:]
         var rawPosesByFrame: [Int: PoseEstimationResult] = [:]
+        var rawBodyFramesBySourceFrame: [Int: SwingFrameObservation] = [:]
+        var trackedBodyFrames: [SwingFrameObservation] = []
         var finalTimeline: [SwingTemporalFrame] = []
         var windowSearchState = AdaptiveWindowSearchState()
         let fineDecodeLedger = AdaptiveFineDecodeLedger()
-        let maximumFrameBudget = adaptiveFrameBudget(sourceFrameRate: nominalFrameRate)
+        let maximumFrameBudget = adaptiveFrameBudget(sourceFrameRate: sourceFrameRate)
         let fineFrameImageCache = FineFrameImageCache(
-            maximumEntryCount: adaptiveFrameCacheBudget(sourceFrameRate: nominalFrameRate)
+            maximumEntryCount: adaptiveFrameCacheBudget(sourceFrameRate: sourceFrameRate)
         )
+        func bodyOnlyCompletion(
+            frames: [SwingFrameSample],
+            observationFrames: [SwingFrameObservation],
+            timeline: [SwingTemporalFrame]
+        ) -> SwingVideoAnalysisOutcome {
+            publish(.solving, progress: 1, runID: runID, gate: gate, handler: progress)
+            return activeCompletedAnalysis(
+                strictResult: ConstrainedSwingPathSolver.solve(
+                    candidateSets: [],
+                    timeline: timeline
+                ),
+                frames: frames,
+                supplementalPoseSamples: coarseFallbackPoseSamples,
+                observationFrames: observationFrames,
+                timeline: timeline,
+                window: window,
+                sourceFrameRate: sourceFrameRate,
+                startedAt: startedAt,
+                trackedPoseDetector: trackedPoseDetector,
+                runID: runID,
+                gate: gate
+            )
+        }
         publish(.expanding, progress: 0.20, runID: runID, gate: gate, handler: progress)
 
         adaptiveExtraction: while gate.isActive(runID) {
             let references = FineSwingSamplingPlan.frames(
                 window: window,
-                sourceFrameRate: nominalFrameRate,
-                duration: duration,
-                maximumSourceFrameIndex: maximumSourceFrameIndex
+                sourceFrameTimeline: sourceFrameTimeline
             ).filter { samplesByFrame[$0.sourceFrameIndex] == nil }
 
             guard !references.isEmpty || !samplesByFrame.isEmpty else {
-                return activeFrameExtractionFailure(runID: runID, gate: gate)
+                return bodyOnlyCompletion(
+                    frames: [],
+                    observationFrames: [],
+                    timeline: []
+                )
             }
             for reference in references {
                 guard gate.isActive(runID) else { return .cancelled }
@@ -1037,16 +1157,29 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                     reference: reference,
                     generator: generator,
                     detector: trackedPoseDetector,
-                    sourceFrameRate: nominalFrameRate,
+                    sourceFrameTimeline: sourceFrameTimeline,
                     frameImageCache: fineFrameImageCache,
                     decodeLedger: fineDecodeLedger
                 ) else {
-                    return activeFrameExtractionFailure(runID: runID, gate: gate)
+                    let availableFrames = samplesByFrame.values.sorted {
+                        $0.sourceFrameIndex < $1.sourceFrameIndex
+                    }
+                    return bodyOnlyCompletion(
+                        frames: availableFrames,
+                        observationFrames: trackedBodyFrames,
+                        timeline: finalTimeline
+                    )
                 }
                 samplesByFrame[extraction.sample.sourceFrameIndex] = extraction.sample
                 if let rawPose = extraction.rawPose {
                     rawPosesByFrame[extraction.sample.sourceFrameIndex] = rawPose
                 }
+                rawBodyFramesBySourceFrame[extraction.sample.sourceFrameIndex] =
+                    SwingPoseObservationAdapter.frame(
+                        pose: extraction.rawPose,
+                        sourceFrameIndex: extraction.sample.sourceFrameIndex,
+                        time: extraction.sample.time
+                    )
                 publish(
                     .expanding,
                     progress: SwingVideoAnalysisProgressPolicy.expansionProgress(
@@ -1059,6 +1192,25 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 )
             }
 
+            trackedBodyFrames = SwingTrajectoryTracker.track(
+                Array(rawBodyFramesBySourceFrame.values),
+                maximumPredictionFrames: 2
+            )
+            samplesByFrame = Dictionary(uniqueKeysWithValues: trackedBodyFrames.map { bodyFrame in
+                let rawFrame = rawBodyFramesBySourceFrame[bodyFrame.sourceFrameIndex]
+                let existingObjects = samplesByFrame[bodyFrame.sourceFrameIndex]?.objectEvidence
+                    ?? .empty
+                return (
+                    bodyFrame.sourceFrameIndex,
+                    SwingFrameSample(
+                        sourceFrameIndex: bodyFrame.sourceFrameIndex,
+                        time: bodyFrame.time,
+                        pose: SwingPoseObservationAdapter.poseSample(from: bodyFrame),
+                        rawPose: rawFrame.flatMap(SwingPoseObservationAdapter.poseSample(from:)),
+                        objectEvidence: existingObjects
+                    )
+                )
+            })
             let frames = samplesByFrame.values.sorted {
                 $0.sourceFrameIndex < $1.sourceFrameIndex
             }
@@ -1074,9 +1226,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             case let .expand(next):
                 let retainedSourceFrames = Set(FineSwingSamplingPlan.frames(
                     window: next,
-                    sourceFrameRate: nominalFrameRate,
-                    duration: duration,
-                    maximumSourceFrameIndex: maximumSourceFrameIndex
+                    sourceFrameTimeline: sourceFrameTimeline
                 ).map(\.sourceFrameIndex))
                 samplesByFrame = samplesByFrame.filter {
                     retainedSourceFrames.contains($0.key)
@@ -1084,12 +1234,50 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 rawPosesByFrame = rawPosesByFrame.filter {
                     retainedSourceFrames.contains($0.key)
                 }
+                rawBodyFramesBySourceFrame = rawBodyFramesBySourceFrame.filter {
+                    retainedSourceFrames.contains($0.key)
+                }
+                trackedBodyFrames = trackedBodyFrames.filter {
+                    retainedSourceFrames.contains($0.sourceFrameIndex)
+                }
                 fineFrameImageCache.retainSourceFrames(retainedSourceFrames)
                 window = next
             case let .ready(readyWindow):
                 window = readyWindow
                 break adaptiveExtraction
             case let .failed(reason):
+                let fallbackFrames = samplesByFrame.values.sorted {
+                    $0.sourceFrameIndex < $1.sourceFrameIndex
+                }
+                let availablePoseSamples = ProductAnalysisFallback.mergedPoseSamples(
+                    primary: fallbackFrames.compactMap(\.pose),
+                    supplemental: coarseFallbackPoseSamples
+                )
+                if availablePoseSamples.count >= SwingStage.pStages.count {
+                    publish(
+                        .solving,
+                        progress: 1,
+                        runID: runID,
+                        gate: gate,
+                        handler: progress
+                    )
+                    return activeCompletedAnalysis(
+                        strictResult: ConstrainedSwingPathSolver.solve(
+                            candidateSets: [],
+                            timeline: finalTimeline
+                        ),
+                        frames: fallbackFrames,
+                        supplementalPoseSamples: coarseFallbackPoseSamples,
+                        observationFrames: trackedBodyFrames,
+                        timeline: finalTimeline,
+                        window: window,
+                        sourceFrameRate: sourceFrameRate,
+                        startedAt: startedAt,
+                        trackedPoseDetector: trackedPoseDetector,
+                        runID: runID,
+                        gate: gate
+                    )
+                }
                 return activeFailure(reason, runID: runID, gate: gate)
             }
         }
@@ -1099,21 +1287,48 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             $0.sourceFrameIndex < $1.sourceFrameIndex
         }
         guard !fineFrames.isEmpty else {
-            return activeFrameExtractionFailure(runID: runID, gate: gate)
+            return bodyOnlyCompletion(
+                frames: [],
+                observationFrames: trackedBodyFrames,
+                timeline: finalTimeline
+            )
         }
         guard fineFrames.filter({ $0.pose != nil }).count >= SwingStage.allCases.count else {
-            return activeFailure(.noStableGolfer, runID: runID, gate: gate)
+            guard coarseFallbackPoseSamples.count >= SwingStage.pStages.count else {
+                return activeFailure(.noStableGolfer, runID: runID, gate: gate)
+            }
+            return bodyOnlyCompletion(
+                frames: fineFrames,
+                observationFrames: trackedBodyFrames,
+                timeline: finalTimeline
+            )
         }
 
         // Resolve candidate neighborhoods only from the body timeline. Object
         // evidence is then extracted sparsely and merged before the final solve.
         let bodyHasTopTransition = finalTimeline.contains(where: \.isTopPlateauEnd)
         let bodyImpactCandidates = ImpactCorridorResolver.candidates(in: finalTimeline)
-        if let failure = SwingVideoAnalysisValidationPolicy.transitionFailure(
+        if SwingVideoAnalysisValidationPolicy.transitionFailure(
             hasTopTransition: bodyHasTopTransition,
             hasImpactCandidates: !bodyImpactCandidates.isEmpty
-        ) {
-            return activeFailure(failure, runID: runID, gate: gate)
+        ) != nil {
+            publish(.solving, progress: 1, runID: runID, gate: gate, handler: progress)
+            return activeCompletedAnalysis(
+                strictResult: ConstrainedSwingPathSolver.solve(
+                    candidateSets: [],
+                    timeline: finalTimeline
+                ),
+                frames: fineFrames,
+                supplementalPoseSamples: coarseFallbackPoseSamples,
+                observationFrames: trackedBodyFrames,
+                timeline: finalTimeline,
+                window: window,
+                sourceFrameRate: sourceFrameRate,
+                startedAt: startedAt,
+                trackedPoseDetector: trackedPoseDetector,
+                runID: runID,
+                gate: gate
+            )
         }
         let bodyCandidates = bodyImpactCandidates.flatMap { impact in
             let candidates = BidirectionalStageCandidateResolver.objectSamplingCandidates(
@@ -1130,7 +1345,23 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 .flatMap { candidates.candidates(for: $0) }
         }
         guard !bodyCandidates.isEmpty else {
-            return activeFailure(.noImpactCorridor, runID: runID, gate: gate)
+            publish(.solving, progress: 1, runID: runID, gate: gate, handler: progress)
+            return activeCompletedAnalysis(
+                strictResult: ConstrainedSwingPathSolver.solve(
+                    candidateSets: [],
+                    timeline: finalTimeline
+                ),
+                frames: fineFrames,
+                supplementalPoseSamples: coarseFallbackPoseSamples,
+                observationFrames: trackedBodyFrames,
+                timeline: finalTimeline,
+                window: window,
+                sourceFrameRate: sourceFrameRate,
+                startedAt: startedAt,
+                trackedPoseDetector: trackedPoseDetector,
+                runID: runID,
+                gate: gate
+            )
         }
 
         let fineReferences = fineFrames.map {
@@ -1142,6 +1373,11 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         )
         let objectDetector = SwingObjectDetector()
         var objectEvidenceByFrame: [Int: SwingObjectEvidence] = [:]
+        var rawGolfObservationByFrame: [Int: GolfObjectObservation] = [:]
+        let promotedGolfProvider = Bundle.main.url(
+            forResource: "GolfKeypoints",
+            withExtension: "mlmodelc"
+        ).flatMap { try? CoreMLGolfObjectDetector(modelURL: $0) }
         publish(.evidence, progress: 0.70, runID: runID, gate: gate, handler: progress)
 
         for (index, reference) in objectReferences.enumerated() {
@@ -1149,7 +1385,11 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             guard let image = fineFrameImageCache.contourImage(
                 sourceFrameIndex: reference.sourceFrameIndex
             ) else {
-                return activeFrameExtractionFailure(runID: runID, gate: gate)
+                return bodyOnlyCompletion(
+                    frames: fineFrames,
+                    observationFrames: trackedBodyFrames,
+                    timeline: finalTimeline
+                )
             }
             let detected: SwingObjectEvidence = autoreleasepool {
                 objectDetector.detect(
@@ -1159,6 +1399,19 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 )
             }
             objectEvidenceByFrame[reference.sourceFrameIndex] = detected
+            let contourObservation = ContourGolfObjectObservationAdapter.observation(
+                from: detected
+            )
+            var mergedPoints = contourObservation.points
+            if let promotedGolfProvider,
+               let promotedObservation = try? promotedGolfProvider.observe(
+                    image: image,
+                    pose: rawPosesByFrame[reference.sourceFrameIndex]
+               ) {
+                mergedPoints.merge(promotedObservation.points) { _, promoted in promoted }
+            }
+            rawGolfObservationByFrame[reference.sourceFrameIndex] =
+                GolfObjectObservation(points: mergedPoints)
             publish(
                 .evidence,
                 progress: SwingVideoAnalysisProgressPolicy.evidenceProgress(
@@ -1172,24 +1425,52 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         }
 
         let stableBall = objectDetector.stableBall?.center
+        var golfTracker = GolfObjectTrajectoryTracker(maximumPredictionFrames: 2)
+        let trackedGolfFrames = fineFrames.map { frame in
+            golfTracker.update(
+                observation: rawGolfObservationByFrame[frame.sourceFrameIndex] ?? .empty,
+                sourceFrameIndex: frame.sourceFrameIndex,
+                time: frame.time
+            )
+        }
+        let trackedGolfByFrame = Dictionary(uniqueKeysWithValues: trackedGolfFrames.map {
+            ($0.sourceFrameIndex, $0)
+        })
         let mergedFrames = fineFrames.map { frame in
             let detected = objectEvidenceByFrame[frame.sourceFrameIndex] ?? .empty
-            let mergedObjects: SwingObjectEvidence
-            if detected.stableBall == nil, let stableBall {
-                mergedObjects = SwingObjectEvidence(
-                    shaft: detected.shaft,
-                    ball: detected.ball,
-                    stableBall: stableBall,
-                    ballLocalChange: detected.ballLocalChange
+            let tracked = trackedGolfByFrame[frame.sourceFrameIndex]
+                ?? SwingFrameObservation(
+                    sourceFrameIndex: frame.sourceFrameIndex,
+                    time: frame.time,
+                    landmarks: [:]
                 )
-            } else {
-                mergedObjects = detected
-            }
+            let mergedObjects = TrackedGolfObjectEvidenceAdapter.evidence(
+                from: tracked,
+                stableBall: detected.stableBall ?? stableBall,
+                ballLocalChange: detected.ballLocalChange
+            )
             return SwingFrameSample(
                 sourceFrameIndex: frame.sourceFrameIndex,
                 time: frame.time,
                 pose: frame.pose,
+                rawPose: frame.rawPose,
                 objectEvidence: mergedObjects
+            )
+        }
+        trackedBodyFrames = trackedBodyFrames.map { bodyFrame in
+            guard let golfFrame = trackedGolfByFrame[bodyFrame.sourceFrameIndex] else {
+                return bodyFrame
+            }
+            let rawGolf = rawGolfObservationByFrame[bodyFrame.sourceFrameIndex]?.points ?? [:]
+            var landmarks = bodyFrame.landmarks
+            landmarks.merge(golfFrame.landmarks) { _, golf in golf }
+            var rawLandmarks = bodyFrame.rawLandmarks
+            rawLandmarks.merge(rawGolf) { _, golf in golf }
+            return SwingFrameObservation(
+                sourceFrameIndex: bodyFrame.sourceFrameIndex,
+                time: bodyFrame.time,
+                landmarks: landmarks,
+                rawLandmarks: rawLandmarks
             )
         }
         finalTimeline = SwingEvidenceTimeline.build(
@@ -1197,11 +1478,27 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         )
 
         let impactCandidates = ImpactCorridorResolver.candidates(in: finalTimeline)
-        if let failure = SwingVideoAnalysisValidationPolicy.transitionFailure(
+        if SwingVideoAnalysisValidationPolicy.transitionFailure(
             hasTopTransition: finalTimeline.contains(where: \.isTopPlateauEnd),
             hasImpactCandidates: !impactCandidates.isEmpty
-        ) {
-            return activeFailure(failure, runID: runID, gate: gate)
+        ) != nil {
+            publish(.solving, progress: 1, runID: runID, gate: gate, handler: progress)
+            return activeCompletedAnalysis(
+                strictResult: ConstrainedSwingPathSolver.solve(
+                    candidateSets: [],
+                    timeline: finalTimeline
+                ),
+                frames: mergedFrames,
+                supplementalPoseSamples: coarseFallbackPoseSamples,
+                observationFrames: trackedBodyFrames,
+                timeline: finalTimeline,
+                window: window,
+                sourceFrameRate: sourceFrameRate,
+                startedAt: startedAt,
+                trackedPoseDetector: trackedPoseDetector,
+                runID: runID,
+                gate: gate
+            )
         }
 
         publish(.solving, progress: 0.95, runID: runID, gate: gate, handler: progress)
@@ -1216,29 +1513,27 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             timeline: finalTimeline
         )
         guard gate.isActive(runID) else { return .cancelled }
-        guard !result.detectedMarkers.isEmpty else {
-            return activeFailure(.insufficientPoseEvidence, runID: runID, gate: gate)
-        }
         publish(.solving, progress: 1, runID: runID, gate: gate, handler: progress)
-        guard gate.isActive(runID) else { return .cancelled }
-        return .completed(SwingVideoAnalysisOutput(
-            result: result,
-            poseSamples: mergedFrames.compactMap(\.pose),
-            leadArm: finalTimeline
-                .map(\.frame.leadArm)
-                .first(where: { $0 != .unknown }) ?? .unknown,
-            adaptiveWindow: window,
-            sourceFrameRate: nominalFrameRate,
-            elapsedSeconds: ProcessInfo.processInfo.systemUptime - startedAt,
-            trackingDiagnostics: trackedPoseDetector.diagnostics
-        ))
+        return activeCompletedAnalysis(
+            strictResult: result,
+            frames: mergedFrames,
+            supplementalPoseSamples: coarseFallbackPoseSamples,
+            observationFrames: trackedBodyFrames,
+            timeline: finalTimeline,
+            window: window,
+            sourceFrameRate: sourceFrameRate,
+            startedAt: startedAt,
+            trackedPoseDetector: trackedPoseDetector,
+            runID: runID,
+            gate: gate
+        )
     }
 
     private func extractPoseSample(
         reference: FineFrameReference,
         generator: AVAssetImageGenerator,
         detector: TrackedPoseDetector,
-        sourceFrameRate: Double,
+        sourceFrameTimeline: SourceFrameTimeline,
         frameImageCache: FineFrameImageCache,
         decodeLedger: AdaptiveFineDecodeLedger
     ) -> PoseFrameExtraction? {
@@ -1251,7 +1546,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 ) else { return nil }
                 guard let requestedTime = FrameExtractionTolerancePolicy.decodeRequestTime(
                     sourceFrameIndex: reference.sourceFrameIndex,
-                    sourceFrameRate: sourceFrameRate
+                    sourceFrameTimeline: sourceFrameTimeline
                 ) else { return nil }
                 var actualTime = CMTime.invalid
                 guard let image = try? generator.copyCGImage(
@@ -1260,13 +1555,12 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 ),
                 actualTime.isValid,
                 actualTime.seconds.isFinite,
-                case let .matched(matchedSourceFrameIndex) = SourceFrameMatchPolicy.validate(
+                sourceFrameTimeline.matches(
                     requestedSourceFrameIndex: reference.sourceFrameIndex,
-                    actualTime: actualTime.seconds,
-                    sourceFrameRate: sourceFrameRate
+                    actualTime: actualTime
                 ) else { return nil }
                 observedTime = actualTime.seconds
-                observedSourceFrameIndex = matchedSourceFrameIndex
+                observedSourceFrameIndex = reference.sourceFrameIndex
                 return image
             }
             guard case let .decoded(image) = load,
@@ -1342,6 +1636,42 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             evidenceFailure: nil
         ) ?? .frameExtractionFailed
         return activeFailure(failure, runID: runID, gate: gate)
+    }
+
+    private func activeCompletedAnalysis(
+        strictResult: SwingAnalysisResult,
+        frames: [SwingFrameSample],
+        supplementalPoseSamples: [SwingPoseSample],
+        observationFrames: [SwingFrameObservation],
+        timeline: [SwingTemporalFrame],
+        window: SwingWindow,
+        sourceFrameRate: Double,
+        startedAt: TimeInterval,
+        trackedPoseDetector: TrackedPoseDetector,
+        runID: UUID,
+        gate: AnalysisRunGate
+    ) -> SwingVideoAnalysisOutcome {
+        guard gate.isActive(runID) else { return .cancelled }
+        let poseSamples = ProductAnalysisFallback.mergedPoseSamples(
+            primary: frames.compactMap(\.pose),
+            supplemental: supplementalPoseSamples
+        )
+        let result = ProductAnalysisFallback.resolve(
+            strictResult: strictResult,
+            poseSamples: poseSamples
+        )
+        return .completed(SwingVideoAnalysisOutput(
+            result: result,
+            poseSamples: poseSamples,
+            leadArm: timeline
+                .map(\.frame.leadArm)
+                .first(where: { $0 != .unknown }) ?? .unknown,
+            adaptiveWindow: window,
+            sourceFrameRate: sourceFrameRate,
+            elapsedSeconds: ProcessInfo.processInfo.systemUptime - startedAt,
+            trackingDiagnostics: trackedPoseDetector.diagnostics,
+            observationFrames: observationFrames
+        ))
     }
 
     private func publish(

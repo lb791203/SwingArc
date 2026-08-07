@@ -107,10 +107,13 @@ struct BidirectionalStageSolverSmoke {
             timeline: objectlessTimeline
         )
         let objectlessImpact = detection(.impact, in: objectlessResult)
-        precondition(objectlessImpact.sourceFrameIndex == 300)
-        precondition(objectlessImpact.status == .lowConfidence)
+        precondition(objectlessImpact.sourceFrameIndex == nil)
+        precondition(objectlessImpact.status == .unresolved)
         precondition(!objectlessImpact.hasClubEvidence)
         precondition(!objectlessImpact.hasBallEvidence)
+        precondition(objectlessResult.detections.filter { $0.stage != .impact }.allSatisfy {
+            $0.status != .unresolved
+        })
 
         let noAddressTimeline = timeline.map { temporal in
             SwingTemporalFrame(
@@ -189,7 +192,9 @@ struct BidirectionalStageSolverSmoke {
             impactFrame: 300,
             timeline: missingDeliveryTimeline
         )
-        precondition(missingDeliverySet.candidates(for: .shaftParallelDownswing).isEmpty)
+        precondition(missingDeliverySet.candidates(for: .shaftParallelDownswing).allSatisfy {
+            $0.maximumStatus == .unresolved && !$0.hasClubEvidence
+        })
         let missingDelivery = ConstrainedSwingPathSolver.solve(
             candidateSets: [missingDeliverySet],
             timeline: missingDeliveryTimeline
@@ -198,6 +203,9 @@ struct BidirectionalStageSolverSmoke {
             detection(.shaftParallelDownswing, in: missingDelivery).status == .unresolved,
             "P6 cannot be fabricated from arm or impact evidence when the shaft is absent"
         )
+        precondition(missingDelivery.detections.filter {
+            $0.stage != .shaftParallelDownswing
+        }.allSatisfy { $0.status != .unresolved })
 
         let missingReleaseTimeline = SwingEvidenceTimeline.build(from: fixture(
             includeImpactObjects: true,
@@ -207,7 +215,9 @@ struct BidirectionalStageSolverSmoke {
             impactFrame: 300,
             timeline: missingReleaseTimeline
         )
-        precondition(missingReleaseSet.candidates(for: .followThrough).isEmpty)
+        precondition(missingReleaseSet.candidates(for: .followThrough).allSatisfy {
+            $0.maximumStatus == .unresolved && !$0.hasClubEvidence
+        })
         let missingRelease = ConstrainedSwingPathSolver.solve(
             candidateSets: [missingReleaseSet],
             timeline: missingReleaseTimeline
@@ -216,6 +226,9 @@ struct BidirectionalStageSolverSmoke {
             detection(.followThrough, in: missingRelease).status == .unresolved,
             "P8 cannot substitute lead-arm evidence for missing shaft evidence"
         )
+        precondition(missingRelease.detections.filter { $0.stage != .followThrough }.allSatisfy {
+            $0.status != .unresolved
+        })
     }
 
     private static func verifyObjectSamplingSeedsDeliveryShaftNeighborhood() {
@@ -230,7 +243,9 @@ struct BidirectionalStageSolverSmoke {
             timeline: timeline,
             impact: impact
         )
-        precondition(strict.candidates(for: .shaftParallelDownswing).isEmpty)
+        precondition(strict.candidates(for: .shaftParallelDownswing).allSatisfy {
+            $0.maximumStatus == .unresolved && !$0.hasClubEvidence
+        })
 
         let sampling = BidirectionalStageCandidateResolver.objectSamplingCandidates(
             timeline: timeline,
@@ -265,9 +280,9 @@ struct BidirectionalStageSolverSmoke {
             candidateSets: candidateSets,
             timeline: timeline
         )
-        precondition(result.detections.allSatisfy { $0.sourceFrameIndex != nil })
         let takeaway = detection(.takeaway, in: result)
-        precondition(takeaway.status == .lowConfidence)
+        precondition(takeaway.status == .unresolved)
+        precondition(takeaway.sourceFrameIndex == nil)
         precondition(!takeaway.hasClubEvidence)
         precondition(result.detections.filter { $0.stage != .takeaway }.allSatisfy {
             $0.status != .unresolved
@@ -1016,12 +1031,15 @@ struct BidirectionalStageSolverSmoke {
                 sourceFrameIndex: sourceFrameIndex,
                 hand: hand
             )
+            let stageAtFrame = localStageIndices.first {
+                $0.value == localIndex
+            }?.key
             let frame = SwingFrameEvidence(
                 sourceFrameIndex: sourceFrameIndex,
                 time: time,
                 pose: pose,
                 rawPose: pose,
-                objectEvidence: .empty,
+                objectEvidence: transitionObjectEvidence(for: stageAtFrame),
                 leadArm: .left,
                 leadArmAngle: 0,
                 leadArmExtension: 176,
@@ -1061,12 +1079,44 @@ struct BidirectionalStageSolverSmoke {
                 score: 0.80,
                 requirementsSatisfied: true,
                 maximumStatus: .confirmed,
-                hasClubEvidence: false,
-                hasBallEvidence: false
+                hasClubEvidence: [
+                    SwingStage.takeaway,
+                    .shaftParallelDownswing,
+                    .followThrough
+                ].contains(stage),
+                hasBallEvidence: stage == .impact,
+                hasBallChangeEvidence: stage == .impact
             )])
         })
         let impact = candidates[.impact]!.first!
         return StageCandidateSet(impact: impact, candidatesByStage: candidates)
+    }
+
+    private static func transitionObjectEvidence(
+        for stage: SwingStage?
+    ) -> SwingObjectEvidence {
+        if let stage,
+           [SwingStage.takeaway, .shaftParallelDownswing, .followThrough].contains(stage) {
+            return SwingObjectEvidence(
+                shaft: ClubShaftEvidence(
+                    start: CGPoint(x: 0.35, y: 0.55),
+                    end: CGPoint(x: 0.70, y: 0.55),
+                    confidence: 0.95
+                ),
+                ball: nil,
+                stableBall: nil,
+                ballLocalChange: 0
+            )
+        }
+        if stage == .impact {
+            return SwingObjectEvidence(
+                shaft: nil,
+                ball: nil,
+                stableBall: CGPoint(x: 0.72, y: 0.82),
+                ballLocalChange: 1
+            )
+        }
+        return .empty
     }
 
     private static func completePose(
