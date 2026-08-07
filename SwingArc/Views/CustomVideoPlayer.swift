@@ -36,10 +36,15 @@ class VideoPlaybackManager: ObservableObject {
     private let analysisRunGate = AnalysisRunGate()
     private var analysisRunID: UUID?
     private var mediaSessionID = UUID()
+    private var sourceTimeScale: CMTimeScale = PlaybackSeekTimePolicy
+        .defaultFallbackTimescale
+    private var exactFrameSessionTask: Task<ExactVideoFrameSession?, Never>?
+    private var activeSeekRequestID = UUID()
     
     init() {}
     
     deinit {
+        exactFrameSessionTask?.cancel()
         stopDisplayLink()
         removeObservers()
     }
@@ -54,8 +59,11 @@ class VideoPlaybackManager: ObservableObject {
         }
 
         cancelAnalysis()
+        exactFrameSessionTask?.cancel()
         mediaSessionID = UUID()
+        activeSeekRequestID = UUID()
         isPlaying = false
+        isProcessing = false
         stopDisplayLink()
         removeObservers()
         analysisState = .idle
@@ -66,6 +74,8 @@ class VideoPlaybackManager: ObservableObject {
         analysisProgressPhase = .preparing
         currentPose = nil
         isPoseDetectionInFlight = false
+        sourceFrameRate = 60
+        sourceTimeScale = PlaybackSeekTimePolicy.defaultFallbackTimescale
         mediaLoadState = .ready
         
         let asset = AVAsset(url: url)
@@ -73,6 +83,9 @@ class VideoPlaybackManager: ObservableObject {
         // 获取视频原始分辨率和方向
         if let track = asset.tracks(withMediaType: .video).first {
             sourceFrameRate = track.nominalFrameRate > 0 ? Double(track.nominalFrameRate) : 60
+            sourceTimeScale = track.naturalTimeScale > 0
+                ? track.naturalTimeScale
+                : PlaybackSeekTimePolicy.defaultFallbackTimescale
             let transform = track.preferredTransform
             let size = track.naturalSize
             
@@ -109,6 +122,17 @@ class VideoPlaybackManager: ObservableObject {
         
         let player = AVPlayer(playerItem: playerItem)
         self.player = player
+
+        let frameSession = ExactVideoFrameSession()
+        exactFrameSessionTask = Task(priority: .userInitiated) {
+            guard !Task.isCancelled else { return nil }
+            do {
+                _ = try await frameSession.open(url: url)
+                return Task.isCancelled ? nil : frameSession
+            } catch {
+                return nil
+            }
+        }
         
         // 观察总时长
         let durationSeconds = asset.duration.seconds
@@ -139,16 +163,21 @@ class VideoPlaybackManager: ObservableObject {
 
     func unloadVideo() {
         cancelAnalysis()
+        exactFrameSessionTask?.cancel()
+        exactFrameSessionTask = nil
         mediaSessionID = UUID()
+        activeSeekRequestID = UUID()
         pause()
         stopDisplayLink()
         removeObservers()
         currentTime = 0
+        isProcessing = false
         duration = 0
         currentPose = nil
         videoSize = .zero
         videoRect = .zero
         sourceFrameRate = 60
+        sourceTimeScale = PlaybackSeekTimePolicy.defaultFallbackTimescale
         analysisResult = nil
         analysisOutput = nil
         analysisFailure = nil
@@ -185,21 +214,94 @@ class VideoPlaybackManager: ObservableObject {
     
     /// 拖动到指定时间（秒）
     func seek(to time: Double) {
-        guard let player = player else { return }
+        let requestID = beginSeekRequest()
+        performSeek(
+            to: PlaybackSeekTimePolicy.roundedFallbackTime(
+                seconds: time,
+                timescale: sourceTimeScale
+            ),
+            requestID: requestID
+        )
+    }
+
+    /// P1-P8 markers prefer their persisted source frame. This avoids a
+    /// floating-point seconds conversion landing just before the intended
+    /// presentation timestamp and displaying the preceding frame.
+    func seek(to marker: KeyframeMarker) {
+        guard let sourceFrameIndex = marker.sourceFrameIndex else {
+            seek(to: marker.time)
+            return
+        }
+
+        let requestID = beginSeekRequest()
+        let requestedMediaSessionID = mediaSessionID
+        let sessionTask = exactFrameSessionTask
+
+        Task { [weak self] in
+            let session = await sessionTask?.value
+            let exactTime = await session?.presentationTime(
+                at: sourceFrameIndex
+            )
+            await MainActor.run {
+                guard let self,
+                      self.mediaSessionID == requestedMediaSessionID,
+                      self.activeSeekRequestID == requestID else {
+                    return
+                }
+                self.performSeek(
+                    to: PlaybackSeekTimePolicy.targetTime(
+                        exactPresentationTime: exactTime,
+                        fallbackSeconds: marker.time,
+                        fallbackTimescale: self.sourceTimeScale
+                    ),
+                    requestID: requestID
+                )
+            }
+        }
+    }
+
+    private func beginSeekRequest() -> UUID {
+        let requestID = UUID()
+        activeSeekRequestID = requestID
         isProcessing = true
-        let cmTime = CMTime(seconds: time, preferredTimescale: 600)
-        
-        // 使用精确 seek，对于高尔夫单帧分析至关重要
-        player.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
-            if finished {
-                DispatchQueue.main.async {
-                    self?.currentTime = time
-                    if self?.isPlaying == true {
-                        self?.processCurrentFramePose()
-                    } else {
-                        self?.extractPoseAtCurrentTime()
-                    }
-                    self?.isProcessing = false
+        return requestID
+    }
+
+    private func performSeek(to targetTime: CMTime, requestID: UUID) {
+        guard targetTime.isValid,
+              targetTime.isNumeric,
+              targetTime.seconds.isFinite else {
+            if activeSeekRequestID == requestID {
+                isProcessing = false
+            }
+            return
+        }
+        guard let player else {
+            if activeSeekRequestID == requestID {
+                isProcessing = false
+            }
+            return
+        }
+
+        // Zero tolerance is required so a selected source frame is not
+        // replaced by an adjacent keyframe during playback seeking.
+        player.seek(
+            to: targetTime,
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        ) { [weak self] finished in
+            DispatchQueue.main.async {
+                guard let self,
+                      self.activeSeekRequestID == requestID else {
+                    return
+                }
+                self.isProcessing = false
+                guard finished else { return }
+                self.currentTime = targetTime.seconds
+                if self.isPlaying {
+                    self.processCurrentFramePose()
+                } else {
+                    self.extractPoseAtCurrentTime()
                 }
             }
         }
@@ -626,6 +728,9 @@ struct PlayerViewRepresentable: UIViewRepresentable {
 
 class PlayerUIView: UIView {
     private let playerLayer = AVPlayerLayer()
+    private var videoRectRetryWorkItem: DispatchWorkItem?
+    private var videoRectRetryCount = 0
+    private var lastPublishedVideoRect: CGRect = .zero
     var onVideoRectChanged: (CGRect) -> Void
     
     init(player: AVPlayer, onVideoRectChanged: @escaping (CGRect) -> Void) {
@@ -643,32 +748,68 @@ class PlayerUIView: UIView {
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+
+    deinit {
+        videoRectRetryWorkItem?.cancel()
+    }
     
     override func layoutSubviews() {
         super.layoutSubviews()
         playerLayer.frame = bounds
-        
-        // 延时一下以确保 videoRect 已经完成计算并就绪
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            let rect = self.playerLayer.videoRect
-            if rect != .zero && rect.width > 0 && rect.height > 0 {
-                self.onVideoRectChanged(rect)
-            }
-        }
+        videoRectRetryCount = 0
+        publishVideoRectWhenReady()
     }
     
     func updatePlayer(_ player: AVPlayer) {
         if playerLayer.player !== player {
             playerLayer.player = player
-            // 当更换视频时，重新发送视频渲染范围
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                guard let self = self else { return }
-                let rect = self.playerLayer.videoRect
-                if rect != .zero {
-                    self.onVideoRectChanged(rect)
-                }
-            }
+            lastPublishedVideoRect = .zero
+            videoRectRetryCount = 0
         }
+        publishVideoRectWhenReady()
+    }
+
+    private func publishVideoRectWhenReady() {
+        videoRectRetryWorkItem?.cancel()
+
+        let layerRect = playerLayer.videoRect
+        let presentationSize = playerLayer.player?.currentItem?.presentationSize ?? .zero
+        let fittedRect = DrawingCanvasGeometry.aspectFitRect(
+            contentSize: presentationSize,
+            containerSize: bounds.size
+        )
+        let resolvedRect: CGRect
+        if playerLayer.isReadyForDisplay,
+           layerRect.width > 0,
+           layerRect.height > 0 {
+            resolvedRect = layerRect
+        } else {
+            resolvedRect = fittedRect
+        }
+
+        if resolvedRect.width > 0, resolvedRect.height > 0 {
+            videoRectRetryCount = 0
+            guard !approximatelyEqual(resolvedRect, lastPublishedVideoRect) else { return }
+            lastPublishedVideoRect = resolvedRect
+            DispatchQueue.main.async { [weak self] in
+                self?.onVideoRectChanged(resolvedRect)
+            }
+            return
+        }
+
+        guard videoRectRetryCount < 100 else { return }
+        videoRectRetryCount += 1
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.publishVideoRectWhenReady()
+        }
+        videoRectRetryWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
+    }
+
+    private func approximatelyEqual(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+        abs(lhs.minX - rhs.minX) < 0.5 &&
+            abs(lhs.minY - rhs.minY) < 0.5 &&
+            abs(lhs.width - rhs.width) < 0.5 &&
+            abs(lhs.height - rhs.height) < 0.5
     }
 }

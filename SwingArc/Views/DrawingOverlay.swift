@@ -17,6 +17,7 @@ struct DrawingOverlay: View {
     var isInteractionEnabled: Bool = true
     
     @State private var currentPoints: [CGPoint] = []
+    @State private var angleDraft = DrawingAngleDraft()
     @State private var selectedControlPoint: SelectedControlPoint? = nil
     @State private var selectedElementId: UUID? = nil
     @State private var selectedElementOrigin: DrawingElement? = nil
@@ -39,9 +40,10 @@ struct DrawingOverlay: View {
             )
 
             ZStack {
-                    // 1. 手势检测层 (使用 contentShape 确保透明层也能 100% 捕获触摸手势)
+                if !rect.isEmpty {
+                    // 1. 只在实际视频画面内捕获绘制手势。
                     Color.clear
-                        .contentShape(Rectangle())
+                        .contentShape(VideoDrawingInteractionShape(interactionRect: rect))
                         .allowsHitTesting(isInteractionEnabled)
                         .gesture(
                             DragGesture(minimumDistance: 0, coordinateSpace: .local)
@@ -55,16 +57,21 @@ struct DrawingOverlay: View {
                     
                     // 2. 向量绘制 Canvas 层
                     Canvas { context, size in
+                        var videoContext = context
+                        var videoClip = Path()
+                        videoClip.addRect(rect)
+                        videoContext.clip(to: videoClip)
+
                         // 绘制 Vision 自动计算数据
                         if let pose = playbackManager.currentPose {
                             if showPoseSkeleton {
-                                drawPoseSkeleton(context: context, pose: pose, rect: rect)
+                                drawPoseSkeleton(context: videoContext, pose: pose, rect: rect)
                             }
                             if showHeadStability {
-                                drawHeadStability(context: context, pose: pose, rect: rect)
+                                drawHeadStability(context: videoContext, pose: pose, rect: rect)
                             }
                             if showSpineAngle {
-                                drawSpineAngle(context: context, pose: pose, rect: rect)
+                                drawSpineAngle(context: videoContext, pose: pose, rect: rect)
                             }
                         }
                         
@@ -76,26 +83,29 @@ struct DrawingOverlay: View {
                                 at: playbackManager.currentTime,
                                 isKeyframeMode: isKeyframeMode
                             ) {
-                                drawElement(context: context, element: element, rect: rect)
+                                drawElement(context: videoContext, element: element, rect: rect)
                             }
                         }
                         
                         // 绘制当前正在画的临时线条
-                        if activeTool != .select && !currentPoints.isEmpty {
+                        let inProgressPoints = activeTool == .angle
+                            ? angleDraft.points
+                            : currentPoints
+                        if activeTool != .select && !inProgressPoints.isEmpty {
                             let tempElement = DrawingElement(
                                 tool: activeTool,
-                                points: currentPoints,
+                                points: inProgressPoints,
                                 color: selectedColor,
                                 lineWidth: strokeWidth,
                                 isKeyframeSpecific: isKeyframeMode,
                                 videoTime: playbackManager.currentTime
                             )
-                            drawElement(context: context, element: tempElement, rect: rect)
+                            drawElement(context: videoContext, element: tempElement, rect: rect)
                         }
                         
                         // 在选择工具模式下，绘制控制端点把手 (Handles)
                         if isInteractionEnabled && activeTool == .select {
-                            drawControlHandles(context: context, rect: rect)
+                            drawControlHandles(context: videoContext, rect: rect)
                         }
                         
                         // 3. 绘制微调向量放大镜
@@ -123,8 +133,42 @@ struct DrawingOverlay: View {
                             .position(x: xPos, y: yPos - (pose.headRadius ?? 0.06) * rect.height - 15)
                             .allowsHitTesting(false) // 同样允许触摸穿透
                     }
+
+                    if isInteractionEnabled,
+                       activeTool == .angle,
+                       angleDraft.phase == .awaitingSecondArm,
+                       angleDraft.points.count == 3 {
+                        let vertex = angleDraft.points[1]
+                        let vertexPosition = CGPoint(
+                            x: rect.minX + vertex.x * rect.width,
+                            y: rect.minY + vertex.y * rect.height
+                        )
+                        Text("再拖出第二条边")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .frame(minHeight: 32)
+                            .background(.black.opacity(0.72), in: Capsule())
+                            .position(
+                                x: min(max(vertexPosition.x, rect.minX + 72), rect.maxX - 72),
+                                y: max(rect.minY + 20, vertexPosition.y - 34)
+                            )
+                            .allowsHitTesting(false)
+                    }
+                }
             }
         }
+        .onChange(of: activeTool) { oldTool, newTool in
+            if oldTool == .angle, newTool != .angle {
+                resetAngleDraft()
+            }
+        }
+        .onChange(of: isInteractionEnabled) { _, enabled in
+            if !enabled {
+                resetAngleDraft()
+            }
+        }
+        .onDisappear(perform: resetAngleDraft)
     }
     
     // MARK: - 绘制函数
@@ -134,11 +178,8 @@ struct DrawingOverlay: View {
         guard element.points.count >= 2 else { return }
         
         // 转换所有点到屏幕坐标
-        let screenPoints = element.points.map { pt in
-            CGPoint(
-                x: rect.minX + pt.x * rect.width,
-                y: rect.minY + pt.y * rect.height
-            )
+        let screenPoints = element.points.map {
+            DrawingCanvasGeometry.denormalizedPoint($0, in: rect)
         }
         
         var path = Path()
@@ -168,63 +209,37 @@ struct DrawingOverlay: View {
         case .circle:
             let center = screenPoints[0]
             let edge = screenPoints[1]
-            let radius = sqrt(pow(center.x - edge.x, 2) + pow(center.y - edge.y, 2))
-            path.addEllipse(in: CGRect(
-                x: center.x - radius,
-                y: center.y - radius,
-                width: radius * 2,
-                height: radius * 2
-            ))
+            path.addEllipse(in: DrawingCircleGeometry.bounds(center: center, edge: edge))
             context.stroke(path, with: .color(element.color), lineWidth: element.lineWidth)
             
         case .angle:
-            guard screenPoints.count >= 3 else {
-                // 如果只有两个点，先画一条虚线
-                path.move(to: screenPoints[0])
-                path.addLine(to: screenPoints[1])
-                context.stroke(path, with: .color(element.color), style: StrokeStyle(lineWidth: element.lineWidth, dash: [5, 5]))
+            guard screenPoints.count >= 3 else { return }
+
+            // 点序固定为端点 A、顶点、端点 B。等待第二笔时，
+            // B 与顶点重合，因此只会看到已经完成的第一条边。
+            path.move(to: screenPoints[0])
+            path.addLine(to: screenPoints[1])
+            path.addLine(to: screenPoints[2])
+            context.stroke(path, with: .color(element.color), lineWidth: element.lineWidth)
+
+            guard let layout = DrawingAngleGeometry.layout(points: screenPoints) else {
                 return
             }
-            
-            let p1 = screenPoints[1] // 顶点（第二个点）
-            let p0 = screenPoints[0] // 边 A 端点
-            let p2 = screenPoints[2] // 边 B 端点
-            
-            // 画两条腿
-            path.move(to: p0)
-            path.addLine(to: p1)
-            path.addLine(to: p2)
-            context.stroke(path, with: .color(element.color), lineWidth: element.lineWidth)
-            
-            // 计算夹角
-            let v0 = CGPoint(x: p0.x - p1.x, y: p0.y - p1.y)
-            let v2 = CGPoint(x: p2.x - p1.x, y: p2.y - p1.y)
-            let angle0 = atan2(v0.y, v0.x)
-            let angle2 = atan2(v2.y, v2.x)
-            var angleDiff = abs(angle2 - angle0) * 180.0 / .pi
-            if angleDiff > 180.0 { angleDiff = 360.0 - angleDiff }
-            
-            // 画圆弧指示器
+
             var arcPath = Path()
-            let arcRadius: CGFloat = 25.0
-            arcPath.addArc(
-                center: p1,
-                radius: arcRadius,
-                startAngle: Angle(radians: Double(min(angle0, angle2))),
-                endAngle: Angle(radians: Double(max(angle0, angle2))),
-                clockwise: false
-            )
+            if let firstArcPoint = layout.arcPoints.first {
+                arcPath.move(to: firstArcPoint)
+                for point in layout.arcPoints.dropFirst() {
+                    arcPath.addLine(to: point)
+                }
+            }
             context.stroke(arcPath, with: .color(element.color.opacity(0.5)), lineWidth: 2.0)
-            
-            // 标写角度文本
-            let textX = p1.x + cos((angle0 + angle2)/2.0) * (arcRadius + 15)
-            let textY = p1.y + sin((angle0 + angle2)/2.0) * (arcRadius + 15)
-            
+
             context.draw(
-                Text(String(format: "%.1f°", angleDiff))
+                Text(String(format: "%.1f°", layout.degrees))
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(element.color),
-                at: CGPoint(x: textX, y: textY),
+                at: layout.labelCenter,
                 anchor: .center
             )
             
@@ -426,10 +441,13 @@ struct DrawingOverlay: View {
         }
         
         // 绘制当前正在画的临时线条放大
-        if activeTool != .select && !currentPoints.isEmpty {
+        let inProgressPoints = activeTool == .angle
+            ? angleDraft.points
+            : currentPoints
+        if activeTool != .select && !inProgressPoints.isEmpty {
             let tempElement = DrawingElement(
                 tool: activeTool,
-                points: currentPoints,
+                points: inProgressPoints,
                 color: selectedColor,
                 lineWidth: strokeWidth,
                 isKeyframeSpecific: isKeyframeMode,
@@ -505,8 +523,7 @@ struct DrawingOverlay: View {
         case .circle:
             let zCenter = zoomedPoints[0]
             let zEdge = zoomedPoints[1]
-            let zRadius = sqrt(pow(zCenter.x - zEdge.x, 2) + pow(zCenter.y - zEdge.y, 2))
-            path.addEllipse(in: CGRect(x: zCenter.x - zRadius, y: zCenter.y - zRadius, width: zRadius * 2, height: zRadius * 2))
+            path.addEllipse(in: DrawingCircleGeometry.bounds(center: zCenter, edge: zEdge))
             context.stroke(path, with: .color(element.color), lineWidth: element.lineWidth * scale)
         case .angle:
             guard zoomedPoints.count >= 3 else { return }
@@ -514,6 +531,31 @@ struct DrawingOverlay: View {
             path.addLine(to: zoomedPoints[1])
             path.addLine(to: zoomedPoints[2])
             context.stroke(path, with: .color(element.color), lineWidth: element.lineWidth * scale)
+
+            guard let layout = DrawingAngleGeometry.layout(
+                points: zoomedPoints,
+                preferredArcRadius: 25 * scale,
+                labelOffset: 15 * scale
+            ) else { return }
+            var arcPath = Path()
+            if let firstArcPoint = layout.arcPoints.first {
+                arcPath.move(to: firstArcPoint)
+                for point in layout.arcPoints.dropFirst() {
+                    arcPath.addLine(to: point)
+                }
+            }
+            context.stroke(
+                arcPath,
+                with: .color(element.color.opacity(0.5)),
+                lineWidth: 2 * scale
+            )
+            context.draw(
+                Text(String(format: "%.1f°", layout.degrees))
+                    .font(.system(size: 11 * scale, weight: .bold))
+                    .foregroundColor(element.color),
+                at: layout.labelCenter,
+                anchor: .center
+            )
         case .freehand:
             path.move(to: zoomedPoints[0])
             for i in 1..<zoomedPoints.count {
@@ -662,34 +704,20 @@ struct DrawingOverlay: View {
                 )
             }
             
+        } else if activeTool == .angle {
+            angleDraft.update(with: finalPoint)
         } else {
-            // 新建线条动作
+            // 新建直线、箭头、圆圈或手绘动作
             if currentPoints.isEmpty {
-                // 新建线条起点
                 currentPoints.append(finalPoint)
-                
-                if activeTool == .angle {
-                    // 量角器需要 3 个点，初始化时我们把 Vertex (第2点) 和 Arm B (第3点) 先默认和起点重合
-                    currentPoints.append(finalPoint)
-                    currentPoints.append(finalPoint)
-                } else {
-                    // 直线和圆形需要 2 个点
-                    currentPoints.append(finalPoint)
-                }
+                currentPoints.append(finalPoint)
             } else {
-                // 拖动更新终点
                 switch activeTool {
                 case .line, .arrow, .circle:
                     currentPoints[1] = finalPoint
-                case .angle:
-                    if currentPoints.count == 3 {
-                        // 首次拖拽拉出第 1 条边
-                        currentPoints[1] = finalPoint
-                        currentPoints[2] = finalPoint
-                    }
                 case .freehand:
                     currentPoints.append(finalPoint)
-                default:
+                case .select, .angle:
                     break
                 }
             }
@@ -704,43 +732,51 @@ struct DrawingOverlay: View {
             selectedElementId = nil
             selectedElementOrigin = nil
             elementDragStartPoint = nil
+        } else if activeTool == .angle {
+            guard let completedPoints = angleDraft.endGesture(
+                canvasSize: rect.size
+            ) else { return }
+
+            drawings.append(DrawingElement(
+                tool: .angle,
+                points: completedPoints,
+                color: selectedColor,
+                lineWidth: strokeWidth,
+                isKeyframeSpecific: isKeyframeMode,
+                videoTime: playbackManager.currentTime
+            ))
+            // 两条边都确定后进入选择模式，立即显示三个可编辑把手。
+            activeTool = .select
         } else {
             guard !currentPoints.isEmpty else { return }
-            
-            if activeTool == .angle && currentPoints.count == 3 {
-                // 3点量角器流程较长。首次拖放后，前两个点定位了边 A。
-                // 接下来把顶点放在点 1，此时我们需要用户继续点选或拖动点 2。
-                // 为了提高交互友好性：如果第一次拖动结束，我们在顶点附近预留一个分支，
-                // 并强制将其加入 drawings 数组中，转由 SELECT 工具对其三个端点进行后续精细微调。
-                let newElement = DrawingElement(
-                    tool: .angle,
-                    points: [
-                        currentPoints[0], // 端点 A
-                        CGPoint(x: (currentPoints[0].x + currentPoints[1].x)/2.0, y: (currentPoints[0].y + currentPoints[1].y)/2.0), // 顶点（默认放中间）
-                        currentPoints[1]  // 端点 B
-                    ],
-                    color: selectedColor,
-                    lineWidth: strokeWidth,
-                    isKeyframeSpecific: isKeyframeMode,
-                    videoTime: playbackManager.currentTime
-                )
-                drawings.append(newElement)
-                activeTool = .select // 自动切回选择工具进行把手微调
-            } else {
-                // 正常保存直线、箭头、圆圈、手绘
-                let newElement = DrawingElement(
-                    tool: activeTool,
-                    points: currentPoints,
-                    color: selectedColor,
-                    lineWidth: strokeWidth,
-                    isKeyframeSpecific: isKeyframeMode,
-                    videoTime: playbackManager.currentTime
-                )
-                drawings.append(newElement)
-            }
+
+            let newElement = DrawingElement(
+                tool: activeTool,
+                points: currentPoints,
+                color: selectedColor,
+                lineWidth: strokeWidth,
+                isKeyframeSpecific: isKeyframeMode,
+                videoTime: playbackManager.currentTime
+            )
+            drawings.append(newElement)
             
             // 清理临时绘制点
             currentPoints = []
         }
+    }
+
+    private func resetAngleDraft() {
+        angleDraft.reset()
+        isDragging = false
+    }
+}
+
+private struct VideoDrawingInteractionShape: Shape {
+    let interactionRect: CGRect
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.addRect(interactionRect)
+        return path
     }
 }

@@ -257,7 +257,7 @@ enum StageMarkerMerger {
 struct DrawingElement: Identifiable, Equatable, Codable {
     let id: UUID
     var tool: DrawingTool
-    var points: [CGPoint] // 归一化坐标点：(0,0)为左下角，(1,1)为右上角 (Vision/AVFoundation标准)
+    var points: [CGPoint] // 归一化坐标点：(0,0)为左上角，(1,1)为右下角，与触摸/SwiftUI画布一致
     var color: Color
     var lineWidth: CGFloat
     var isKeyframeSpecific: Bool // 是否只在绘制时的时间点前后显示
@@ -326,7 +326,7 @@ enum DrawingDisplayPolicy {
 /// Geometry shared by the drawing canvas and its interaction tests.
 enum DrawingInteractionPolicy {
     static func allowsPointEditing(for tool: DrawingTool) -> Bool {
-        tool == .line || tool == .arrow
+        tool == .line || tool == .arrow || tool == .angle
     }
 
     static func translated(_ element: DrawingElement, by requestedOffset: CGPoint) -> DrawingElement {
@@ -380,9 +380,214 @@ enum DrawingInteractionPolicy {
 enum DrawingCanvasGeometry {
     static func interactionRect(videoRect: CGRect, canvasSize: CGSize) -> CGRect {
         guard videoRect.width > 0, videoRect.height > 0 else {
-            return CGRect(origin: .zero, size: canvasSize)
+            // The AVPlayer layer can briefly report no video rect while a
+            // stored project is reopening. Rendering against the whole canvas
+            // during that window makes persisted normalized points jump and
+            // grow, so wait for a real video rect instead.
+            return .zero
         }
-        return videoRect
+        return videoRect.intersection(CGRect(origin: .zero, size: canvasSize))
+    }
+
+    static func aspectFitRect(contentSize: CGSize, containerSize: CGSize) -> CGRect {
+        guard contentSize.width > 0,
+              contentSize.height > 0,
+              containerSize.width > 0,
+              containerSize.height > 0 else {
+            return .zero
+        }
+
+        let scale = min(
+            containerSize.width / contentSize.width,
+            containerSize.height / contentSize.height
+        )
+        let fittedSize = CGSize(
+            width: contentSize.width * scale,
+            height: contentSize.height * scale
+        )
+        return CGRect(
+            x: (containerSize.width - fittedSize.width) / 2,
+            y: (containerSize.height - fittedSize.height) / 2,
+            width: fittedSize.width,
+            height: fittedSize.height
+        )
+    }
+
+    static func denormalizedPoint(_ point: CGPoint, in rect: CGRect) -> CGPoint {
+        CGPoint(
+            x: rect.minX + point.x * rect.width,
+            y: rect.minY + point.y * rect.height
+        )
+    }
+}
+
+/// Circles are persisted as a center point plus a point on the circumference.
+/// Keeping the conversion in one place prevents the editing canvas and media
+/// exporters from interpreting the same two points as different geometries.
+enum DrawingCircleGeometry {
+    static func bounds(center: CGPoint, edge: CGPoint) -> CGRect {
+        let radius = hypot(edge.x - center.x, edge.y - center.y)
+        return CGRect(
+            x: center.x - radius,
+            y: center.y - radius,
+            width: radius * 2,
+            height: radius * 2
+        )
+    }
+}
+
+enum DrawingAngleDraftPhase: Equatable {
+    case idle
+    case definingFirstArm
+    case awaitingSecondArm
+    case definingSecondArm
+}
+
+/// A two-gesture angle draft. Points always use the persisted order
+/// `[arm A endpoint, vertex, arm B endpoint]`.
+struct DrawingAngleDraft: Equatable {
+    private(set) var phase: DrawingAngleDraftPhase = .idle
+    private(set) var points: [CGPoint] = []
+
+    mutating func update(with point: CGPoint) {
+        switch phase {
+        case .idle:
+            points = [point, point, point]
+            phase = .definingFirstArm
+        case .definingFirstArm:
+            points[0] = point
+        case .awaitingSecondArm:
+            points[2] = point
+            phase = .definingSecondArm
+        case .definingSecondArm:
+            points[2] = point
+        }
+    }
+
+    /// Returns completed normalized points after the second valid gesture.
+    /// Invalid first arms reset the draft; an invalid second arm remains
+    /// pending so the user can try that arm again.
+    mutating func endGesture(
+        canvasSize: CGSize,
+        minimumArmLength: CGFloat = 10
+    ) -> [CGPoint]? {
+        guard points.count == 3 else {
+            reset()
+            return nil
+        }
+
+        switch phase {
+        case .definingFirstArm:
+            guard screenDistance(
+                from: points[0],
+                to: points[1],
+                canvasSize: canvasSize
+            ) >= minimumArmLength else {
+                reset()
+                return nil
+            }
+            points[2] = points[1]
+            phase = .awaitingSecondArm
+            return nil
+
+        case .definingSecondArm:
+            guard screenDistance(
+                from: points[2],
+                to: points[1],
+                canvasSize: canvasSize
+            ) >= minimumArmLength else {
+                points[2] = points[1]
+                phase = .awaitingSecondArm
+                return nil
+            }
+            let completed = points
+            reset()
+            return completed
+
+        case .idle, .awaitingSecondArm:
+            return nil
+        }
+    }
+
+    mutating func reset() {
+        phase = .idle
+        points = []
+    }
+
+    private func screenDistance(
+        from first: CGPoint,
+        to second: CGPoint,
+        canvasSize: CGSize
+    ) -> CGFloat {
+        hypot(
+            (second.x - first.x) * canvasSize.width,
+            (second.y - first.y) * canvasSize.height
+        )
+    }
+}
+
+struct DrawingAngleLayout: Equatable {
+    let endpointA: CGPoint
+    let vertex: CGPoint
+    let endpointB: CGPoint
+    let startRadians: CGFloat
+    let signedSweepRadians: CGFloat
+    let degrees: Double
+    let arcPoints: [CGPoint]
+    let labelCenter: CGPoint
+}
+
+enum DrawingAngleGeometry {
+    static func layout(
+        points: [CGPoint],
+        preferredArcRadius: CGFloat = 25,
+        labelOffset: CGFloat = 15,
+        arcSegmentCount: Int = 24,
+        minimumArmLength: CGFloat = 0.5
+    ) -> DrawingAngleLayout? {
+        guard points.count >= 3 else { return nil }
+
+        let endpointA = points[0]
+        let vertex = points[1]
+        let endpointB = points[2]
+        let armALength = hypot(endpointA.x - vertex.x, endpointA.y - vertex.y)
+        let armBLength = hypot(endpointB.x - vertex.x, endpointB.y - vertex.y)
+        let shortestArm = min(armALength, armBLength)
+        guard shortestArm >= minimumArmLength else { return nil }
+
+        let start = atan2(endpointA.y - vertex.y, endpointA.x - vertex.x)
+        let end = atan2(endpointB.y - vertex.y, endpointB.x - vertex.x)
+        let rawSweep = end - start
+        let signedSweep = atan2(sin(rawSweep), cos(rawSweep))
+        let degrees = abs(Double(signedSweep)) * 180 / Double.pi
+
+        let radius = min(max(0, preferredArcRadius), shortestArm * 0.45)
+        let segments = max(2, arcSegmentCount)
+        let arcPoints = (0...segments).map { index in
+            let progress = CGFloat(index) / CGFloat(segments)
+            let radians = start + signedSweep * progress
+            return CGPoint(
+                x: vertex.x + cos(radians) * radius,
+                y: vertex.y + sin(radians) * radius
+            )
+        }
+        let bisector = start + signedSweep / 2
+        let labelRadius = radius + max(0, labelOffset)
+        let labelCenter = CGPoint(
+            x: vertex.x + cos(bisector) * labelRadius,
+            y: vertex.y + sin(bisector) * labelRadius
+        )
+
+        return DrawingAngleLayout(
+            endpointA: endpointA,
+            vertex: vertex,
+            endpointB: endpointB,
+            startRadians: start,
+            signedSweepRadians: signedSweep,
+            degrees: degrees,
+            arcPoints: arcPoints,
+            labelCenter: labelCenter
+        )
     }
 }
 

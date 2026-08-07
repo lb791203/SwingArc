@@ -496,7 +496,9 @@ struct ContentView: View {
             time: time,
             sourceFrameIndex: sourceFrameIndex
         )
-        playbackManager.seek(to: time)
+        if let marker = keyframes.first(where: { $0.stage == stage.rawValue }) {
+            playbackManager.seek(to: marker)
+        }
         playbackManager.refineManualPPoint(
             image: image,
             sourceFrameIndex: sourceFrameIndex,

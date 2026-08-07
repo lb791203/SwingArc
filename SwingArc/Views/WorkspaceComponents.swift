@@ -176,53 +176,56 @@ struct MobileReplayTimelineView: View {
     let onCorrectPPoints: () -> Void
 
     var body: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 8) {
-                Text(formatTime(playbackManager.currentTime))
-                Slider(
-                    value: Binding(
-                        get: { min(max(playbackManager.currentTime, 0), max(playbackManager.duration, 0.001)) },
-                        set: { time in
-                            playbackManager.pause()
-                            playbackManager.seek(to: time)
-                        }
-                    ),
-                    in: 0...max(playbackManager.duration, 0.001)
-                )
-                .tint(.white)
-                .accessibilityLabel("视频进度")
-                Text(formatTime(playbackManager.duration))
-            }
-            .font(.caption2.monospacedDigit())
-            .foregroundStyle(.white.opacity(0.76))
+        VStack(spacing: MobileReplayStageStripPolicy.stackSpacing) {
+            Slider(
+                value: Binding(
+                    get: { min(max(playbackManager.currentTime, 0), max(playbackManager.duration, 0.001)) },
+                    set: { time in
+                        playbackManager.pause()
+                        playbackManager.seek(to: time)
+                    }
+                ),
+                in: 0...max(playbackManager.duration, 0.001)
+            )
+            .tint(.white)
+            .accessibilityLabel("视频进度")
+            .accessibilityValue("\(progressPercentage)%")
 
-            HStack(spacing: 0) {
+            HStack(spacing: MobileReplayStageStripPolicy.stageSpacing) {
                 ForEach(SwingStage.allCases) { stage in
                     let marker = keyframes.first { $0.stage == stage.rawValue }
                     let resultState = StageResultPolicy.state(for: marker)
+                    let current = currentStage == stage
                     Button {
                         playbackManager.pause()
                         if let marker {
-                            playbackManager.seek(to: marker.time)
+                            playbackManager.seek(to: marker)
                         } else {
                             onCorrectPPoints()
                         }
                     } label: {
-                        ZStack {
-                            if isCurrent(marker) {
-                                Circle()
-                                    .stroke(.white, lineWidth: 1.5)
-                                    .frame(width: 42, height: 42)
-                            }
-
+                        VStack(spacing: 2) {
                             SwingStagePoseGlyph(
                                 stage: stage,
-                                resultState: resultState
+                                resultState: resultState,
+                                isCurrent: current
                             )
-                            .frame(width: 40, height: 48)
+                            .frame(
+                                width: MobileReplayStageStripPolicy.glyphWidth,
+                                height: MobileReplayStageStripPolicy.glyphHeight
+                            )
+
+                            Capsule()
+                                .fill(AnalysisTheme.proTourSignal)
+                                .frame(
+                                    width: MobileReplayStageStripPolicy.currentIndicatorWidth,
+                                    height: MobileReplayStageStripPolicy.currentIndicatorHeight
+                                )
+                                .opacity(current ? 1 : 0)
                         }
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .contentShape(Rectangle())
+                        .frame(maxWidth: .infinity)
+                        .frame(height: MobileReplayStageStripPolicy.buttonHeight)
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(
@@ -232,19 +235,30 @@ struct MobileReplayTimelineView: View {
                     .accessibilityHint(marker == nil ? "打开 P 点修正" : "跳到该阶段")
                 }
             }
+            // Consume near-miss taps in the gaps instead of forwarding them to
+            // the full-screen video play/pause gesture behind this rail.
+            .contentShape(Rectangle())
+            .onTapGesture { }
         }
         .accessibilityElement(children: .contain)
     }
 
-    private func formatTime(_ time: Double) -> String {
-        guard time.isFinite else { return "00:00" }
-        let value = max(time, 0)
-        return String(format: "%02d:%02d", Int(value) / 60, Int(value) % 60)
+    private var progressPercentage: Int {
+        guard playbackManager.duration.isFinite,
+              playbackManager.duration > 0,
+              playbackManager.currentTime.isFinite else {
+            return 0
+        }
+        let progress = playbackManager.currentTime / playbackManager.duration
+        return Int((min(max(progress, 0), 1) * 100).rounded())
     }
 
-    private func isCurrent(_ marker: KeyframeMarker?) -> Bool {
-        guard let marker else { return false }
-        return abs(playbackManager.currentTime - marker.time) <= 0.18
+    private var currentStage: SwingStage? {
+        ReplayStageSelectionPolicy.currentStage(
+            at: playbackManager.currentTime,
+            keyframes: keyframes,
+            tolerance: 0.18
+        )
     }
 }
 
@@ -254,8 +268,27 @@ struct MobileReplayTimelineView: View {
 private struct SwingStagePoseGlyph: View {
     let stage: SwingStage
     let resultState: StageResultState
+    let isCurrent: Bool
 
     var body: some View {
+        Image(SwingStageGlyphAsset.name(for: stage))
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .foregroundStyle(foregroundColor)
+            .accessibilityHidden(true)
+    }
+
+    private var foregroundColor: Color {
+        if isCurrent { return AnalysisTheme.proTourSignal }
+        switch resultState {
+        case .confirmed, .manual: return .white
+        case .review: return AnalysisTheme.current
+        case .unresolved: return .white.opacity(0.38)
+        }
+    }
+
+    private var legacyBody: some View {
         Canvas { context, size in
             let pose = SwingStagePoseLibrary.pose(for: stage)
             let bodyColor: Color
@@ -370,6 +403,21 @@ private struct SwingStagePoseGlyph: View {
         path.move(to: CGPoint(x: tip.x - perpendicular.x, y: tip.y - perpendicular.y))
         path.addLine(to: CGPoint(x: tip.x + perpendicular.x, y: tip.y + perpendicular.y))
         return path
+    }
+}
+
+private enum SwingStageGlyphAsset {
+    static func name(for stage: SwingStage) -> String {
+        switch stage {
+        case .address: return "PStage1"
+        case .takeaway: return "PStage2"
+        case .leadArmParallelBackswing: return "PStage3"
+        case .top: return "PStage4"
+        case .leadArmParallelDownswing: return "PStage5"
+        case .shaftParallelDownswing: return "PStage6"
+        case .impact: return "PStage7"
+        case .followThrough, .finish: return "PStage8"
+        }
     }
 }
 
@@ -544,48 +592,73 @@ struct CompactPlaybackControlsView: View {
     @Binding var interactionMode: WorkspaceInteractionMode
 
     var body: some View {
-        HStack(spacing: 14) {
-            Menu {
-                ForEach(PlaybackRate.allCases) { rate in
-                    Button(rate.label) {
-                        perform(.selectRate(rate.value))
-                    }
+        ZStack {
+            HStack(spacing: CompactPlaybackPolicy.controlSpacing) {
+                compactButton(
+                    systemImage: "backward.frame.fill",
+                    label: "前一帧"
+                ) {
+                    perform(.previousFrame)
                 }
-            } label: {
-                Text(speedLabel)
-                    .font(.caption.weight(.bold).monospacedDigit())
-                    .frame(
-                        minWidth: CompactPlaybackPolicy.minimumTouchTarget,
-                        minHeight: CompactPlaybackPolicy.minimumTouchTarget
-                    )
-                    .background(.black.opacity(0.46), in: Capsule())
-            }
-            .accessibilityLabel("播放速度，当前 \(speedLabel)")
 
-            compactButton(
-                systemImage: "backward.frame.fill",
-                label: "前一帧"
-            ) {
-                perform(.previousFrame)
-            }
+                compactButton(
+                    systemImage: playbackManager.isPlaying ? "pause.fill" : "play.fill",
+                    label: playbackManager.isPlaying ? "暂停" : "播放",
+                    emphasized: true
+                ) {
+                    perform(.togglePlayback)
+                }
 
-            compactButton(
-                systemImage: playbackManager.isPlaying ? "pause.fill" : "play.fill",
-                label: playbackManager.isPlaying ? "暂停" : "播放",
-                emphasized: true
-            ) {
-                perform(.togglePlayback)
+                compactButton(
+                    systemImage: "forward.frame.fill",
+                    label: "后一帧"
+                ) {
+                    perform(.nextFrame)
+                }
             }
 
-            compactButton(
-                systemImage: "forward.frame.fill",
-                label: "后一帧"
-            ) {
-                perform(.nextFrame)
+            HStack {
+                Menu {
+                    ForEach(PlaybackRate.allCases) { rate in
+                        Button {
+                            perform(.selectRate(rate.value))
+                        } label: {
+                            if abs(rate.value - playbackManager.playbackSpeed) < 0.001 {
+                                Label(rate.label, systemImage: "checkmark")
+                            } else {
+                                Text(rate.label)
+                            }
+                        }
+                    }
+                } label: {
+                    Text(speedLabel)
+                        .font(.caption.weight(.bold).monospacedDigit())
+                        .frame(
+                            width: CompactPlaybackPolicy.speedControlWidth,
+                            height: CompactPlaybackPolicy.speedControlVisualHeight
+                        )
+                        .background(.black.opacity(0.46), in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
+                        .frame(
+                            width: max(
+                                CompactPlaybackPolicy.speedControlWidth,
+                                CompactPlaybackPolicy.minimumTouchTarget
+                            ),
+                            height: CompactPlaybackPolicy.minimumTouchTarget
+                        )
+                }
+                .accessibilityLabel("播放速度，当前 \(speedLabel)")
+                .accessibilityHint("选择 0.1、0.25、0.5 或 1 倍速度")
+
+                Spacer(minLength: 0)
             }
         }
         .frame(maxWidth: .infinity)
+        .frame(height: CompactPlaybackPolicy.rowHeight)
+        .contentShape(Rectangle())
+        .onTapGesture { }
         .foregroundStyle(.white)
+        .accessibilityElement(children: .contain)
     }
 
     private var speedLabel: String {
@@ -618,8 +691,12 @@ struct CompactPlaybackControlsView: View {
             Image(systemName: systemImage)
                 .font(.system(size: emphasized ? 18 : 15, weight: .bold))
                 .frame(
-                    width: emphasized ? 50 : CompactPlaybackPolicy.minimumTouchTarget,
-                    height: emphasized ? 50 : CompactPlaybackPolicy.minimumTouchTarget
+                    width: emphasized
+                        ? CompactPlaybackPolicy.emphasizedTouchTarget
+                        : CompactPlaybackPolicy.minimumTouchTarget,
+                    height: emphasized
+                        ? CompactPlaybackPolicy.emphasizedTouchTarget
+                        : CompactPlaybackPolicy.minimumTouchTarget
                 )
                 .background(
                     emphasized
@@ -627,6 +704,11 @@ struct CompactPlaybackControlsView: View {
                         : .black.opacity(0.46),
                     in: Circle()
                 )
+                .overlay {
+                    if !emphasized {
+                        Circle().stroke(.white.opacity(0.18), lineWidth: 1)
+                    }
+                }
                 .foregroundStyle(
                     emphasized ? AnalysisTheme.proTourBackground : .white
                 )
@@ -734,51 +816,60 @@ struct DrawingToolRail: View {
     @Binding var activeTool: DrawingTool
     @Binding var selectedColor: Color
     @Binding var isKeyframeMode: Bool
-    let onUndo: () -> Void
     let onClear: () -> Void
-    let onDone: () -> Void
 
     @State private var confirmsClear = false
     @State private var showsColorPalette = false
 
     var body: some View {
-        VStack(spacing: 5) {
-            railButton(
-                systemImage: "xmark",
-                label: "关闭画线工具",
-                isActive: false
-            ) {
-                showsColorPalette = false
-                onDone()
-            }
+        HStack(spacing: WorkspaceAccessoryPolicy.drawingToolbarItemSpacing) {
+            colorButton
 
             ForEach(DrawingTool.allCases) { tool in
                 toolButton(tool)
             }
 
-            Button {
-                showsColorPalette = false
-                isKeyframeMode.toggle()
-            } label: {
-                Image(systemName: isKeyframeMode ? "pin.fill" : "rectangle.inset.filled")
-                    .frame(width: 44, height: 44)
-                    .background(AnalysisTheme.raisedChrome, in: RoundedRectangle(cornerRadius: 11))
-            }
-            .foregroundStyle(.white)
-            .accessibilityLabel(isKeyframeMode ? "仅当前 P 点显示" : "全视频显示")
-            .accessibilityHint(isKeyframeMode ? "切换为全视频显示" : "切换为仅当前 P 点显示")
+            Menu {
+                Button {
+                    showsColorPalette = false
+                    isKeyframeMode.toggle()
+                } label: {
+                    Label(
+                        isKeyframeMode ? "切换为全视频显示" : "切换为仅当前 P 点显示",
+                        systemImage: isKeyframeMode ? "rectangle.inset.filled" : "pin.fill"
+                    )
+                }
 
-            DrawingUndoControl(
-                onUndo: onUndo,
-                onRequestClear: { confirmsClear = true }
-            )
+                Button(role: .destructive) {
+                    showsColorPalette = false
+                    confirmsClear = true
+                } label: {
+                    Label("清除所有标注", systemImage: "trash")
+                }
+            } label: {
+                toolbarItemLabel(systemImage: "ellipsis", isActive: false)
+            }
+            .accessibilityLabel("更多画线选项")
+            .accessibilityHint("调整标注显示范围或清除全部标注")
         }
-        .padding(6)
-        .frame(maxWidth: WorkspaceAccessoryPolicy.drawingRailMaximumWidth)
-        .fixedSize(horizontal: true, vertical: false)
-        .background(AnalysisTheme.chrome.opacity(0.96), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.12)))
+        .padding(.horizontal, WorkspaceAccessoryPolicy.drawingToolbarHorizontalPadding)
+        .padding(.vertical, 6)
+        .frame(maxWidth: WorkspaceAccessoryPolicy.drawingToolbarMaximumWidth)
+        .background(AnalysisTheme.chrome.opacity(0.96), in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 1))
         .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+        .overlay(alignment: .top) {
+            if showsColorPalette {
+                DrawingColorPalette(selectedColor: $selectedColor) {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        showsColorPalette = false
+                    }
+                }
+                .fixedSize()
+                .offset(y: -58)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
         .confirmationDialog("清除所有标注？", isPresented: $confirmsClear, titleVisibility: .visible) {
             Button("清除", role: .destructive, action: onClear)
             Button("取消", role: .cancel) {}
@@ -786,62 +877,81 @@ struct DrawingToolRail: View {
             Text("此操作会删除项目中的所有画线。")
         }
         .onAppear {
-            showsColorPalette = activeTool.revealsColorPalette
+            showsColorPalette = false
         }
-        .onChange(of: activeTool) { _, tool in
-            showsColorPalette = tool.revealsColorPalette
+        .onChange(of: activeTool) { _, _ in
+            showsColorPalette = false
         }
+    }
+
+    private var colorButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.16)) {
+                showsColorPalette.toggle()
+            }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(selectedColor)
+                    .frame(width: 22, height: 22)
+
+                Circle()
+                    .stroke(
+                        showsColorPalette
+                            ? AnalysisTheme.proTourSignal
+                            : .white.opacity(0.62),
+                        lineWidth: showsColorPalette ? 2 : 1
+                    )
+                    .frame(width: 28, height: 28)
+            }
+            .frame(
+                width: WorkspaceAccessoryPolicy.drawingToolbarButtonSize,
+                height: WorkspaceAccessoryPolicy.drawingToolbarButtonSize
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("选择画线颜色")
+        .accessibilityValue(showsColorPalette ? "色板已展开" : "色板已收起")
+        .accessibilityHint("轻点展开红、黄、绿、蓝、白五种颜色")
     }
 
     private func toolButton(_ tool: DrawingTool) -> some View {
-        railButton(
-            systemImage: tool.iconName,
-            label: tool.rawValue,
-            isActive: activeTool == tool,
-            symbolColor: tool.revealsColorPalette ? selectedColor : nil
-        ) {
-            if activeTool == tool, tool.revealsColorPalette {
-                withAnimation(.easeInOut(duration: 0.16)) {
-                    showsColorPalette.toggle()
-                }
-            } else {
-                activeTool = tool
-                showsColorPalette = tool.revealsColorPalette
-            }
+        Button {
+            activeTool = tool
+            showsColorPalette = false
+        } label: {
+            toolbarItemLabel(
+                systemImage: tool.iconName,
+                isActive: activeTool == tool
+            )
         }
-        .overlay(alignment: .trailing) {
-            if activeTool == tool, tool.revealsColorPalette, showsColorPalette {
-                DrawingColorPalette(selectedColor: $selectedColor) {
-                    withAnimation(.easeInOut(duration: 0.16)) {
-                        showsColorPalette = false
-                    }
-                }
-                .fixedSize()
-                .offset(x: -52)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
-        }
-        .zIndex(activeTool == tool && showsColorPalette ? 2 : 0)
+        .buttonStyle(.plain)
+        .accessibilityLabel(tool.rawValue)
+        .accessibilityValue(activeTool == tool ? "已选择" : "")
+        .accessibilityHint("选择此画线工具")
     }
 
-    private func railButton(
+    private func toolbarItemLabel(
         systemImage: String,
-        label: String,
-        isActive: Bool,
-        symbolColor: Color? = nil,
-        action: @escaping () -> Void
+        isActive: Bool
     ) -> some View {
-        Button(action: action) {
+        ZStack(alignment: .bottom) {
             Image(systemName: systemImage)
-                .frame(width: 44, height: 44)
-                .foregroundStyle(symbolColor ?? (isActive ? AnalysisTheme.current : .white))
-                .background(AnalysisTheme.raisedChrome, in: RoundedRectangle(cornerRadius: 11))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 11)
-                        .stroke(isActive ? AnalysisTheme.current : .clear, lineWidth: 2)
-                )
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(isActive ? AnalysisTheme.proTourSignal : .white)
+
+            Capsule()
+                .fill(AnalysisTheme.proTourSignal)
+                .frame(width: 16, height: 2)
+                .padding(.bottom, 2)
+                .opacity(isActive ? 1 : 0)
         }
-        .accessibilityLabel(label)
+        .frame(
+            width: WorkspaceAccessoryPolicy.drawingToolbarButtonSize,
+            height: WorkspaceAccessoryPolicy.drawingToolbarButtonSize
+        )
+        .contentShape(Rectangle())
     }
 }
 
@@ -864,13 +974,22 @@ private struct DrawingColorPalette: View {
                     selectedColor = option.color
                     onSelect()
                 } label: {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(option.color)
-                        .frame(width: 34, height: 34)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(.white.opacity(0.65), lineWidth: 1)
-                        )
+                    ZStack {
+                        Color.clear
+
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(option.color)
+                            .frame(width: 34, height: 34)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(.white.opacity(0.65), lineWidth: 1)
+                            )
+                    }
+                    .frame(
+                        width: WorkspaceAccessoryPolicy.drawingToolbarButtonSize,
+                        height: WorkspaceAccessoryPolicy.drawingToolbarButtonSize
+                    )
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(option.name)
@@ -980,7 +1099,7 @@ struct StageInspectorView: View {
     let presentation: AnalysisWorkspacePresentation
     let keyframes: [KeyframeMarker]
     let sourceFrameRate: Double
-    let onSeek: (Double) -> Void
+    let onSeek: (KeyframeMarker) -> Void
     let onAdjust: (SwingStage) -> Void
 
     var body: some View {
@@ -1020,7 +1139,7 @@ struct StageInspectorView: View {
                             }
                             Spacer()
                             if let marker = descriptor.marker {
-                                Button("查看") { onSeek(marker.time) }
+                                Button("查看") { onSeek(marker) }
                                     .font(.caption.weight(.semibold))
                             }
                             Button("调整") { onAdjust(descriptor.stage) }
@@ -1042,7 +1161,7 @@ struct WorkspaceInspectorView: View {
     let presentation: AnalysisWorkspacePresentation
     let keyframes: [KeyframeMarker]
     let onCancelAnalysis: () -> Void
-    let onSeek: (Double) -> Void
+    let onSeek: (KeyframeMarker) -> Void
     let onAdjust: (SwingStage) -> Void
 
     var body: some View {
@@ -1232,7 +1351,7 @@ struct SwingPhaseRailView: View {
     let currentTime: Double
     let frameDuration: Double
     let duration: Double
-    let onSelect: (Double) -> Void
+    let onSelect: (KeyframeMarker) -> Void
     let onScrub: (Double) -> Void
 
     var body: some View {
@@ -1247,11 +1366,11 @@ struct SwingPhaseRailView: View {
             .tint(AnalysisTheme.proTourSignal)
             .accessibilityLabel("挥杆进度")
 
-            HStack(spacing: 0) {
+            HStack(spacing: MobileReplayStageStripPolicy.stageSpacing) {
                 ForEach(visibleDescriptors, id: \.stage) { descriptor in
                     Button {
                         if let marker = descriptor.marker {
-                            onSelect(marker.time)
+                            onSelect(marker)
                         }
                     } label: {
                         SwingPhaseSilhouette(
@@ -1260,12 +1379,15 @@ struct SwingPhaseRailView: View {
                             resultState: descriptor.resultState
                         )
                         .frame(maxWidth: .infinity, minHeight: FullscreenPlaybackPolicy.minimumTouchTarget)
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(descriptor.accessibilityLabel)
                     .accessibilityHint("跳到该挥杆位置")
                 }
             }
+            .contentShape(Rectangle())
+            .onTapGesture { }
         }
         .padding(.horizontal, 4)
         .padding(.top, 5)
@@ -1300,53 +1422,27 @@ private struct SwingPhaseSilhouette: View {
     let isCurrent: Bool
     let resultState: StageResultState
 
-    private var clubAngle: Angle {
-        switch stage {
-        case .address: .degrees(-20)
-        case .takeaway: .degrees(-48)
-        case .leadArmParallelBackswing: .degrees(-72)
-        case .top: .degrees(-112)
-        case .leadArmParallelDownswing: .degrees(38)
-        case .shaftParallelDownswing: .degrees(0)
-        case .impact: .degrees(18)
-        case .followThrough: .degrees(0)
-        case .finish: .degrees(105)
-        }
-    }
-
-    private var accent: Color {
-        if isCurrent { return .white }
-        switch resultState {
-        case .confirmed, .manual: return AnalysisTheme.proTourSignal
-        case .review: return AnalysisTheme.current.opacity(0.45)
-        case .unresolved: return .white.opacity(0.28)
-        }
-    }
-
     var body: some View {
-        ZStack {
-            Circle()
-                .stroke(isCurrent ? .white : .clear, lineWidth: 1.5)
-                .frame(width: 36, height: 36)
-
-            Circle()
-                .fill(accent)
-                .frame(width: 5.5, height: 5.5)
-                .offset(y: -11)
-
-            Capsule()
-                .fill(accent)
-                .frame(width: 3.5, height: 15)
-                .offset(y: -2)
+        VStack(spacing: 2) {
+            SwingStagePoseGlyph(
+                stage: stage,
+                resultState: resultState,
+                isCurrent: isCurrent
+            )
+            .frame(
+                width: MobileReplayStageStripPolicy.glyphWidth,
+                height: MobileReplayStageStripPolicy.glyphHeight
+            )
 
             Capsule()
-                .fill(accent)
-                .frame(width: 2.5, height: 13)
-                .rotationEffect(clubAngle)
-                .offset(x: 6, y: -2)
+                .fill(AnalysisTheme.proTourSignal)
+                .frame(
+                    width: MobileReplayStageStripPolicy.currentIndicatorWidth,
+                    height: MobileReplayStageStripPolicy.currentIndicatorHeight
+                )
+                .opacity(isCurrent ? 1 : 0)
         }
-        .frame(width: 40, height: 40)
-        .contentShape(Circle())
+        .frame(width: 42, height: FullscreenPlaybackPolicy.minimumTouchTarget)
         .accessibilityHidden(true)
     }
 }
@@ -1367,11 +1463,11 @@ private struct StageDisplayDescriptor {
         self.stage = stage
         marker = keyframes.first { $0.stage == stage.rawValue }
         detection = presentation.detection(for: stage)
-        if let marker, currentTime >= 0 {
-            isCurrent = abs(marker.time - currentTime) <= max(frameDuration * 1.5, 0.02)
-        } else {
-            isCurrent = false
-        }
+        isCurrent = ReplayStageSelectionPolicy.currentStage(
+            at: currentTime,
+            keyframes: keyframes,
+            tolerance: max(frameDuration * 1.5, 0.02)
+        ) == stage
     }
 
     var resultState: StageResultState {

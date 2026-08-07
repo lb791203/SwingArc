@@ -19,6 +19,11 @@ struct CoreAnalysisSurfaceSmoke {
             from: "struct PlaybackControlsView",
             to: "struct DrawingToolRail"
         )
+        let drawingToolbar = section(
+            components,
+            from: "struct DrawingToolRail",
+            to: "private struct DrawingColorPalette"
+        )
         let inspector = section(
             components,
             from: "struct WorkspaceInspectorView",
@@ -31,6 +36,20 @@ struct CoreAnalysisSurfaceSmoke {
         precondition(workspace.contains("onCorrectPPoints"))
         precondition(workspace.contains("onExport"))
         precondition(workspace.contains("重新分析"))
+        precondition(workspace.contains("drawingModeChrome"))
+        precondition(workspace.contains("drawingModeHeader"))
+        precondition(workspace.contains("Text(\"画线\")"))
+        precondition(workspace.contains("Button(\"完成\")"))
+
+        precondition(drawingToolbar.contains("HStack(spacing: WorkspaceAccessoryPolicy.drawingToolbarItemSpacing)"))
+        precondition(drawingToolbar.contains("ForEach(DrawingTool.allCases)"))
+        precondition(drawingToolbar.contains("Menu {"))
+        precondition(drawingToolbar.contains("toolbarItemLabel"))
+        precondition(drawingToolbar.contains("AnalysisTheme.proTourSignal"))
+        precondition(drawingToolbar.contains("colorButton"))
+        precondition(drawingToolbar.contains("选择画线颜色"))
+        precondition(drawingToolbar.contains("in: Capsule()"))
+        precondition(!drawingToolbar.contains("background(AnalysisTheme.raisedChrome"))
 
         for forbidden in [
             "SimplifiedSwingFeedbackView(",

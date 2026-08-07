@@ -34,7 +34,11 @@ struct WorkspaceModelsSmoke {
         precondition(!playback.showsDrawingRail)
         precondition(!playback.shouldPausePlayback)
 
-        precondition(WorkspaceAccessoryPolicy.drawingRailMaximumWidth == 56)
+        precondition(WorkspaceAccessoryPolicy.drawingToolbarButtonSize == 44)
+        precondition(WorkspaceAccessoryPolicy.drawingToolbarItemSpacing == 0)
+        precondition(WorkspaceAccessoryPolicy.drawingToolbarHorizontalPadding == 3)
+        precondition(WorkspaceAccessoryPolicy.drawingToolbarMaximumWidth == 370)
+        precondition(WorkspaceAccessoryPolicy.drawingToolbarBottomPadding >= 28)
         precondition(CameraCaptureLayout.instructionVerticalPosition(containerHeight: 844) <= 664)
         precondition(WorkspaceAccessoryPolicy.stageAdjustmentPlacement == .inline)
 
@@ -47,6 +51,44 @@ struct WorkspaceModelsSmoke {
         precondition(StageStripPolicy.indicator(for: .review) == .filledCircle)
         precondition(StageStripPolicy.indicator(for: .unresolved) == .hollowCircle)
         precondition(StageStripPolicy.indicator(for: .manual) == .lock)
+        precondition(MobileReplayStageStripPolicy.stackSpacing == 8)
+        precondition(MobileReplayStageStripPolicy.stageSpacing == 4)
+        precondition(MobileReplayStageStripPolicy.buttonHeight == 44)
+        precondition(MobileReplayStageStripPolicy.glyphWidth == 38)
+        precondition(MobileReplayStageStripPolicy.glyphHeight == 34)
+
+        let replayMarkers = [
+            KeyframeMarker(time: 0.75, stage: .takeaway),
+            KeyframeMarker(time: 1.25, stage: .leadArmParallelBackswing)
+        ]
+        precondition(
+            ReplayStageSelectionPolicy.currentStage(
+                at: 1.0,
+                keyframes: replayMarkers,
+                tolerance: 0.30
+            ) == .takeaway
+        )
+        precondition(
+            ReplayStageSelectionPolicy.currentStage(
+                at: 1.20,
+                keyframes: replayMarkers,
+                tolerance: 0.18
+            ) == .leadArmParallelBackswing
+        )
+        precondition(
+            ReplayStageSelectionPolicy.currentStage(
+                at: 1.5,
+                keyframes: replayMarkers,
+                tolerance: 0.18
+            ) == nil
+        )
+        precondition(
+            ReplayStageSelectionPolicy.currentStage(
+                at: -1,
+                keyframes: replayMarkers,
+                tolerance: 0.18
+            ) == nil
+        )
 
         precondition(MediaLoadPolicy.state(fileExists: true) == .ready)
         precondition(MediaLoadPolicy.state(fileExists: false) == .missing)

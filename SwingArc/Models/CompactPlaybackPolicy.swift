@@ -16,6 +16,12 @@ enum CompactPlaybackCommand: Equatable {
 
 enum CompactPlaybackPolicy {
     static let minimumTouchTarget: CGFloat = 44
+    static let emphasizedTouchTarget: CGFloat = 50
+    static let speedControlWidth: CGFloat = 48
+    static let speedControlVisualHeight: CGFloat = 32
+    static let rowHeight: CGFloat = 50
+    static let controlSpacing: CGFloat = 12
+    static let sectionSpacing: CGFloat = 10
 
     static func command(
         for action: CompactPlaybackAction,

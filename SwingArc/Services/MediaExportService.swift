@@ -122,6 +122,9 @@ enum MediaExportService {
 
         let parentLayer = CALayer()
         parentLayer.frame = CGRect(origin: .zero, size: renderSize)
+        // Match the top-left UIKit/SwiftUI drawing coordinate system when
+        // Core Animation renders this detached layer tree offscreen.
+        parentLayer.isGeometryFlipped = true
         let videoLayer = CALayer()
         videoLayer.frame = parentLayer.bounds
         parentLayer.addSublayer(videoLayer)
@@ -132,7 +135,7 @@ enum MediaExportService {
 
         let duration = max(asset.duration.seconds, 0.01)
         drawings.forEach { drawing in
-            let layer = shapeLayer(for: drawing, canvasSize: renderSize)
+            let layer = annotationLayer(for: drawing, canvasSize: renderSize)
             if drawing.isKeyframeSpecific {
                 layer.opacity = 0
                 let threshold = 0.15
@@ -179,44 +182,90 @@ enum MediaExportService {
         return renderer.image { context in
             UIImage(cgImage: image).draw(in: CGRect(origin: .zero, size: size))
             drawings.forEach { drawing in
-                let path = path(for: drawing, canvasSize: size)
-                UIColor(drawing.color).setStroke()
-                path.lineWidth = drawing.lineWidth * max(1, size.width / 390)
-                path.lineCapStyle = .round
-                path.lineJoinStyle = .round
-                path.stroke()
+                draw(drawing, canvasSize: size)
             }
         }.cgImage!
     }
 
-    private static func shapeLayer(for drawing: DrawingElement, canvasSize: CGSize) -> CAShapeLayer {
-        let layer = CAShapeLayer()
-        layer.path = path(for: drawing, canvasSize: canvasSize).cgPath
-        layer.strokeColor = UIColor(drawing.color).cgColor
-        layer.fillColor = UIColor.clear.cgColor
-        layer.lineWidth = drawing.lineWidth * max(1, canvasSize.width / 390)
-        layer.lineCap = .round
-        layer.lineJoin = .round
-        return layer
+    private static func draw(_ drawing: DrawingElement, canvasSize: CGSize) {
+        let scale = max(1, canvasSize.width / 390)
+        let linePath = path(for: drawing, canvasSize: canvasSize)
+        UIColor(drawing.color).setStroke()
+        linePath.lineWidth = drawing.lineWidth * scale
+        linePath.lineCapStyle = .round
+        linePath.lineJoinStyle = .round
+        linePath.stroke()
+
+        guard let layout = angleLayout(for: drawing, canvasSize: canvasSize) else {
+            return
+        }
+        let arcPath = path(forArcPoints: layout.arcPoints)
+        UIColor(drawing.color).withAlphaComponent(0.5).setStroke()
+        arcPath.lineWidth = 2 * scale
+        arcPath.lineCapStyle = .round
+        arcPath.stroke()
+
+        let label = angleLabel(for: layout, drawing: drawing, scale: scale)
+        let labelSize = label.size()
+        label.draw(at: CGPoint(
+            x: layout.labelCenter.x - labelSize.width / 2,
+            y: layout.labelCenter.y - labelSize.height / 2
+        ))
+    }
+
+    private static func annotationLayer(for drawing: DrawingElement, canvasSize: CGSize) -> CALayer {
+        let scale = max(1, canvasSize.width / 390)
+        let container = CALayer()
+        container.frame = CGRect(origin: .zero, size: canvasSize)
+
+        let lineLayer = CAShapeLayer()
+        lineLayer.frame = container.bounds
+        lineLayer.path = path(for: drawing, canvasSize: canvasSize).cgPath
+        lineLayer.strokeColor = UIColor(drawing.color).cgColor
+        lineLayer.fillColor = UIColor.clear.cgColor
+        lineLayer.lineWidth = drawing.lineWidth * scale
+        lineLayer.lineCap = .round
+        lineLayer.lineJoin = .round
+        container.addSublayer(lineLayer)
+
+        guard let layout = angleLayout(for: drawing, canvasSize: canvasSize) else {
+            return container
+        }
+
+        let arcLayer = CAShapeLayer()
+        arcLayer.frame = container.bounds
+        arcLayer.path = path(forArcPoints: layout.arcPoints).cgPath
+        arcLayer.strokeColor = UIColor(drawing.color).withAlphaComponent(0.5).cgColor
+        arcLayer.fillColor = UIColor.clear.cgColor
+        arcLayer.lineWidth = 2 * scale
+        arcLayer.lineCap = .round
+        container.addSublayer(arcLayer)
+
+        let label = angleLabel(for: layout, drawing: drawing, scale: scale)
+        let labelSize = label.size()
+        let labelLayer = CATextLayer()
+        labelLayer.contentsScale = max(2, UIScreen.main.scale)
+        labelLayer.string = label
+        labelLayer.alignmentMode = .center
+        labelLayer.frame = CGRect(
+            x: layout.labelCenter.x - labelSize.width / 2,
+            y: layout.labelCenter.y - labelSize.height / 2,
+            width: labelSize.width,
+            height: labelSize.height
+        )
+        container.addSublayer(labelLayer)
+        return container
     }
 
     private static func path(for drawing: DrawingElement, canvasSize: CGSize) -> UIBezierPath {
-        let points = drawing.points.map {
-            CGPoint(x: $0.x * canvasSize.width, y: (1 - $0.y) * canvasSize.height)
-        }
+        let points = canvasPoints(for: drawing, canvasSize: canvasSize)
         let path = UIBezierPath()
         guard let first = points.first else { return path }
 
         switch drawing.tool {
         case .circle:
             let second = points.dropFirst().first ?? first
-            let rect = CGRect(
-                x: min(first.x, second.x),
-                y: min(first.y, second.y),
-                width: abs(second.x - first.x),
-                height: abs(second.y - first.y)
-            )
-            path.append(UIBezierPath(ovalIn: rect))
+            path.append(UIBezierPath(ovalIn: DrawingCircleGeometry.bounds(center: first, edge: second)))
         case .angle:
             path.move(to: first)
             for point in points.dropFirst() { path.addLine(to: point) }
@@ -238,6 +287,54 @@ enum MediaExportService {
             for point in points.dropFirst() { path.addLine(to: point) }
         }
         return path
+    }
+
+    private static func canvasPoints(
+        for drawing: DrawingElement,
+        canvasSize: CGSize
+    ) -> [CGPoint] {
+        let canvasRect = CGRect(origin: .zero, size: canvasSize)
+        return drawing.points.map {
+            DrawingCanvasGeometry.denormalizedPoint($0, in: canvasRect)
+        }
+    }
+
+    private static func angleLayout(
+        for drawing: DrawingElement,
+        canvasSize: CGSize
+    ) -> DrawingAngleLayout? {
+        guard drawing.tool == .angle else { return nil }
+        let scale = max(1, canvasSize.width / 390)
+        return DrawingAngleGeometry.layout(
+            points: canvasPoints(for: drawing, canvasSize: canvasSize),
+            preferredArcRadius: 25 * scale,
+            labelOffset: 15 * scale,
+            arcSegmentCount: max(24, Int(ceil(24 * scale)))
+        )
+    }
+
+    private static func path(forArcPoints points: [CGPoint]) -> UIBezierPath {
+        let path = UIBezierPath()
+        guard let first = points.first else { return path }
+        path.move(to: first)
+        for point in points.dropFirst() {
+            path.addLine(to: point)
+        }
+        return path
+    }
+
+    private static func angleLabel(
+        for layout: DrawingAngleLayout,
+        drawing: DrawingElement,
+        scale: CGFloat
+    ) -> NSAttributedString {
+        NSAttributedString(
+            string: String(format: "%.1f°", layout.degrees),
+            attributes: [
+                .font: UIFont.systemFont(ofSize: 11 * scale, weight: .bold),
+                .foregroundColor: UIColor(drawing.color)
+            ]
+        )
     }
 
     private static func temporaryURL(for kind: MediaExportKind) -> URL {

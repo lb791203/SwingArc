@@ -24,6 +24,19 @@ struct CaptureReplayPresentationSmoke {
         precondition(workspace.contains("mobileAnalysisStatus"))
         precondition(workspace.contains("mobileReplayOverlayControls"))
         precondition(!workspace.contains("AnalysisProgressCard("))
+        let mobileHeader = section(
+            from: "private var mobileReplayHeader",
+            until: "private var mobileReviewChrome",
+            in: workspace
+        )
+        precondition(mobileHeader.contains("Image(systemName: \"chevron.left\")"))
+        precondition(!mobileHeader.contains("Image(systemName: \"chevron.down\")"))
+        precondition(mobileHeader.contains(".frame(width: 44, height: 44)"))
+        precondition(mobileHeader.contains(".accessibilityLabel(\"返回项目库\")"))
+        precondition(mobileHeader.contains("Button(action: onExport)"))
+        precondition(mobileHeader.contains("Image(systemName: \"square.and.arrow.up\")"))
+        precondition(mobileHeader.contains(".accessibilityLabel(\"分享视频\")"))
+        precondition(!mobileHeader.contains("onCorrectPPoints"))
         let mobileTimeline = section(
             from: "struct MobileReplayTimelineView",
             until: "struct PlaybackControlsView",
@@ -31,11 +44,24 @@ struct CaptureReplayPresentationSmoke {
         )
         precondition(mobileTimeline.contains("ForEach(SwingStage.allCases)"))
         precondition(mobileTimeline.contains("SwingStagePoseGlyph"))
+        precondition(mobileTimeline.contains("MobileReplayStageStripPolicy.stageSpacing"))
+        precondition(mobileTimeline.contains("MobileReplayStageStripPolicy.glyphWidth"))
+        precondition(mobileTimeline.contains(".frame(height: MobileReplayStageStripPolicy.buttonHeight)"))
+        precondition(mobileTimeline.contains(".contentShape(RoundedRectangle"))
+        precondition(mobileTimeline.contains(".onTapGesture { }"))
+        precondition(mobileTimeline.contains("let current = currentStage == stage"))
+        precondition(mobileTimeline.contains("Slider("))
+        precondition(mobileTimeline.contains("accessibilityValue"))
+        precondition(!mobileTimeline.contains("Text(formatTime"))
+        precondition(!mobileTimeline.contains(".frame(maxHeight: .infinity, alignment: .bottom)"))
         precondition(!mobileTimeline.contains("Text(stage.pNumber)"))
         precondition(!mobileTimeline.contains("Image(systemName: \"figure.golf\")"))
-        precondition(mobileTimeline.contains(".allowsHitTesting(marker != nil)"))
+        precondition(!mobileTimeline.contains(".allowsHitTesting(marker != nil)"))
         precondition(!mobileTimeline.contains(".disabled(marker == nil)"))
-        precondition(components.contains("struct SwingStagePoseGlyph"))
+        precondition(mobileTimeline.contains("onCorrectPPoints()"))
+        precondition(components.contains("private struct SwingStagePoseGlyph"))
+        precondition(components.contains("Image(SwingStageGlyphAsset.name(for: stage))"))
+        precondition(components.contains("private enum SwingStageGlyphAsset"))
         precondition(components.contains("private enum SwingStagePoseCue"))
         for cue in [
             "准备：双膝微屈，杆头落在球后",
@@ -55,6 +81,26 @@ struct CaptureReplayPresentationSmoke {
         precondition(components.contains("case .address:"))
         precondition(components.contains("case .shaftParallelDownswing:"))
         precondition(components.contains("case .finish:"))
+        for stageNumber in 1...8 {
+            let assetName = "PStage\(stageNumber)"
+            let assetDirectory = root.appending(path: "SwingArc/Assets.xcassets/\(assetName).imageset")
+            precondition(
+                components.contains("return \"\(assetName)\""),
+                "P\(stageNumber) must render the approved image asset."
+            )
+            precondition(
+                FileManager.default.fileExists(
+                    atPath: assetDirectory.appending(path: "p_stage_\(stageNumber).png").path
+                ),
+                "Missing approved P\(stageNumber) PNG asset."
+            )
+            precondition(
+                FileManager.default.fileExists(
+                    atPath: assetDirectory.appending(path: "Contents.json").path
+                ),
+                "Missing P\(stageNumber) asset catalog metadata."
+            )
+        }
         precondition(!workspace.contains("showsFullscreenPlayback"))
         precondition(!workspace.contains("arrow.up.left.and.arrow.down.right"))
         precondition(!library.contains("showsNewProjectSheet"))
@@ -93,7 +139,7 @@ struct CaptureReplayPresentationSmoke {
         precondition(practiceSession.contains("onOpenLastClip(clipURL)"))
         precondition(!content.contains("showCameraView"))
         precondition(workspace.contains("mobileReplayActionRow"))
-        precondition(workspace.contains("Text(\"标注\")"))
+        precondition(workspace.contains("Text(\"画线\")"))
         let mobileActionRow = section(
             from: "private var mobileReplayActionRow",
             until: "private func toggleWorkspacePlayback",
@@ -103,6 +149,12 @@ struct CaptureReplayPresentationSmoke {
             mobileActionRow.contains("onAnalyze()"),
             "Portrait replay must keep a retry/manual analysis action for reopened or failed projects"
         )
+        precondition(mobileActionRow.contains("Button(action: onCorrectPPoints)"))
+        precondition(mobileActionRow.contains("Image(systemName: \"viewfinder\")"))
+        precondition(mobileActionRow.contains("Text(\"P\")"))
+        precondition(mobileActionRow.contains(".accessibilityLabel(\"修正 P 点\")"))
+        precondition(mobileActionRow.contains(".accessibilityHint(\"打开 P1–P8 时间点修正\")"))
+        precondition(!mobileActionRow.contains("square.and.arrow.up"))
     }
 
     private static func read(_ url: URL) -> String {

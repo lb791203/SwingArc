@@ -82,7 +82,7 @@ struct AnnotationIntegrationSmoke {
             precondition(!contentView.contains("AnnotationWorkspaceView("))
             precondition(workspace.contains("let onCorrectPPoints: () -> Void"))
             precondition(components.contains("let onCorrectPPoints: () -> Void"))
-            precondition(workspace.contains("Text(\"修正 P 点\")"))
+            precondition(workspace.contains(".accessibilityLabel(\"修正 P 点\")"))
             precondition(workspace.contains("Text(\"画线\")"))
             precondition(components.contains("Text(\"修正 P 点\")"))
         }

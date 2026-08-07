@@ -4,6 +4,12 @@ import Foundation
 struct CompactPlaybackPolicySmoke {
     static func main() {
         precondition(CompactPlaybackPolicy.minimumTouchTarget == 44)
+        precondition(CompactPlaybackPolicy.emphasizedTouchTarget == 50)
+        precondition(CompactPlaybackPolicy.speedControlWidth == 48)
+        precondition(CompactPlaybackPolicy.speedControlVisualHeight == 32)
+        precondition(CompactPlaybackPolicy.rowHeight == 50)
+        precondition(CompactPlaybackPolicy.controlSpacing == 12)
+        precondition(CompactPlaybackPolicy.sectionSpacing == 10)
         precondition(
             CompactPlaybackPolicy.command(
                 for: .togglePlayback,

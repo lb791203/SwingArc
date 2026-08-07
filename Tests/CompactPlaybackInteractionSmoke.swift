@@ -20,6 +20,7 @@ struct CompactPlaybackInteractionSmoke {
         perform(.previousFrame, true)
         perform(.nextFrame, false)
         perform(.selectRate(0.5), true)
-        precondition(events == ["play", "pause", "previous", "next", "rate:0.5"])
+        perform(.selectRate(0.25), false)
+        precondition(events == ["play", "pause", "previous", "next", "rate:0.5", "rate:0.25"])
     }
 }

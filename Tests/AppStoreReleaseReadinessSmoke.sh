@@ -32,8 +32,8 @@ grep -q 'INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription' "$project"
 grep -q 'TARGETED_DEVICE_FAMILY = 1;' "$project"
 grep -q 'SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;' "$project"
 grep -q 'SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;' "$project"
-grep -q 'MARKETING_VERSION = 1.0;' "$project"
-grep -q 'CURRENT_PROJECT_VERSION = 2;' "$project"
+grep -q 'MARKETING_VERSION = 1.0.1;' "$project"
+grep -q 'CURRENT_PROJECT_VERSION = 3;' "$project"
 grep -q 'PRODUCT_BUNDLE_IDENTIFIER = com.liangbo.swingarc;' "$project"
 grep -q 'IPHONEOS_DEPLOYMENT_TARGET = 17.0;' "$project"
 grep -q 'INFOPLIST_KEY_CFBundleDisplayName = SwingArc;' "$project"
@@ -57,6 +57,7 @@ for heading in \
   grep -Fqx -- "$heading" "$metadata"
 done
 grep -Fqx -- '首次发布：支持手动录像、视频导入、慢动作与逐帧回放、P1–P8 本地识别和人工修正、专业画线、本地项目记录及标注图片/视频导出。' "$metadata"
+grep -Fqx -- '改进 P1–P8 图标与底部排版，恢复倍速和逐帧控制，并修复画线、圆圈在视频导出或重新打开记录时的尺寸与位置。' "$metadata"
 grep -Fqx -- '提示：P1–P8 自动识别结果仅用于运动训练参考，不能替代专业教练意见。识别效果会受到机位、光线、遮挡和视频完整度影响。P6 和 P8 缺少可靠杆身证据时会显示“未识别”，SwingArc 不会用固定时间或视频百分比生成假结果。' "$metadata"
 for marker in \
   '1. Launch SwingArc.' \

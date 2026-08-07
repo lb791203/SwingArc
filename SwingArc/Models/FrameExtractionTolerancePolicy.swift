@@ -208,3 +208,45 @@ enum FrameExtractionTolerancePolicy {
         )
     }
 }
+
+/// Preserves exact source-frame timestamps for P-point playback. The rounded
+/// fallback exists only for legacy markers that do not have a source frame or
+/// when an exact source timeline cannot be loaded.
+enum PlaybackSeekTimePolicy {
+    static let defaultFallbackTimescale: CMTimeScale = 60_000
+
+    static func targetTime(
+        exactPresentationTime: CMTime?,
+        fallbackSeconds: Double,
+        fallbackTimescale: CMTimeScale = defaultFallbackTimescale
+    ) -> CMTime {
+        if let exactPresentationTime,
+           exactPresentationTime.isValid,
+           exactPresentationTime.isNumeric,
+           exactPresentationTime.seconds.isFinite {
+            return exactPresentationTime
+        }
+        return roundedFallbackTime(
+            seconds: fallbackSeconds,
+            timescale: fallbackTimescale
+        )
+    }
+
+    static func roundedFallbackTime(
+        seconds: Double,
+        timescale: CMTimeScale = defaultFallbackTimescale
+    ) -> CMTime {
+        guard seconds.isFinite,
+              timescale > 0 else { return .zero }
+        let clampedSeconds = max(seconds, 0)
+        let scaledValue = clampedSeconds * Double(timescale)
+        guard scaledValue.isFinite,
+              scaledValue <= Double(CMTimeValue.max) else {
+            return .zero
+        }
+        return CMTime(
+            value: CMTimeValue(scaledValue.rounded()),
+            timescale: timescale
+        )
+    }
+}

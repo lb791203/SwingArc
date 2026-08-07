@@ -101,6 +101,48 @@ struct FrameExtractionTolerancePolicySmoke {
                 == CMTime(value: 29, timescale: 30)
         )
 
+        // Regression: the persisted P8 time from a 30 fps clip used to be
+        // truncated to 1459/600, which is before source frame 73 and makes
+        // AVPlayer display frame 72.
+        let persistedP8Time = 2.433333333333333
+        let expectedP8Time = CMTime(value: 73, timescale: 30)
+        let legacyP8Time = CMTime(
+            seconds: persistedP8Time,
+            preferredTimescale: 600
+        )
+        precondition(
+            CMTimeCompare(legacyP8Time, expectedP8Time) < 0,
+            "The fixture must reproduce the previous-frame seek bug"
+        )
+        let roundedP8Fallback = PlaybackSeekTimePolicy
+            .roundedFallbackTime(
+                seconds: persistedP8Time,
+                timescale: 15_360
+            )
+        precondition(
+            CMTimeCompare(roundedP8Fallback, expectedP8Time) == 0,
+            "Legacy marker fallback must not land before source frame 73"
+        )
+        let exactVFRTime = CMTime(value: 37_376, timescale: 15_360)
+        precondition(
+            PlaybackSeekTimePolicy.targetTime(
+                exactPresentationTime: exactVFRTime,
+                fallbackSeconds: 1
+            ) == exactVFRTime,
+            "A persisted source frame must keep its exact presentation timestamp"
+        )
+        precondition(
+            PlaybackSeekTimePolicy.targetTime(
+                exactPresentationTime: nil,
+                fallbackSeconds: persistedP8Time,
+                fallbackTimescale: 15_360
+            ) == roundedP8Fallback,
+            "Legacy markers without a source frame must use the rounded fallback"
+        )
+        precondition(
+            PlaybackSeekTimePolicy.roundedFallbackTime(seconds: .nan) == .zero
+        )
+
         if CommandLine.arguments.count > 1 {
             let analyzer = try! String(
                 contentsOfFile: CommandLine.arguments[1],

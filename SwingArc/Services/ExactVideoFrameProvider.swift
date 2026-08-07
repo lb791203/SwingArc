@@ -161,4 +161,12 @@ actor ExactVideoFrameSession {
             sourceFrameIndex: sourceFrameIndex
         )?.seconds
     }
+
+    func presentationTime(
+        at sourceFrameIndex: Int
+    ) -> CMTime? {
+        provider?.timeline.presentationTime(
+            sourceFrameIndex: sourceFrameIndex
+        )
+    }
 }

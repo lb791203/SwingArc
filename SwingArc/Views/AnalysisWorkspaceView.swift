@@ -53,7 +53,7 @@ struct AnalysisWorkspaceView: View {
                         presentation: presentation,
                         keyframes: keyframes,
                         onCancelAnalysis: onCancelAnalysis,
-                        onSeek: playbackManager.seek,
+                        onSeek: { playbackManager.seek(to: $0) },
                         onAdjust: openAdjustment
                     )
                     .frame(width: 300)
@@ -137,17 +137,7 @@ struct AnalysisWorkspaceView: View {
                 }
 
                 if interactionMode == .drawing {
-                    DrawingToolRail(
-                        activeTool: $activeTool,
-                        selectedColor: $selectedColor,
-                        isKeyframeMode: $isKeyframeMode,
-                        onUndo: { if !drawings.isEmpty { drawings.removeLast() } },
-                        onClear: { drawings.removeAll() },
-                        onDone: { interactionMode = .idle }
-                    )
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.trailing, 10)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    drawingModeChrome
                 }
             }
             .frame(maxHeight: .infinity)
@@ -160,7 +150,7 @@ struct AnalysisWorkspaceView: View {
                     presentation: presentation,
                     onStageTap: { stage, marker in
                         if let marker {
-                            playbackManager.seek(to: marker.time)
+                            playbackManager.seek(to: marker)
                         } else {
                             openAdjustment(stage)
                         }
@@ -221,33 +211,95 @@ struct AnalysisWorkspaceView: View {
                     .onTapGesture(perform: toggleWorkspacePlayback)
             }
 
-            mobileReplayHeader
-            mobileReviewChrome
-
-            if interactionMode == .drawing {
-                DrawingToolRail(
-                    activeTool: $activeTool,
-                    selectedColor: $selectedColor,
-                    isKeyframeMode: $isKeyframeMode,
-                    onUndo: { if !drawings.isEmpty { drawings.removeLast() } },
-                    onClear: { drawings.removeAll() },
-                    onDone: { interactionMode = .idle }
-                )
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.trailing, 10)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
+            if interactionMode == .idle {
+                mobileReplayHeader
+                mobileReviewChrome
+            } else {
+                drawingModeChrome
             }
         }
         .background(Color.black)
         .animation(.easeInOut(duration: 0.2), value: interactionMode)
     }
 
+    private var drawingModeChrome: some View {
+        ZStack {
+            drawingModeHeader
+
+            DrawingToolRail(
+                activeTool: $activeTool,
+                selectedColor: $selectedColor,
+                isKeyframeMode: $isKeyframeMode,
+                onClear: { drawings.removeAll() }
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .padding(.horizontal, 8)
+            .padding(.bottom, WorkspaceAccessoryPolicy.drawingToolbarBottomPadding)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    private var drawingModeHeader: some View {
+        ZStack {
+            Text("画线")
+                .font(.system(size: 18, weight: .semibold, design: .rounded))
+
+            HStack(spacing: 8) {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 23, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("返回项目库")
+
+                Spacer(minLength: 0)
+
+                Button {
+                    if !drawings.isEmpty {
+                        drawings.removeLast()
+                    }
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 20, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .disabled(drawings.isEmpty)
+                .opacity(drawings.isEmpty ? 0.38 : 1)
+                .accessibilityLabel("撤销最后一笔")
+
+                Button("完成") {
+                    interactionMode = .idle
+                }
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(AnalysisTheme.proTourSignal)
+                .frame(minWidth: 52, minHeight: 44)
+                .buttonStyle(.plain)
+                .accessibilityLabel("结束画线")
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .background(
+            LinearGradient(
+                colors: [.black.opacity(0.72), .black.opacity(0.30), .clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
     private var mobileReplayHeader: some View {
         HStack(spacing: 12) {
             Button(action: onBack) {
-                Image(systemName: "chevron.down")
+                Image(systemName: "chevron.left")
                     .font(.system(size: 23, weight: .semibold))
-                    .frame(width: 42, height: 42)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("返回项目库")
@@ -267,13 +319,13 @@ struct AnalysisWorkspaceView: View {
 
             Spacer(minLength: 0)
 
-            Button(action: onCorrectPPoints) {
-                Text("修正 P 点")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(minWidth: 72, minHeight: 42)
+            Button(action: onExport) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 20, weight: .semibold))
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("修正 P 点")
+            .accessibilityLabel("分享视频")
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 16)
@@ -359,7 +411,7 @@ struct AnalysisWorkspaceView: View {
     }
 
     private var mobileReplayOverlayControls: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: CompactPlaybackPolicy.sectionSpacing) {
             mobileReplayActionRow
 
             CompactPlaybackControlsView(
@@ -375,6 +427,8 @@ struct AnalysisWorkspaceView: View {
         }
         .padding(.top, 34)
         .padding(.bottom, 10)
+        .contentShape(Rectangle())
+        .onTapGesture { }
         .background(alignment: .bottom) {
             LinearGradient(
                 colors: [.clear, .black.opacity(0.34), .black.opacity(0.84)],
@@ -444,16 +498,21 @@ struct AnalysisWorkspaceView: View {
 
             Spacer(minLength: 20)
 
-            Button(action: onExport) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 18, weight: .semibold))
+            Button(action: onCorrectPPoints) {
+                ZStack {
+                    Image(systemName: "viewfinder")
+                        .font(.system(size: 22, weight: .medium))
+                    Text("P")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                }
                     .frame(width: 48, height: 48)
                     .background(.black.opacity(0.46), in: Circle())
                     .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .foregroundStyle(.white)
-            .accessibilityLabel("导出")
+            .accessibilityLabel("修正 P 点")
+            .accessibilityHint("打开 P1–P8 时间点修正")
         }
     }
 
@@ -515,7 +574,7 @@ struct AnalysisWorkspaceView: View {
         playbackManager.pause()
         interactionMode = .idle
         if let marker = keyframes.first(where: { $0.stage == stage.rawValue }) {
-            playbackManager.seek(to: marker.time)
+            playbackManager.seek(to: marker)
         }
         adjustmentStage = stage
     }
@@ -588,7 +647,7 @@ struct FullscreenVideoPlaybackView: View {
                     expandedCategory: $expandedFeedbackCategory,
                     onSelectStage: { stage in
                         if let marker = keyframes.first(where: { $0.stage == stage.rawValue }) {
-                            playbackManager.seek(to: marker.time)
+                            playbackManager.seek(to: marker)
                         } else if let time = AnalysisWorkspacePresentation(
                             state: playbackManager.analysisState
                         ).detection(for: stage)?.time {
@@ -643,9 +702,9 @@ struct FullscreenVideoPlaybackView: View {
                 currentTime: playbackManager.currentTime,
                 frameDuration: VideoFramePolicy.frameDuration(sourceFrameRate: playbackManager.sourceFrameRate),
                 duration: playbackManager.duration
-            ) { time in
+            ) { marker in
                 playbackManager.pause()
-                playbackManager.seek(to: time)
+                playbackManager.seek(to: marker)
                 setControlsVisible(true, schedulesHide: false)
             } onScrub: { time in
                 playbackManager.pause()

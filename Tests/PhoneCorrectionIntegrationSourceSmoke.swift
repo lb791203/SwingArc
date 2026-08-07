@@ -16,6 +16,10 @@ struct PhoneCorrectionIntegrationSourceSmoke {
             contentsOf: root.appendingPathComponent("SwingArc/Views/WorkspaceComponents.swift"),
             encoding: .utf8
         )
+        let playback = try String(
+            contentsOf: root.appendingPathComponent("SwingArc/Views/CustomVideoPlayer.swift"),
+            encoding: .utf8
+        )
 
         precondition(content.contains("showPPointCorrection"))
         precondition(content.contains("PPointCorrectionWorkspace("))
@@ -23,6 +27,7 @@ struct PhoneCorrectionIntegrationSourceSmoke {
         precondition(content.contains("refineManualPPoints("))
         precondition(content.contains("markers: keyframes"))
         precondition(content.contains("sourceFrameIndex: sourceFrameIndex"))
+        precondition(content.contains("playbackManager.seek(to: marker)"))
         precondition(!content.contains("AnnotationWorkspaceView("))
         let fullscreenStart = workspace.range(
             of: "struct FullscreenVideoPlaybackView"
@@ -30,7 +35,7 @@ struct PhoneCorrectionIntegrationSourceSmoke {
         let publicWorkspace = String(workspace[..<fullscreenStart])
 
         precondition(publicWorkspace.contains("let onCorrectPPoints: () -> Void"))
-        precondition(publicWorkspace.contains("Text(\"修正 P 点\")"))
+        precondition(publicWorkspace.contains(".accessibilityLabel(\"修正 P 点\")"))
         precondition(publicWorkspace.contains("Text(\"画线\")"))
         precondition(!publicWorkspace.contains("选择拍摄视角"))
         precondition(!publicWorkspace.contains("title: \"正后方 DTL\""))
@@ -46,6 +51,8 @@ struct PhoneCorrectionIntegrationSourceSmoke {
         )
         precondition(mobileTimeline.contains("let onCorrectPPoints: () -> Void"))
         precondition(mobileTimeline.contains("onCorrectPPoints()"))
+        precondition(mobileTimeline.contains("playbackManager.seek(to: marker)"))
+        precondition(!mobileTimeline.contains("playbackManager.seek(to: marker.time)"))
         precondition(
             !mobileTimeline.contains(".allowsHitTesting(marker != nil)"),
             "An unresolved P stage must remain actionable"
@@ -61,6 +68,21 @@ struct PhoneCorrectionIntegrationSourceSmoke {
             to: ")"
         )
         precondition(mobileCall.contains("onCorrectPPoints: onCorrectPPoints"))
+        precondition(
+            playback.contains("func seek(to marker: KeyframeMarker)") &&
+                playback.contains("session?.presentationTime(") &&
+                playback.contains("exactPresentationTime: exactTime"),
+            "P-point playback must resolve the persisted source frame before seeking"
+        )
+        precondition(
+            !workspace.contains("playbackManager.seek(to: marker.time)"),
+            "Workspace stage actions must not discard the persisted source frame"
+        )
+        precondition(
+            !components.contains("onSeek(marker.time)") &&
+                !components.contains("onSelect(marker.time)"),
+            "Inspector and fullscreen stage actions must retain the source frame"
+        )
     }
 
     private static func section(

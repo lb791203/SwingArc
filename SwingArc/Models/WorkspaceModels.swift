@@ -19,7 +19,11 @@ enum StageAdjustmentPlacement: Equatable {
 }
 
 enum WorkspaceAccessoryPolicy {
-    static let drawingRailMaximumWidth: CGFloat = 56
+    static let drawingToolbarButtonSize: CGFloat = 44
+    static let drawingToolbarItemSpacing: CGFloat = 0
+    static let drawingToolbarHorizontalPadding: CGFloat = 3
+    static let drawingToolbarMaximumWidth: CGFloat = 370
+    static let drawingToolbarBottomPadding: CGFloat = 28
     static let stageAdjustmentPlacement: StageAdjustmentPlacement = .inline
 }
 
@@ -405,6 +409,53 @@ enum FullscreenPlaybackPolicy {
     static let showsWorkspaceChrome = false
     static let showsTimeLabels = false
     static let showsTransportButtons = false
+}
+
+/// Keeps the eight mobile P-stage controls compact while leaving a real gap
+/// between adjacent hit regions. The glyph can shrink without shrinking the
+/// control below the standard 44-point vertical touch target.
+enum MobileReplayStageStripPolicy {
+    static let stackSpacing: CGFloat = 8
+    static let stageSpacing: CGFloat = 4
+    static let buttonHeight: CGFloat = 44
+    static let glyphWidth: CGFloat = 38
+    static let glyphHeight: CGFloat = 34
+    static let currentIndicatorWidth: CGFloat = 14
+    static let currentIndicatorHeight: CGFloat = 2
+}
+
+enum ReplayStageSelectionPolicy {
+    static func currentStage(
+        at currentTime: Double,
+        keyframes: [KeyframeMarker],
+        tolerance: Double
+    ) -> SwingStage? {
+        guard currentTime.isFinite,
+              currentTime >= 0,
+              tolerance.isFinite,
+              tolerance >= 0 else {
+            return nil
+        }
+
+        let candidates = SwingStage.pStages.enumerated().compactMap {
+            index, stage -> (stage: SwingStage, distance: Double, index: Int)? in
+            guard let marker = keyframes.first(where: { $0.stage == stage.rawValue }),
+                  marker.time.isFinite else {
+                return nil
+            }
+            return (stage, abs(currentTime - marker.time), index)
+        }
+
+        guard let nearest = candidates.min(by: { left, right in
+            if abs(left.distance - right.distance) <= 0.000_000_001 {
+                return left.index < right.index
+            }
+            return left.distance < right.distance
+        }), nearest.distance <= tolerance else {
+            return nil
+        }
+        return nearest.stage
+    }
 }
 
 enum FullscreenReplayTap: Equatable {
