@@ -1,4 +1,16 @@
-# SwingArc 1.0 App Store 提交清单
+# SwingArc 1.0.1 App Store 提交清单
+
+## TestFlight 1.0.1 (3) 验收记录（2026-08-07）
+
+- [x] 使用 Xcode 27 beta 4 完成 Release archive，并成功上传 App Store Connect；该工具链仅用于 TestFlight，不用于正式 App Review 提交。
+- [x] Apple 处理完成；构建状态为“完成”，二进制状态为“已验证”，Bundle ID 为 `com.liangbo.swingarc`。
+- [x] 构建元数据确认：版本 `1.0.1 (3)`、arm64、仅 iPhone、最低 iOS 17、包含符号、非豁免加密为“否”。
+- [x] 已加入“SwingArc 内部测试”群组，并在 TestFlight 保存本次重点测试说明。
+- [x] iPhone 16 Pro 已通过 TestFlight 替换安装并首次启动 `1.0.1 (3)`；原有本地分析记录仍保留。
+- [x] 真机检查通过：主页、历史记录、正常分析页、P1–P8 标签、P8 预览与人工修正帧一致、画线工具栏及颜色选择。
+- [x] 真机量角器验证通过：两次拖拽得到约 `84.1°`，未再固定显示 `180°`；测试标记随后已撤销，未保存到历史记录。
+- [ ] 本轮未重新执行完整录像、相册导入、导出视频、权限拒绝/重新授权、低存储空间与最低系统 iOS 17 验收。
+- [ ] 正式 App Review 提交前，须改用 Apple 当时公开发布且支持提交的稳定版 Xcode 重新归档、验证并上传新构建。
 
 ## 已在仓库准备
 
