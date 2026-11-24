@@ -15,6 +15,8 @@ struct AnalysisWorkspaceView: View {
     let onCancelAnalysis: () -> Void
     let onSetManualStage: (SwingStage) -> Void
     let onCorrectPPoints: () -> Void
+    /// Opens P-point correction directly on one stage.
+    let onCorrectStage: (SwingStage) -> Void
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var interactionMode: WorkspaceInteractionMode = .idle
@@ -392,10 +394,25 @@ struct AnalysisWorkspaceView: View {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(AnalysisTheme.proTourPaused)
-                Text(mobileFailureMessage(failure))
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                    .multilineTextAlignment(.leading)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(mobileFailureMessage(failure))
+                        .font(.system(size: 13, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+
+                    if failure != .analysisCancelled, failure != .noVideo {
+                        Button(action: onCorrectPPoints) {
+                            Label("手动标 P 点", systemImage: "hand.tap")
+                                .font(.system(size: 13, weight: .bold))
+                                .padding(.horizontal, 12)
+                                .frame(minHeight: 32)
+                                .foregroundStyle(AnalysisTheme.proTourBackground)
+                                .background(AnalysisTheme.proTourSignal, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("逐帧手动设置 P1–P8")
+                    }
+                }
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 13)
@@ -422,7 +439,8 @@ struct AnalysisWorkspaceView: View {
             MobileReplayTimelineView(
                 playbackManager: playbackManager,
                 keyframes: keyframes,
-                onCorrectPPoints: onCorrectPPoints
+                onCorrectPPoints: onCorrectPPoints,
+                onCorrectStage: onCorrectStage
             )
         }
         .padding(.top, 34)
@@ -551,7 +569,7 @@ struct AnalysisWorkspaceView: View {
             return "未找到击球瞬间"
         case .missingPostImpactBoundary:
             return "未找到击球后释放边界"
-        case .unsupportedInput:
+        case .unsupportedInput, .poseDetectionUnavailable:
             return AnalysisFailurePresentation(failure: failure).message
         case .analysisCancelled:
             return "AI 分析已取消"

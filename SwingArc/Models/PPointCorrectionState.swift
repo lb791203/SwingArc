@@ -152,13 +152,47 @@ struct PPointCorrectionState: Equatable {
             .sorted { $0.code.ordinal < $1.code.ordinal }
     }
 
+    /// The frames the selected stage may move to without crossing its
+    /// neighbouring P points.
+    var selectableFrameRange: ClosedRange<Int> {
+        orderedBounds(for: selectedCode)
+    }
+
+    /// The stage after the selected one, if any.
+    var nextCode: PPointCode? {
+        let next = selectedCode.ordinal + 1
+        return next < PPointCode.allCases.count ? PPointCode.allCases[next] : nil
+    }
+
     fileprivate mutating func select(_ code: PPointCode) {
         selectedCode = code
         let selection = selection(for: code)
         currentSourceFrameIndex = selection.sourceFrameIndex
             ?? selection.suggestedSourceFrameIndex
-            ?? boundedFrame(currentSourceFrameIndex)
+            ?? startFrameForUnresolved(code)
         currentSourceFrameIndex = orderedBounds(for: code).clamp(currentSourceFrameIndex)
+    }
+
+    /// An unresolved stage starts just after the closest earlier stage
+    /// (set or suggested), so the user scrubs forward from there instead of
+    /// from wherever the previous stage left the playhead.
+    private func startFrameForUnresolved(_ code: PPointCode) -> Int {
+        let earlier = selections
+            .filter { $0.code.ordinal < code.ordinal }
+            .sorted { $0.code.ordinal > $1.code.ordinal }
+            .lazy
+            .compactMap { $0.sourceFrameIndex ?? $0.suggestedSourceFrameIndex }
+            .first
+        if let earlier {
+            return boundedFrame(earlier + 1)
+        }
+        return boundedFrame(currentSourceFrameIndex)
+    }
+
+    fileprivate mutating func jump(to frame: Int) {
+        currentSourceFrameIndex = orderedBounds(for: selectedCode).clamp(
+            boundedFrame(frame)
+        )
     }
 
     fileprivate mutating func step(by amount: Int) {
@@ -220,6 +254,7 @@ struct PPointCorrectionState: Equatable {
 enum PPointCorrectionAction: Equatable {
     case select(PPointCode)
     case step(Int)
+    case jump(Int)
     case setSelectedStage
 }
 
@@ -233,6 +268,8 @@ enum PPointCorrectionReducer {
             state.select(code)
         case let .step(amount):
             state.step(by: amount)
+        case let .jump(frame):
+            state.jump(to: frame)
         case .setSelectedStage:
             state.setSelectedStage()
         }

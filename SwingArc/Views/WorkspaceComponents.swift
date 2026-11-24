@@ -168,12 +168,14 @@ struct StageTimelineView: View {
 }
 
 /// Compact review controls stay visible on iPhone. Each P-stage is represented
-/// by its own swing silhouette. Unresolved positions open the existing precise
-/// P-point correction workspace instead of presenting a disabled action.
+/// by its own swing silhouette and a P1–P8 label coloured by status.
+/// Unresolved positions open the precise P-point correction workspace on that
+/// stage; a long press on a resolved stage does the same.
 struct MobileReplayTimelineView: View {
     @ObservedObject var playbackManager: VideoPlaybackManager
     let keyframes: [KeyframeMarker]
     let onCorrectPPoints: () -> Void
+    let onCorrectStage: (SwingStage) -> Void
 
     var body: some View {
         VStack(spacing: MobileReplayStageStripPolicy.stackSpacing) {
@@ -201,7 +203,7 @@ struct MobileReplayTimelineView: View {
                         if let marker {
                             playbackManager.seek(to: marker)
                         } else {
-                            onCorrectPPoints()
+                            onCorrectStage(stage)
                         }
                     } label: {
                         VStack(spacing: 2) {
@@ -214,6 +216,19 @@ struct MobileReplayTimelineView: View {
                                 width: MobileReplayStageStripPolicy.glyphWidth,
                                 height: MobileReplayStageStripPolicy.glyphHeight
                             )
+
+                            Text(stage.pNumber)
+                                .font(.system(
+                                    size: MobileReplayStageStripPolicy.labelFontSize,
+                                    weight: .bold,
+                                    design: .rounded
+                                ))
+                                .foregroundStyle(
+                                    StageStripLabelStyle.color(
+                                        for: resultState,
+                                        isCurrent: current
+                                    )
+                                )
 
                             Capsule()
                                 .fill(AnalysisTheme.proTourSignal)
@@ -228,11 +243,20 @@ struct MobileReplayTimelineView: View {
                         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+                            playbackManager.pause()
+                            onCorrectStage(stage)
+                        }
+                    )
                     .accessibilityLabel(
                         "\(stage.pNumber)，\(SwingStagePoseCue.description(for: stage))，"
                             + StageResultPresentation.detailLabel(for: resultState)
                     )
                     .accessibilityHint(marker == nil ? "打开 P 点修正" : "跳到该阶段")
+                    .accessibilityAction(named: "修正 \(stage.pNumber)") {
+                        onCorrectStage(stage)
+                    }
                 }
             }
             // Consume near-miss taps in the gaps instead of forwarding them to
@@ -259,6 +283,19 @@ struct MobileReplayTimelineView: View {
             keyframes: keyframes,
             tolerance: 0.18
         )
+    }
+}
+
+/// P-strip label colours: white resolved, amber needs review, orange unresolved,
+/// green for the stage under the playhead.
+enum StageStripLabelStyle {
+    static func color(for state: StageResultState, isCurrent: Bool) -> Color {
+        if isCurrent { return AnalysisTheme.proTourSignal }
+        switch state {
+        case .confirmed, .manual: return .white
+        case .review: return AnalysisTheme.current
+        case .unresolved: return AnalysisTheme.proTourPaused
+        }
     }
 }
 

@@ -61,6 +61,15 @@ extension SwingPoseSample {
 /// 基于 Apple Vision 的实时姿态检测器
 class VisionPoseDetector {
     private var poseRequest = VNDetectHumanBodyPoseRequest()
+    /// Counts of `detectPoses` calls and of calls where Vision itself threw.
+    /// When every request throws (for example in the iOS Simulator, where the
+    /// body-pose request cannot be set up) the video is not the problem.
+    private(set) var poseRequestCount = 0
+    private(set) var failedPoseRequestCount = 0
+
+    var isPoseDetectionUnavailable: Bool {
+        poseRequestCount > 0 && failedPoseRequestCount == poseRequestCount
+    }
     
     init() {}
     
@@ -201,11 +210,13 @@ class VisionPoseDetector {
     /// golfer identity across the coarse and fine passes.
     func detectPoses(in cgImage: CGImage, orientation: CGImagePropertyOrientation = .up) -> [PoseEstimationResult] {
         let requestHandler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation, options: [:])
+        poseRequestCount += 1
         do {
             try requestHandler.perform([poseRequest])
             guard let observations = poseRequest.results else { return [] }
             return observations.compactMap { try? poseResult(from: $0) }
         } catch {
+            failedPoseRequestCount += 1
             print("Vision pose detection error on CGImage: \(error)")
             return []
         }
@@ -800,6 +811,10 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             golferTracker.diagnostics
         }
 
+        var isPoseDetectionUnavailable: Bool {
+            vision.isPoseDetectionUnavailable
+        }
+
         func selectPose(
             in image: CGImage,
             time: Double,
@@ -1053,6 +1068,11 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         guard gate.isActive(runID) else { return .cancelled }
         guard !coarseSamples.isEmpty else {
             return activeFrameExtractionFailure(runID: runID, gate: gate)
+        }
+        // Vision failing on every frame is a device/runtime problem, not a
+        // person-stability problem; do not report it as 人物检测不稳定.
+        guard !trackedPoseDetector.isPoseDetectionUnavailable else {
+            return activeFailure(.poseDetectionUnavailable, runID: runID, gate: gate)
         }
 
         let attempts = SwingAttemptSegmenter.segment(

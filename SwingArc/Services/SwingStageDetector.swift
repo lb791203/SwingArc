@@ -2897,6 +2897,8 @@ enum AnalysisFailure: Equatable {
     case missingPostImpactBoundary
     case incompleteSwingClip
     case unsupportedInput([SwingInputQualityIssue])
+    /// Apple Vision could not run body-pose detection at all on this device.
+    case poseDetectionUnavailable
     case analysisCancelled
 }
 

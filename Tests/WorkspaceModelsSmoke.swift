@@ -53,9 +53,10 @@ struct WorkspaceModelsSmoke {
         precondition(StageStripPolicy.indicator(for: .manual) == .lock)
         precondition(MobileReplayStageStripPolicy.stackSpacing == 8)
         precondition(MobileReplayStageStripPolicy.stageSpacing == 4)
-        precondition(MobileReplayStageStripPolicy.buttonHeight == 44)
+        precondition(MobileReplayStageStripPolicy.buttonHeight == 54)
         precondition(MobileReplayStageStripPolicy.glyphWidth == 38)
-        precondition(MobileReplayStageStripPolicy.glyphHeight == 34)
+        precondition(MobileReplayStageStripPolicy.glyphHeight == 30)
+        precondition(MobileReplayStageStripPolicy.labelFontSize == 10)
 
         let replayMarkers = [
             KeyframeMarker(time: 0.75, stage: .takeaway),

@@ -38,6 +38,7 @@ struct ContentView: View {
     @State private var showVideoPicker = false
     @State private var showManualCapture = false
     @State private var showPPointCorrection = false
+    @State private var pPointCorrectionStage: SwingStage?
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var showExportActions = false
     @State private var sharePayload: SharePayload?
@@ -77,6 +78,12 @@ struct ContentView: View {
                     onSetManualStage: saveManualStage,
                     onCorrectPPoints: {
                         playbackManager.pause()
+                        pPointCorrectionStage = nil
+                        showPPointCorrection = true
+                    },
+                    onCorrectStage: { stage in
+                        playbackManager.pause()
+                        pPointCorrectionStage = stage
                         showPPointCorrection = true
                     }
                 )
@@ -143,6 +150,7 @@ struct ContentView: View {
                     ),
                     markers: keyframes,
                     initialTime: playbackManager.currentTime,
+                    initialStage: pPointCorrectionStage,
                     onClose: { showPPointCorrection = false },
                     onSave: savePPointCorrection
                 )
