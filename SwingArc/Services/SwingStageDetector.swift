@@ -3243,57 +3243,29 @@ enum SwingStageDetector {
     static func detectPoseOnlyCandidates(
         _ rawSamples: [SwingPoseSample]
     ) -> SwingAnalysisResult {
-        let samples = rawSamples
-            .filter { !$0.wristY.isNaN }
-            .sorted { $0.time < $1.time }
+        let samples = PoseOnlyStageRules.suppressDenseJitter(
+            rawSamples
+                .filter { !$0.wristY.isNaN }
+                .sorted { $0.time < $1.time }
+        )
         guard samples.count >= 9,
               zip(samples, samples.dropFirst()).allSatisfy({ $0.time < $1.time }) else {
             return unresolvedResult()
         }
 
-        var resolved: [SwingStage: SwingPoseSample] = [:]
-        guard let p4Index = backswingTopIndex(in: samples) else {
+        guard let apexIndex = backswingTopIndex(in: samples) else {
             return unresolvedResult()
         }
 
-        // Repeated video frames at P1 and P4 are normal. This compatibility
-        // path is not part of the production candidate/solver pipeline.
-        if p4Index >= 3 {
-            let p1Index = (0..<p4Index).reduce(0) { best, index in
-                samples[index].wristY >= samples[best].wristY ? index : best
-            }
-            let ascentLength = p4Index - p1Index
-            let p2Index = p1Index + max(1, ascentLength / 3)
-            let p3Index = p1Index + max(2, (ascentLength * 2) / 3)
-            let p1 = samples[p1Index]
-            let p2 = samples[p2Index]
-            let p3 = samples[p3Index]
-            let p4 = samples[p4Index]
-            // Slow-motion Vision tracks commonly contain short reversals or
-            // repeated frames. Preserve ordered correction candidates when
-            // the full address-to-top movement is clear instead of requiring
-            // every interpolated third to be strictly monotonic.
-            if p1Index < p2Index, p2Index < p3Index, p3Index < p4Index,
-               p1.wristY > p4.wristY + directionChangeThreshold {
-                resolved[.address] = p1
-                resolved[.takeaway] = p2
-                resolved[.leadArmParallelBackswing] = p3
-                resolved[.top] = p4
-            }
-        }
-
-        // P5 is lead-arm-parallel on the downswing. It happens when the hands
-        // cross the shoulder line, not at the first frame that leaves P4.
-        if let p5Index = downswingParallelIndex(after: p4Index, in: samples) {
-            resolved[.leadArmParallelDownswing] = samples[p5Index]
-
-            // Legacy pose-only samples cannot establish P6 (shaft-parallel
-            // delivery) or P8 (shaft-parallel release). They stay unresolved
-            // rather than being inferred from hand motion. P7 can still be
-            // retained as an impact compatibility signal.
-            if let p7Index = impactIndex(after: p5Index, in: samples) {
-                resolved[.impact] = samples[p7Index]
-            }
+        // Every stage is chosen from body geometry on real observed frames.
+        // The rules compare positions rather than speeds, so they behave the
+        // same on real-time high-rate originals and on Photos slow-motion
+        // timelines, and they keep working when a local dense refinement pass
+        // adds extra frames around each candidate.
+        let indices = PoseOnlyStageRules.resolve(samples: samples, apexIndex: apexIndex)
+        var resolved: [SwingStage: SwingPoseSample] = [:]
+        for (stage, index) in indices.byStage {
+            resolved[stage] = samples[index]
         }
 
         let detections = SwingStage.pStages.map { stage -> SwingStageDetection in
@@ -3376,55 +3348,6 @@ enum SwingStageDetector {
         return (first.y + second.y) / 2
     }
 
-    private static func downswingParallelIndex(after topIndex: Int, in samples: [SwingPoseSample]) -> Int? {
-        guard topIndex + 2 < samples.count else { return nil }
-        return ((topIndex + 1)..<(samples.count - 1)).first { index in
-            guard let shoulderY = midpointY(samples[index].leftShoulder, samples[index].rightShoulder) else {
-                return false
-            }
-            return samples[index].wristY > samples[topIndex].wristY + directionChangeThreshold &&
-                samples[index + 1].wristY > samples[index].wristY + directionChangeThreshold &&
-                samples[index].wristY >= shoulderY
-        }
-    }
-
-    private static func impactIndex(after downswingIndex: Int, in samples: [SwingPoseSample]) -> Int? {
-        guard downswingIndex + 1 < samples.count else { return nil }
-        let finalIndices = (samples.count - 3)..<samples.count
-        let candidates = ((downswingIndex + 1)..<(samples.count - 1)).compactMap { index -> (index: Int, score: CGFloat)? in
-            guard !finalIndices.contains(index),
-                  let hipY = midpointY(samples[index].leftHip, samples[index].rightHip),
-                  let shoulderY = midpointY(samples[index].leftShoulder, samples[index].rightShoulder),
-                  let hand = handCenter(in: samples[index]),
-                  let hip = center(samples[index].leftHip, samples[index].rightHip) else {
-                return nil
-            }
-            guard hand.y >= shoulderY,
-                  abs(hand.y - hipY) <= 0.25,
-                  abs(hand.x - hip.x) <= 0.30 else {
-                return nil
-            }
-            let hipAlignment = max(0, 1 - (abs(hand.x - hip.x) / 0.30 + abs(hand.y - hipY) / 0.25) / 2)
-            let score = handSpeed(at: index, in: samples) * (0.35 + 0.65 * hipAlignment)
-            return (index, score)
-        }
-        return candidates.max { $0.score < $1.score }?.index
-    }
-
-    private static func handSpeed(at index: Int, in samples: [SwingPoseSample]) -> CGFloat {
-        guard index > 0 else { return 0 }
-        let elapsed = max(samples[index].time - samples[index - 1].time, .leastNonzeroMagnitude)
-        guard let current = handCenter(in: samples[index]),
-              let previous = handCenter(in: samples[index - 1]) else {
-            return abs(samples[index].wristY - samples[index - 1].wristY) / elapsed
-        }
-        return hypot(current.x - previous.x, current.y - previous.y) / elapsed
-    }
-
-    private static func handCenter(in sample: SwingPoseSample) -> CGPoint? {
-        center(sample.leftWrist, sample.rightWrist) ?? sample.rightWrist ?? sample.leftWrist
-    }
-
     private static func center(_ first: CGPoint?, _ second: CGPoint?) -> CGPoint? {
         guard let first, let second else { return nil }
         return CGPoint(x: (first.x + second.x) / 2, y: (first.y + second.y) / 2)
@@ -3479,6 +3402,326 @@ enum SwingStageDetector {
             }
         }
         return nil
+    }
+}
+
+/// Body-geometry stage rules for the pose-only product fallback.
+///
+/// Every rule compares the hands with the golfer's own torso, hips and
+/// shoulders on observed frames. No rule uses speeds, fixed time offsets or
+/// equal splits of the backswing, so the same swing gives the same stages on a
+/// real-time high-rate original and on a Photos slow-motion timeline, and a
+/// denser local pass around each candidate can only sharpen the result.
+///
+/// - P1: the last frame whose hands are still at the address position before
+///   the continuous move to the top (takeaway onset). The frame with the
+///   lowest hands is not used because it often falls inside a flat takeaway.
+/// - P2: the hands closest to hip height between P1 and P4.
+/// - P3: the hands closest to shoulder height between P2 and P4, the body-only
+///   proxy for a level lead arm.
+/// - P4: the first frame of the top plateau, not the last high-hand frame.
+/// - P5: the hands closest to shoulder height on the way down.
+/// - P7: the first downswing frame whose hands are back at address height,
+///   or the lowest downswing hands when no frame gets that close.
+///
+/// P6 and P8 are defined by the shaft and are never produced here.
+enum PoseOnlyStageRules {
+    struct Indices: Equatable {
+        var address: Int?
+        var takeaway: Int?
+        var leadArmParallelBackswing: Int?
+        var top: Int?
+        var leadArmParallelDownswing: Int?
+        var impact: Int?
+
+        var byStage: [(SwingStage, Int)] {
+            var pairs: [(SwingStage, Int)] = []
+            if let address { pairs.append((.address, address)) }
+            if let takeaway { pairs.append((.takeaway, takeaway)) }
+            if let leadArmParallelBackswing {
+                pairs.append((.leadArmParallelBackswing, leadArmParallelBackswing))
+            }
+            if let top { pairs.append((.top, top)) }
+            if let leadArmParallelDownswing {
+                pairs.append((.leadArmParallelDownswing, leadArmParallelDownswing))
+            }
+            if let impact { pairs.append((.impact, impact)) }
+            return pairs
+        }
+    }
+
+    /// Smallest address-to-top hand rise that still counts as a backswing.
+    static let minimumRise: CGFloat = 0.015
+    /// Number of earliest low-hand frames that define the address position.
+    static let addressReferenceFrameCount = 3
+
+    static func resolve(samples: [SwingPoseSample], apexIndex: Int) -> Indices {
+        var indices = Indices()
+        guard samples.indices.contains(apexIndex) else { return indices }
+        let hands = samples.map(handCenter)
+        guard let apexY = hands[apexIndex]?.y else { return indices }
+        let torso = torsoScale(samples)
+        let leadShoulderY = leadShoulderLevel(atTop: samples[apexIndex])
+
+        var addressY: CGFloat?
+        var rise: CGFloat?
+        var top = apexIndex
+        if let address = addressIndex(hands: hands, before: apexIndex, torso: torso),
+           let handY = hands[address]?.y,
+           handY - apexY > minimumRise {
+            addressY = handY
+            rise = handY - apexY
+            top = topPlateauStart(
+                hands: hands,
+                after: address,
+                apexIndex: apexIndex,
+                apexY: apexY,
+                tolerance: max(0.005, (handY - apexY) * 0.012)
+            )
+            indices.address = address
+            indices.top = top
+
+            if let takeaway = closestIndex(
+                in: (address + 1)..<top,
+                hands: hands,
+                samples: samples,
+                target: hipY
+            ) {
+                indices.takeaway = takeaway
+                indices.leadArmParallelBackswing = closestIndex(
+                    in: (takeaway + 1)..<top,
+                    hands: hands,
+                    samples: samples,
+                    target: leadShoulderY
+                )
+            }
+        }
+
+        let downswingEnd = downswingEndIndex(samples: samples, hands: hands, after: top)
+        let downswing = (top + 1)..<downswingEnd
+        var impact: Int?
+        if let addressY, let rise {
+            let tolerance = max(0.01, rise * 0.08)
+            impact = downswing.first { index in
+                guard let hand = hands[index] else { return false }
+                return hand.y >= addressY - tolerance
+            }
+        }
+        if impact == nil {
+            var lowest: (index: Int, y: CGFloat)?
+            for index in downswing {
+                guard let hand = hands[index],
+                      let hip = hipY(samples[index]),
+                      hand.y > hip else { continue }
+                if lowest == nil || hand.y > lowest!.y {
+                    lowest = (index, hand.y)
+                }
+            }
+            impact = lowest?.index
+        }
+        indices.impact = impact
+        indices.leadArmParallelDownswing = closestIndex(
+            in: (top + 1)..<(impact ?? downswingEnd),
+            hands: hands,
+            samples: samples,
+            target: leadShoulderY
+        )
+        return indices
+    }
+
+    /// Takeaway onset: walk back from the top to the last frame whose hands are
+    /// still at the address position. The address position is the median of
+    /// the earliest frames whose hands sit at their lowest height before the
+    /// top; using the earliest ones keeps it stable when a refinement pass adds
+    /// frames around the end of address.
+    static func addressIndex(hands: [CGPoint?], before apexIndex: Int, torso: CGFloat) -> Int? {
+        let candidates = (0..<apexIndex).filter { hands[$0] != nil }
+        guard let lowestY = candidates.compactMap({ hands[$0]?.y }).max() else {
+            return nil
+        }
+        let clusterTolerance = max(0.02, torso * 0.15)
+        let cluster = candidates.compactMap { index -> CGPoint? in
+            guard let hand = hands[index], hand.y >= lowestY - clusterTolerance else {
+                return nil
+            }
+            return hand
+        }
+        guard !cluster.isEmpty else { return nil }
+        let earliest = Array(cluster.prefix(addressReferenceFrameCount))
+        let reference = CGPoint(
+            x: median(earliest.map(\.x)),
+            y: median(earliest.map(\.y))
+        )
+        let stillTolerance = max(0.01, torso * 0.06)
+        for index in stride(from: apexIndex - 1, through: 0, by: -1) {
+            guard let hand = hands[index] else { continue }
+            if hypot(hand.x - reference.x, hand.y - reference.y) <= stillTolerance {
+                return index
+            }
+        }
+        return nil
+    }
+
+    /// First frame of the contiguous run of near-apex frames that ends at the apex.
+    static func topPlateauStart(
+        hands: [CGPoint?],
+        after address: Int,
+        apexIndex: Int,
+        apexY: CGFloat,
+        tolerance: CGFloat
+    ) -> Int {
+        var start = apexIndex
+        var index = apexIndex - 1
+        while index > address {
+            if let hand = hands[index] {
+                guard hand.y <= apexY + tolerance else { break }
+                start = index
+            }
+            index -= 1
+        }
+        return start
+    }
+
+    /// The downswing ends when the hands, having dropped below the hips, rise
+    /// back above them into the follow-through.
+    static func downswingEndIndex(
+        samples: [SwingPoseSample],
+        hands: [CGPoint?],
+        after top: Int
+    ) -> Int {
+        guard top + 1 < samples.count else { return samples.count }
+        var reachedLowHands = false
+        for index in (top + 1)..<samples.count {
+            guard let hand = hands[index], let hip = hipY(samples[index]) else { continue }
+            if hand.y >= hip {
+                reachedLowHands = true
+            } else if reachedLowHands, hand.y < hip - 0.02 {
+                return index
+            }
+        }
+        return samples.count
+    }
+
+    static func closestIndex(
+        in range: Range<Int>,
+        hands: [CGPoint?],
+        samples: [SwingPoseSample],
+        target: (SwingPoseSample) -> CGFloat?
+    ) -> Int? {
+        var best: (index: Int, distance: CGFloat)?
+        for index in range {
+            guard let hand = hands[index], let level = target(samples[index]) else { continue }
+            let distance = abs(hand.y - level)
+            if best == nil || distance < best!.distance {
+                best = (index, distance)
+            }
+        }
+        return best?.index
+    }
+
+    /// Largest source-frame gap treated as one dense run for jitter suppression.
+    static let denseNeighbourFrameGap = 3
+
+    /// Replaces single-frame wrist spikes inside dense runs of consecutive
+    /// source frames (the local refinement frames). A wrist counts as a spike
+    /// only when it jumps far from both neighbours while the neighbours agree
+    /// with each other; it is then moved to their midpoint. Such a spike could
+    /// otherwise become a false P4 apex or break the P1 stillness test. Real
+    /// motion, including a sharp apex, is kept, and sparse samples are never
+    /// touched. The filter is centred, so it adds no lag.
+    static func suppressDenseJitter(_ samples: [SwingPoseSample]) -> [SwingPoseSample] {
+        guard samples.count >= 3 else { return samples }
+        var filtered = samples
+        for index in 1..<(samples.count - 1) {
+            let previous = samples[index - 1]
+            let current = samples[index]
+            let next = samples[index + 1]
+            guard let previousFrame = previous.sourceFrameIndex,
+                  let currentFrame = current.sourceFrameIndex,
+                  let nextFrame = next.sourceFrameIndex,
+                  currentFrame - previousFrame <= denseNeighbourFrameGap,
+                  nextFrame - currentFrame <= denseNeighbourFrameGap else { continue }
+            filtered[index] = SwingPoseSample(
+                time: current.time,
+                leftWrist: despike(previous.leftWrist, current.leftWrist, next.leftWrist),
+                rightWrist: despike(previous.rightWrist, current.rightWrist, next.rightWrist),
+                leftElbow: current.leftElbow,
+                rightElbow: current.rightElbow,
+                leftShoulder: current.leftShoulder,
+                rightShoulder: current.rightShoulder,
+                leftHip: current.leftHip,
+                rightHip: current.rightHip,
+                head: current.head,
+                spineAngle: current.spineAngle,
+                aggregateConfidence: current.aggregateConfidence,
+                sourceFrameIndex: current.sourceFrameIndex,
+                leftKnee: current.leftKnee,
+                rightKnee: current.rightKnee,
+                leftAnkle: current.leftAnkle,
+                rightAnkle: current.rightAnkle
+            )
+        }
+        return filtered
+    }
+
+    /// Smallest jump from the neighbours' midpoint that can count as a spike.
+    static let minimumSpikeDistance: CGFloat = 0.05
+
+    private static func despike(_ previous: CGPoint?, _ current: CGPoint?, _ next: CGPoint?) -> CGPoint? {
+        guard let previous, let current, let next else { return current }
+        let midpoint = CGPoint(x: (previous.x + next.x) / 2, y: (previous.y + next.y) / 2)
+        let neighbourGap = hypot(previous.x - next.x, previous.y - next.y)
+        let deviation = hypot(current.x - midpoint.x, current.y - midpoint.y)
+        guard deviation > max(minimumSpikeDistance, neighbourGap * 3) else { return current }
+        return midpoint
+    }
+
+    /// Lead-arm level for P3/P5. At the top the lead shoulder sits clearly
+    /// lower than the trail shoulder in both face-on and down-the-line views,
+    /// which identifies the lead side without knowing handedness. When the
+    /// shoulders are level at the top the shoulder midpoint is used.
+    static func leadShoulderLevel(atTop top: SwingPoseSample) -> (SwingPoseSample) -> CGFloat? {
+        guard let left = top.leftShoulder, let right = top.rightShoulder,
+              abs(left.y - right.y) >= 0.01 else {
+            return shoulderY
+        }
+        if left.y > right.y {
+            return { $0.leftShoulder?.y ?? PoseOnlyStageRules.shoulderY($0) }
+        }
+        return { $0.rightShoulder?.y ?? PoseOnlyStageRules.shoulderY($0) }
+    }
+
+    static func handCenter(_ sample: SwingPoseSample) -> CGPoint? {
+        if let left = sample.leftWrist, let right = sample.rightWrist {
+            return CGPoint(x: (left.x + right.x) / 2, y: (left.y + right.y) / 2)
+        }
+        return sample.rightWrist ?? sample.leftWrist
+    }
+
+    static func hipY(_ sample: SwingPoseSample) -> CGFloat? {
+        guard let left = sample.leftHip, let right = sample.rightHip else { return nil }
+        return (left.y + right.y) / 2
+    }
+
+    static func shoulderY(_ sample: SwingPoseSample) -> CGFloat? {
+        guard let left = sample.leftShoulder, let right = sample.rightShoulder else { return nil }
+        return (left.y + right.y) / 2
+    }
+
+    static func torsoScale(_ samples: [SwingPoseSample]) -> CGFloat {
+        let scales = samples.compactMap { sample -> CGFloat? in
+            guard let ls = sample.leftShoulder, let rs = sample.rightShoulder,
+                  let lh = sample.leftHip, let rh = sample.rightHip else { return nil }
+            let shoulder = CGPoint(x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2)
+            let hip = CGPoint(x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2)
+            return hypot(shoulder.x - hip.x, shoulder.y - hip.y)
+        }
+        return scales.isEmpty ? 0.20 : median(scales)
+    }
+
+    private static func median(_ values: [CGFloat]) -> CGFloat {
+        let sorted = values.sorted()
+        return sorted[sorted.count / 2]
     }
 }
 
@@ -4227,6 +4470,114 @@ enum FineSwingSamplingPlan {
         return stride(from: firstAlignedFrame, through: lastFrame, by: frameStride).map {
             FineFrameReference(sourceFrameIndex: $0, time: Double($0) / sourceFrameRate)
         }
+    }
+}
+
+/// Dense source-frame neighbourhoods around body-only stage candidates.
+///
+/// The fine pass samples about 12 frames per second of timeline, which is a
+/// 20-frame stride on a real-time 240 FPS original, and the coarse fallback is
+/// sparser still. A ±2 source-frame target cannot be met at that stride, so
+/// each resolved candidate gets extra frames between its observed neighbours.
+/// Run twice, the first pass narrows the gap and the second fills it frame by
+/// frame, so the cost stays at roughly 16 decoded frames per stage.
+enum LocalStageRefinementPlan {
+    static let refinedStages: Set<SwingStage> = [
+        .address,
+        .takeaway,
+        .leadArmParallelBackswing,
+        .top,
+        .leadArmParallelDownswing,
+        .impact
+    ]
+    static let maximumFramesPerStage = 10
+
+    static func sourceFrames(
+        around detections: [SwingStageDetection],
+        observedSourceFrames: Set<Int>,
+        maximumSourceFrameIndex: Int,
+        maximumHalfSpan: Int
+    ) -> [Int] {
+        guard maximumSourceFrameIndex >= 0, maximumHalfSpan > 0 else { return [] }
+        let observed = observedSourceFrames.sorted()
+        var planned = Set<Int>()
+        for detection in detections where refinedStages.contains(detection.stage) {
+            guard detection.status != .unresolved,
+                  let center = detection.sourceFrameIndex,
+                  center >= 0,
+                  center <= maximumSourceFrameIndex else { continue }
+            let previous = observed.last(where: { $0 < center }) ?? Int.min
+            let next = observed.first(where: { $0 > center }) ?? Int.max
+            let lower = max(0, center - maximumHalfSpan, previous == Int.min ? 0 : previous + 1)
+            let upper = min(
+                maximumSourceFrameIndex,
+                center + maximumHalfSpan,
+                next == Int.max ? maximumSourceFrameIndex : next - 1
+            )
+            guard lower <= upper else { continue }
+            let widestSide = max(center - lower, upper - center)
+            guard widestSide > 0 else { continue }
+            let framesPerSide = max(1, maximumFramesPerStage / 2)
+            let step = max(1, Int(ceil(Double(widestSide) / Double(framesPerSide))))
+            var offset = step
+            while offset <= widestSide {
+                for frame in [center - offset, center + offset]
+                where frame >= lower && frame <= upper && !observedSourceFrames.contains(frame) {
+                    planned.insert(frame)
+                }
+                offset += step
+            }
+        }
+        return planned.sorted()
+    }
+}
+
+/// Re-resolves body-only stages after sampling the frames planned by
+/// `LocalStageRefinementPlan`. Strict solver results are returned unchanged,
+/// and a pass is only kept when it resolves at least as many stages.
+enum LocalStageRefinement {
+    static let passCount = 2
+
+    static func refine(
+        strictResult: SwingAnalysisResult,
+        poseSamples: [SwingPoseSample],
+        maximumSourceFrameIndex: Int,
+        maximumHalfSpan: Int,
+        sampler: ([Int]) -> [SwingPoseSample]
+    ) -> (result: SwingAnalysisResult, poseSamples: [SwingPoseSample]) {
+        var samples = poseSamples
+        var result = ProductAnalysisFallback.resolve(
+            strictResult: strictResult,
+            poseSamples: samples
+        )
+        guard strictResult.detectedMarkers.isEmpty else { return (result, samples) }
+        for _ in 0..<passCount {
+            let frames = LocalStageRefinementPlan.sourceFrames(
+                around: result.detections,
+                observedSourceFrames: Set(samples.compactMap(\.sourceFrameIndex)),
+                maximumSourceFrameIndex: maximumSourceFrameIndex,
+                maximumHalfSpan: maximumHalfSpan
+            )
+            guard !frames.isEmpty else { break }
+            let dense = sampler(frames)
+            guard !dense.isEmpty else { break }
+            let merged = ProductAnalysisFallback.mergedPoseSamples(
+                primary: samples,
+                supplemental: dense
+            )
+            let refined = ProductAnalysisFallback.resolve(
+                strictResult: strictResult,
+                poseSamples: merged
+            )
+            guard resolvedStageCount(refined) >= resolvedStageCount(result) else { break }
+            samples = merged
+            result = refined
+        }
+        return (result, samples)
+    }
+
+    static func resolvedStageCount(_ result: SwingAnalysisResult) -> Int {
+        result.detections.filter { $0.status != .unresolved }.count
     }
 }
 

@@ -832,6 +832,13 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         }
     }
 
+    private typealias LocalPoseSampler = ([Int]) -> [SwingPoseSample]
+
+    private struct LocalRefinementBounds {
+        let maximumSourceFrameIndex: Int
+        let maximumHalfSpan: Int
+    }
+
     private struct PoseFrameExtraction {
         let sample: SwingFrameSample
         let rawPose: PoseEstimationResult?
@@ -893,6 +900,53 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         generator.appliesPreferredTrackTransform = true
         generator.requestedTimeToleranceBefore = decodeTolerance
         generator.requestedTimeToleranceAfter = decodeTolerance
+
+        // Decodes exact source frames for the local stage refinement pass.
+        // It reuses the same golfer tracker so refinement frames keep the
+        // identity locked by the coarse and fine passes.
+        let localPoseSampler: LocalPoseSampler = { sourceFrames in
+            var samples: [SwingPoseSample] = []
+            for sourceFrameIndex in sourceFrames {
+                guard gate.isActive(runID) else { break }
+                let sample: SwingPoseSample? = autoreleasepool {
+                    guard let requestedTime = FrameExtractionTolerancePolicy.decodeRequestTime(
+                        sourceFrameIndex: sourceFrameIndex,
+                        sourceFrameTimeline: sourceFrameTimeline
+                    ) else { return nil }
+                    var actualTime = CMTime.invalid
+                    guard let image = try? generator.copyCGImage(
+                        at: requestedTime,
+                        actualTime: &actualTime
+                    ),
+                    actualTime.isValid,
+                    actualTime.seconds.isFinite,
+                    sourceFrameTimeline.matches(
+                        requestedSourceFrameIndex: sourceFrameIndex,
+                        actualTime: actualTime
+                    ) else { return nil }
+                    let actualSeconds = actualTime.seconds
+                    return trackedPoseDetector.selectPose(
+                        in: image,
+                        time: actualSeconds,
+                        recordsCoreAnchorCandidate: false
+                    ).map {
+                        SwingPoseSample(
+                            time: actualSeconds,
+                            sourceFrameIndex: sourceFrameIndex,
+                            pose: $0
+                        )
+                    }
+                }
+                if let sample {
+                    samples.append(sample)
+                }
+            }
+            return samples
+        }
+        let refinementBounds = LocalRefinementBounds(
+            maximumSourceFrameIndex: sourceFrameTimeline.maximumSourceFrameIndex,
+            maximumHalfSpan: max(1, Int(ceil(sourceFrameRate / 4)))
+        )
 
         // One tracker is intentionally reused for the complete coarse pass and
         // every adaptive block. Expansion must never create a new golfer identity.
@@ -1132,6 +1186,8 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 sourceFrameRate: sourceFrameRate,
                 startedAt: startedAt,
                 trackedPoseDetector: trackedPoseDetector,
+                localPoseSampler: localPoseSampler,
+                refinementBounds: refinementBounds,
                 runID: runID,
                 gate: gate
             )
@@ -1274,6 +1330,8 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                         sourceFrameRate: sourceFrameRate,
                         startedAt: startedAt,
                         trackedPoseDetector: trackedPoseDetector,
+                        localPoseSampler: localPoseSampler,
+                        refinementBounds: refinementBounds,
                         runID: runID,
                         gate: gate
                     )
@@ -1326,6 +1384,8 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 sourceFrameRate: sourceFrameRate,
                 startedAt: startedAt,
                 trackedPoseDetector: trackedPoseDetector,
+                localPoseSampler: localPoseSampler,
+                refinementBounds: refinementBounds,
                 runID: runID,
                 gate: gate
             )
@@ -1359,6 +1419,8 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 sourceFrameRate: sourceFrameRate,
                 startedAt: startedAt,
                 trackedPoseDetector: trackedPoseDetector,
+                localPoseSampler: localPoseSampler,
+                refinementBounds: refinementBounds,
                 runID: runID,
                 gate: gate
             )
@@ -1496,6 +1558,8 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 sourceFrameRate: sourceFrameRate,
                 startedAt: startedAt,
                 trackedPoseDetector: trackedPoseDetector,
+                localPoseSampler: localPoseSampler,
+                refinementBounds: refinementBounds,
                 runID: runID,
                 gate: gate
             )
@@ -1524,6 +1588,8 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             sourceFrameRate: sourceFrameRate,
             startedAt: startedAt,
             trackedPoseDetector: trackedPoseDetector,
+            localPoseSampler: localPoseSampler,
+            refinementBounds: refinementBounds,
             runID: runID,
             gate: gate
         )
@@ -1648,18 +1714,29 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         sourceFrameRate: Double,
         startedAt: TimeInterval,
         trackedPoseDetector: TrackedPoseDetector,
+        localPoseSampler: LocalPoseSampler,
+        refinementBounds: LocalRefinementBounds,
         runID: UUID,
         gate: AnalysisRunGate
     ) -> SwingVideoAnalysisOutcome {
         guard gate.isActive(runID) else { return .cancelled }
-        let poseSamples = ProductAnalysisFallback.mergedPoseSamples(
+        let observedPoseSamples = ProductAnalysisFallback.mergedPoseSamples(
             primary: frames.compactMap(\.pose),
             supplemental: supplementalPoseSamples
         )
-        let result = ProductAnalysisFallback.resolve(
+        // Body-only candidates come from a sparse pass. Decode the source
+        // frames around each candidate and re-resolve so the stage lands on
+        // the exact frame instead of the nearest sparse sample.
+        let refinement = LocalStageRefinement.refine(
             strictResult: strictResult,
-            poseSamples: poseSamples
+            poseSamples: observedPoseSamples,
+            maximumSourceFrameIndex: refinementBounds.maximumSourceFrameIndex,
+            maximumHalfSpan: refinementBounds.maximumHalfSpan,
+            sampler: localPoseSampler
         )
+        guard gate.isActive(runID) else { return .cancelled }
+        let poseSamples = refinement.poseSamples
+        let result = refinement.result
         return .completed(SwingVideoAnalysisOutput(
             result: result,
             poseSamples: poseSamples,
