@@ -32,8 +32,12 @@ struct ProjectLibraryView: View {
                         Button {
                             onClose()
                         } label: {
-                            Label("返回", systemImage: "chevron.left")
-                                .labelStyle(.titleAndIcon)
+                            // An explicit HStack: a toolbar Label is drawn
+                            // icon-only, which hid the 返回 text.
+                            HStack(spacing: 4) {
+                                Image(systemName: "chevron.left")
+                                Text("返回")
+                            }
                         }
                         .scaledFont(size: 16, weight: .bold)
                         .accessibilityLabel("返回首页")

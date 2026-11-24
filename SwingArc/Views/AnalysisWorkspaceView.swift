@@ -623,6 +623,10 @@ struct AnalysisWorkspaceView: View {
             .accessibilityLabel("修正 P 点")
             .accessibilityHint("打开 P1–P8 时间点修正")
         }
+        // Three labelled buttons share one row; past this size they would
+        // truncate to "AI…", so the row stops growing and shrinks slightly.
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
+        .minimumScaleFactor(0.8)
     }
 
     private func toggleWorkspacePlayback() {

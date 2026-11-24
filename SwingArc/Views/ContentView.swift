@@ -158,7 +158,13 @@ struct ContentView: View {
                     markers: keyframes,
                     initialTime: playbackManager.currentTime,
                     initialStage: pPointCorrectionStage,
-                    onClose: { showPPointCorrection = false },
+                    onClose: {
+                        // Without animation, so a tap right after 关闭 is
+                        // not swallowed by the dismiss transition.
+                        var transaction = Transaction(animation: nil)
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) { showPPointCorrection = false }
+                    },
                     onSave: savePPointCorrection
                 )
             }
