@@ -2,7 +2,8 @@ import Foundation
 
 /// Run with:
 ///   xcrun swiftc -parse-as-library \
-///     SwingArc/Models/DrawingModels.swift SwingArc/Services/SwingStageDetector.swift \
+///     SwingArc/Models/{DrawingModels,SwingMetricModels,SwingObservationModels,WorkspaceModels,FrameExtractionTolerancePolicy}.swift \
+///     SwingArc/Services/{StageCalibration,SwingInputQualityEvaluator,SwingStageDetector}.swift \
 ///     Tests/PoseOnlyStageRulesSmoke.swift -o /tmp/pose-only-rules && /tmp/pose-only-rules
 @main
 struct PoseOnlyStageRulesSmoke {
@@ -11,6 +12,32 @@ struct PoseOnlyStageRulesSmoke {
         checksTempoInvariance()
         checksLocalRefinementReachesDenseResult()
         checksStrictResultIsNeverRefined()
+        checksLeadShoulderDefinesArmParallel()
+        checksDenseWristSpikeIsIgnored()
+    }
+
+    /// With the lead shoulder clearly lower at the top, P3/P5 use the lead
+    /// shoulder height instead of the shoulder midpoint.
+    private static func checksLeadShoulderDefinesArmParallel() {
+        let tilted = takeawayScenario(timeScale: 1, leftShoulderY: 0.40, rightShoulderY: 0.30)
+        let result = SwingStageDetector.detectPoseOnlyCandidates(tilted)
+        precondition(frame(.leadArmParallelBackswing, in: result) == 8, "P3 must follow the lead (lower) shoulder")
+        precondition(frame(.leadArmParallelDownswing, in: result) == 15, "P5 must follow the lead (lower) shoulder")
+        precondition(frame(.top, in: result) == 12)
+    }
+
+    /// One bad Vision wrist in a dense refinement run must not become P4.
+    private static func checksDenseWristSpikeIsIgnored() {
+        let clean = (0..<520).map(denseSwingSample)
+        var spiked = clean
+        let hand = denseSwingHand(300)
+        spiked[300] = sample(frame: 300, time: 300.0 / 240, hand: CGPoint(x: hand.x, y: hand.y - 0.25))
+        let cleanResult = SwingStageDetector.detectPoseOnlyCandidates(clean)
+        let spikedResult = SwingStageDetector.detectPoseOnlyCandidates(spiked)
+        precondition(
+            cleanResult.detections.map(\.sourceFrameIndex) == spikedResult.detections.map(\.sourceFrameIndex),
+            "A single-frame wrist spike inside a dense run must not move any stage"
+        )
     }
 
     /// P1 must be the last still address frame even when the takeaway starts
@@ -111,7 +138,11 @@ struct PoseOnlyStageRulesSmoke {
 
     // MARK: - Fixtures
 
-    private static func takeawayScenario(timeScale: Double) -> [SwingPoseSample] {
+    private static func takeawayScenario(
+        timeScale: Double,
+        leftShoulderY: CGFloat = 0.34,
+        rightShoulderY: CGFloat = 0.34
+    ) -> [SwingPoseSample] {
         let hands: [(CGFloat, CGFloat)] = [
             (0.500, 0.820), (0.502, 0.821), (0.499, 0.819), (0.500, 0.820), // address
             (0.460, 0.820), (0.420, 0.800),                                   // flat takeaway
@@ -124,7 +155,9 @@ struct PoseOnlyStageRulesSmoke {
             sample(
                 frame: index,
                 time: Double(index) / 30 * timeScale,
-                hand: CGPoint(x: hand.0, y: hand.1)
+                hand: CGPoint(x: hand.0, y: hand.1),
+                leftShoulderY: leftShoulderY,
+                rightShoulderY: rightShoulderY
             )
         }
     }
@@ -164,15 +197,21 @@ struct PoseOnlyStageRulesSmoke {
         return (0.48 + 0.15 * u, 0.80 - 0.55 * smoothstep(u))
     }
 
-    private static func sample(frame: Int, time: Double, hand: CGPoint) -> SwingPoseSample {
+    private static func sample(
+        frame: Int,
+        time: Double,
+        hand: CGPoint,
+        leftShoulderY: CGFloat = 0.34,
+        rightShoulderY: CGFloat = 0.34
+    ) -> SwingPoseSample {
         SwingPoseSample(
             time: time,
             leftWrist: CGPoint(x: hand.x - 0.01, y: hand.y),
             rightWrist: CGPoint(x: hand.x + 0.01, y: hand.y),
             leftElbow: CGPoint(x: 0.42, y: min(0.95, hand.y + 0.08)),
             rightElbow: CGPoint(x: 0.58, y: min(0.95, hand.y + 0.08)),
-            leftShoulder: CGPoint(x: 0.40, y: 0.34),
-            rightShoulder: CGPoint(x: 0.60, y: 0.34),
+            leftShoulder: CGPoint(x: 0.40, y: leftShoulderY),
+            rightShoulder: CGPoint(x: 0.60, y: rightShoulderY),
             leftHip: CGPoint(x: 0.43, y: 0.58),
             rightHip: CGPoint(x: 0.57, y: 0.58),
             head: CGPoint(x: 0.50, y: 0.16),

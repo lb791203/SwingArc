@@ -3243,9 +3243,11 @@ enum SwingStageDetector {
     static func detectPoseOnlyCandidates(
         _ rawSamples: [SwingPoseSample]
     ) -> SwingAnalysisResult {
-        let samples = rawSamples
-            .filter { !$0.wristY.isNaN }
-            .sorted { $0.time < $1.time }
+        let samples = PoseOnlyStageRules.suppressDenseJitter(
+            rawSamples
+                .filter { !$0.wristY.isNaN }
+                .sorted { $0.time < $1.time }
+        )
         guard samples.count >= 9,
               zip(samples, samples.dropFirst()).allSatisfy({ $0.time < $1.time }) else {
             return unresolvedResult()
@@ -3459,6 +3461,7 @@ enum PoseOnlyStageRules {
         let hands = samples.map(handCenter)
         guard let apexY = hands[apexIndex]?.y else { return indices }
         let torso = torsoScale(samples)
+        let leadShoulderY = leadShoulderLevel(atTop: samples[apexIndex])
 
         var addressY: CGFloat?
         var rise: CGFloat?
@@ -3489,7 +3492,7 @@ enum PoseOnlyStageRules {
                     in: (takeaway + 1)..<top,
                     hands: hands,
                     samples: samples,
-                    target: shoulderY
+                    target: leadShoulderY
                 )
             }
         }
@@ -3521,7 +3524,7 @@ enum PoseOnlyStageRules {
             in: (top + 1)..<(impact ?? downswingEnd),
             hands: hands,
             samples: samples,
-            target: shoulderY
+            target: leadShoulderY
         )
         return indices
     }
@@ -3614,6 +3617,78 @@ enum PoseOnlyStageRules {
             }
         }
         return best?.index
+    }
+
+    /// Largest source-frame gap treated as one dense run for jitter suppression.
+    static let denseNeighbourFrameGap = 3
+
+    /// Replaces single-frame wrist spikes inside dense runs of consecutive
+    /// source frames (the local refinement frames). A wrist counts as a spike
+    /// only when it jumps far from both neighbours while the neighbours agree
+    /// with each other; it is then moved to their midpoint. Such a spike could
+    /// otherwise become a false P4 apex or break the P1 stillness test. Real
+    /// motion, including a sharp apex, is kept, and sparse samples are never
+    /// touched. The filter is centred, so it adds no lag.
+    static func suppressDenseJitter(_ samples: [SwingPoseSample]) -> [SwingPoseSample] {
+        guard samples.count >= 3 else { return samples }
+        var filtered = samples
+        for index in 1..<(samples.count - 1) {
+            let previous = samples[index - 1]
+            let current = samples[index]
+            let next = samples[index + 1]
+            guard let previousFrame = previous.sourceFrameIndex,
+                  let currentFrame = current.sourceFrameIndex,
+                  let nextFrame = next.sourceFrameIndex,
+                  currentFrame - previousFrame <= denseNeighbourFrameGap,
+                  nextFrame - currentFrame <= denseNeighbourFrameGap else { continue }
+            filtered[index] = SwingPoseSample(
+                time: current.time,
+                leftWrist: despike(previous.leftWrist, current.leftWrist, next.leftWrist),
+                rightWrist: despike(previous.rightWrist, current.rightWrist, next.rightWrist),
+                leftElbow: current.leftElbow,
+                rightElbow: current.rightElbow,
+                leftShoulder: current.leftShoulder,
+                rightShoulder: current.rightShoulder,
+                leftHip: current.leftHip,
+                rightHip: current.rightHip,
+                head: current.head,
+                spineAngle: current.spineAngle,
+                aggregateConfidence: current.aggregateConfidence,
+                sourceFrameIndex: current.sourceFrameIndex,
+                leftKnee: current.leftKnee,
+                rightKnee: current.rightKnee,
+                leftAnkle: current.leftAnkle,
+                rightAnkle: current.rightAnkle
+            )
+        }
+        return filtered
+    }
+
+    /// Smallest jump from the neighbours' midpoint that can count as a spike.
+    static let minimumSpikeDistance: CGFloat = 0.05
+
+    private static func despike(_ previous: CGPoint?, _ current: CGPoint?, _ next: CGPoint?) -> CGPoint? {
+        guard let previous, let current, let next else { return current }
+        let midpoint = CGPoint(x: (previous.x + next.x) / 2, y: (previous.y + next.y) / 2)
+        let neighbourGap = hypot(previous.x - next.x, previous.y - next.y)
+        let deviation = hypot(current.x - midpoint.x, current.y - midpoint.y)
+        guard deviation > max(minimumSpikeDistance, neighbourGap * 3) else { return current }
+        return midpoint
+    }
+
+    /// Lead-arm level for P3/P5. At the top the lead shoulder sits clearly
+    /// lower than the trail shoulder in both face-on and down-the-line views,
+    /// which identifies the lead side without knowing handedness. When the
+    /// shoulders are level at the top the shoulder midpoint is used.
+    static func leadShoulderLevel(atTop top: SwingPoseSample) -> (SwingPoseSample) -> CGFloat? {
+        guard let left = top.leftShoulder, let right = top.rightShoulder,
+              abs(left.y - right.y) >= 0.01 else {
+            return shoulderY
+        }
+        if left.y > right.y {
+            return { $0.leftShoulder?.y ?? PoseOnlyStageRules.shoulderY($0) }
+        }
+        return { $0.rightShoulder?.y ?? PoseOnlyStageRules.shoulderY($0) }
     }
 
     static func handCenter(_ sample: SwingPoseSample) -> CGPoint? {
