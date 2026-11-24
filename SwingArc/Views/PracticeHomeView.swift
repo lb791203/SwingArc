@@ -32,18 +32,16 @@ struct PracticeHomeView: View {
                             .padding(.top, metrics.trainingTopPadding)
 
                         Text("挥杆视频分析")
-                            .font(
-                                .system(
-                                    size: metrics.mainTitleSize,
-                                    weight: .bold,
-                                    design: .rounded
-                                )
-                            )
+                            .scaledFont(size: metrics.mainTitleSize, weight: .bold, design: .rounded)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                             .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                             .padding(.top, 6)
 
                         Text("录制或导入视频，开始 P1–P8 识别与画线")
-                            .font(.system(size: metrics.cardDetailSize + 2, weight: .medium))
+                            .scaledFont(size: metrics.cardDetailSize + 2, weight: .medium)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
                             .foregroundStyle(AnalysisTheme.proTourSecondaryText)
                             .padding(.top, 4)
 
@@ -251,16 +249,14 @@ private struct PracticeModeSelector: View {
                         .tracking(1.1)
                         .foregroundStyle(AnalysisTheme.proTourSecondaryText)
                     Text(title)
-                        .font(
-                            .system(
-                                size: metrics.cardTitleSize,
-                                weight: .bold,
-                                design: .rounded
-                            )
-                        )
+                        .scaledFont(size: metrics.cardTitleSize, weight: .bold, design: .rounded)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                     Text(detail)
-                        .font(.system(size: metrics.cardDetailSize, weight: .medium))
+                        .scaledFont(size: metrics.cardDetailSize, weight: .medium)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         .foregroundStyle(AnalysisTheme.proTourSecondaryText)
                 }
 
