@@ -48,7 +48,7 @@ struct CameraView: View {
                             .tint(AnalysisTheme.proTourSignal)
                     } else {
                         Image(systemName: "camera.fill")
-                            .font(.system(size: 34, weight: .semibold))
+                            .scaledFont(size: 34, weight: .semibold)
                             .foregroundStyle(AnalysisTheme.proTourSignal)
                     }
 
@@ -155,7 +155,7 @@ struct CameraView: View {
         HStack {
             Button(action: { presentationMode.wrappedValue.dismiss() }) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 17, weight: .bold))
+                    .scaledFont(size: 17, weight: .bold)
                     .frame(width: 48, height: 48)
                     .background(AnalysisTheme.proTourSurface.opacity(0.9), in: Circle())
                     .overlay(Circle().stroke(AnalysisTheme.proTourRaisedSurface))
@@ -167,10 +167,10 @@ struct CameraView: View {
 
             VStack(spacing: 3) {
                 Text(ManualCapturePresentation.title)
-                    .font(.system(size: 11, weight: .black, design: .monospaced))
+                    .scaledFont(size: 11, weight: .black, design: .monospaced)
                     .tracking(1.2)
                 Text(ManualCapturePresentation.detail)
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .scaledFont(size: 10, weight: .bold, design: .monospaced)
                     .tracking(0.8)
                     .foregroundStyle(AnalysisTheme.proTourSecondaryText)
             }
@@ -187,7 +187,7 @@ struct CameraView: View {
                 cameraState.toggleCamera(useFront: useFrontCamera)
             } label: {
                 Image(systemName: "camera.rotate")
-                    .font(.system(size: 17, weight: .bold))
+                    .scaledFont(size: 17, weight: .bold)
                     .frame(width: 48, height: 48)
                     .background(AnalysisTheme.proTourSurface.opacity(0.9), in: Circle())
                     .overlay(Circle().stroke(AnalysisTheme.proTourRaisedSurface))
@@ -215,7 +215,7 @@ struct CameraView: View {
 
                 if !isRecording {
                     Text(ManualCapturePresentation.framingPrompt)
-                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .scaledFont(size: 11, weight: .black, design: .monospaced)
                         .tracking(1.0)
                         .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                         .padding(.horizontal, 16)
@@ -237,7 +237,7 @@ struct CameraView: View {
     private var delayPicker: some View {
         HStack(spacing: 6) {
             Image(systemName: "timer")
-                .font(.system(size: 13, weight: .bold))
+                .scaledFont(size: 13, weight: .bold)
                 .foregroundStyle(AnalysisTheme.proTourSecondaryText)
             ForEach(ManualCaptureDelay.options, id: \.self) { seconds in
                 let selected = ManualCaptureDelay.sanitized(delaySeconds) == seconds
@@ -245,7 +245,7 @@ struct CameraView: View {
                     delaySeconds = seconds
                 } label: {
                     Text(ManualCaptureDelay.label(for: seconds))
-                        .font(.system(size: 13, weight: .bold))
+                        .scaledFont(size: 13, weight: .bold)
                         .padding(.horizontal, 12)
                         .frame(minHeight: 34)
                         .foregroundStyle(
@@ -270,12 +270,12 @@ struct CameraView: View {
         if let delayRemaining {
             VStack(spacing: 8) {
                 Text("\(delayRemaining)")
-                    .font(.system(size: 96, weight: .heavy, design: .rounded))
+                    .scaledFont(size: 96, weight: .heavy, design: .rounded)
                     .monospacedDigit()
                     .foregroundStyle(AnalysisTheme.proTourSignal)
                     .contentTransition(.numericText(countsDown: true))
                 Text("走到球位，倒计时结束自动开始录制")
-                    .font(.system(size: 16, weight: .semibold))
+                    .scaledFont(size: 16, weight: .semibold)
                     .foregroundStyle(AnalysisTheme.proTourSecondaryText)
             }
             .multilineTextAlignment(.center)
@@ -296,15 +296,15 @@ struct CameraView: View {
                         .fill(isRecording ? AnalysisTheme.proTourPaused : AnalysisTheme.proTourSignal)
                         .frame(width: 10, height: 10)
                     Text(isRecording ? "RECORDING" : "READY TO CAPTURE")
-                        .font(.system(size: 12, weight: .black, design: .monospaced))
+                        .scaledFont(size: 12, weight: .black, design: .monospaced)
                         .tracking(1.2)
                         .foregroundStyle(isRecording ? AnalysisTheme.proTourPaused : AnalysisTheme.proTourSignal)
                 }
                 Text(isRecording ? "RECORDING" : "READY")
-                    .font(.system(size: 42, weight: .heavy, design: .monospaced))
+                    .scaledFont(size: 42, weight: .heavy, design: .monospaced)
                     .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                 Text(isRecording ? "最长 15 秒，可随时停止" : ManualCapturePresentation.readyDetail)
-                    .font(.system(size: 16, weight: .semibold))
+                    .scaledFont(size: 16, weight: .semibold)
                     .foregroundStyle(AnalysisTheme.proTourSecondaryText)
             }
             .multilineTextAlignment(.center)
@@ -329,10 +329,10 @@ struct CameraView: View {
                     isRecording ? "结束录制" : (isDelaying ? "取消倒计时" : "开始录像"),
                     systemImage: isRecording ? "stop.fill" : (isDelaying ? "xmark" : "record.circle")
                 )
-                .font(.system(size: 20, weight: .black, design: .rounded))
+                .scaledFont(size: 20, weight: .black, design: .rounded)
 
                 Text(captureControlDetail)
-                    .font(.system(size: 13, weight: .bold))
+                    .scaledFont(size: 13, weight: .bold)
                     .opacity(0.68)
             }
             .multilineTextAlignment(.center)
@@ -406,7 +406,7 @@ struct CameraView: View {
                 scheduleAutomaticStop()
             case .failure(let error):
                 captureLifecycle.didFail()
-                recordingAlertMessage = error.localizedDescription
+                recordingAlertMessage = CameraErrorPresentation.message(prefix: "录像未能开始", error: error)
             }
         }
     }
@@ -881,7 +881,7 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
             print("Camera recording error: \(error.localizedDescription)")
             completePendingRecordingStart(.failure(.rejected))
             publishRecordingFailure(
-                "录像中断：\(error.localizedDescription)"
+                CameraErrorPresentation.message(prefix: "录像中断", error: error)
             )
         }
 
@@ -1017,8 +1017,7 @@ class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecording
 
     @objc private func sessionRuntimeError(_ notification: Notification) {
         let error = notification.userInfo?[AVCaptureSessionErrorKey] as? Error
-        let detail = error?.localizedDescription ?? "未知相机错误"
-        handleSessionFailure("相机运行错误：\(detail)")
+        handleSessionFailure(CameraErrorPresentation.message(prefix: "相机运行错误", error: error))
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             self?.setupSession()
         }

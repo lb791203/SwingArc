@@ -210,3 +210,42 @@ struct CapturedVideoStore {
         return result.isEmpty ? "capture" : result
     }
 }
+
+enum SwingClipTrimmerError: Error {
+    case exportUnavailable
+    case exportFailed
+}
+
+/// Saves a time range of a clip as a new file without re-encoding, so the
+/// trimmed swing keeps the original frames and frame rate.
+enum SwingClipTrimmer {
+    static func trim(
+        sourceURL: URL,
+        range: ClosedRange<Double>,
+        destinationDirectory: URL
+    ) async throws -> URL {
+        let asset = AVURLAsset(url: sourceURL)
+        guard let session = AVAssetExportSession(
+            asset: asset,
+            presetName: AVAssetExportPresetPassthrough
+        ) else {
+            throw SwingClipTrimmerError.exportUnavailable
+        }
+        let fileType: AVFileType = session.supportedFileTypes.contains(.mov) ? .mov : .mp4
+        let destination = destinationDirectory.appendingPathComponent(
+            "swing_trim_\(UUID().uuidString).\(fileType == .mov ? "mov" : "mp4")"
+        )
+        session.timeRange = CMTimeRange(
+            start: CMTime(seconds: range.lowerBound, preferredTimescale: 600),
+            end: CMTime(seconds: range.upperBound, preferredTimescale: 600)
+        )
+        do {
+            try await session.export(to: destination, as: fileType)
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw SwingClipTrimmerError.exportFailed
+        }
+        _ = try await VideoAssetValidator.validate(url: destination)
+        return destination
+    }
+}

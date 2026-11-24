@@ -61,3 +61,39 @@ enum PlaybackRate: Double, CaseIterable, Identifiable {
         rawValue == 1 ? "1×" : "\(rawValue)×"
     }
 }
+
+/// A fixed design size that still follows the system text size (Dynamic
+/// Type). Small decorative labels get a floor so they stay readable outdoors.
+struct ScaledSystemFont: ViewModifier {
+    static let minimumSize: CGFloat = 11
+
+    @ScaledMetric private var size: CGFloat
+    private let weight: Font.Weight
+    private let design: Font.Design
+
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design) {
+        _size = ScaledMetric(wrappedValue: max(size, Self.minimumSize), relativeTo: .body)
+        self.weight = weight
+        self.design = design
+    }
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size, weight: weight, design: design))
+    }
+}
+
+extension View {
+    func scaledFont(
+        size: CGFloat,
+        weight: Font.Weight = .regular,
+        design: Font.Design = .default
+    ) -> some View {
+        modifier(ScaledSystemFont(size: size, weight: weight, design: design))
+    }
+}
+
+/// Largest text size the fixed-layout screens support before they would
+/// overlap; beyond this the system size is capped.
+enum DynamicTypeLimit {
+    static let maximum: DynamicTypeSize = .accessibility1
+}

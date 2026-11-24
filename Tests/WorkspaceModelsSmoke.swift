@@ -57,6 +57,27 @@ struct WorkspaceModelsSmoke {
         precondition(MobileReplayStageStripPolicy.glyphWidth == 38)
         precondition(MobileReplayStageStripPolicy.glyphHeight == 30)
         precondition(MobileReplayStageStripPolicy.labelFontSize == 10)
+        let swingMarkers = [
+            KeyframeMarker(time: 0.33, stage: .address),
+            KeyframeMarker(time: 0.83, stage: .top),
+            KeyframeMarker(time: 1.13, stage: .impact)
+        ]
+        let trim = SwingTrimPolicy.range(keyframes: swingMarkers, duration: 32.4)
+        precondition(trim?.lowerBound == 0 && abs((trim?.upperBound ?? 0) - 2.63) < 1e-9)
+        precondition(SwingTrimPolicy.range(keyframes: swingMarkers, duration: 4.0) == nil)
+        precondition(SwingTrimPolicy.range(keyframes: [], duration: 32.4) == nil)
+        precondition(ProjectThumbnailPolicy.time(keyframes: swingMarkers, duration: 32.4) == 0.83)
+        precondition(ProjectThumbnailPolicy.stageSummary(keyframes: swingMarkers) == " · P 点 3/8")
+        precondition(PlaybackPositionLabel.frameNumber(time: 0, sourceFrameRate: 30) == 1)
+        precondition(PlaybackPositionLabel.frameNumber(time: 1, sourceFrameRate: 30) == 31)
+        precondition(
+            PlaybackPositionLabel.text(time: 1, duration: 32.4, sourceFrameRate: 30)
+                == "1.00 秒 · 帧 31 / 972"
+        )
+        precondition(
+            PlaybackPositionLabel.text(time: 99, duration: 32.4, sourceFrameRate: 30)
+                .hasSuffix("帧 972 / 972")
+        )
 
         let replayMarkers = [
             KeyframeMarker(time: 0.75, stage: .takeaway),

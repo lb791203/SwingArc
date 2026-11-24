@@ -34,6 +34,7 @@ struct AboutPrivacyView: View {
                 }
             }
         }
+        .tint(AnalysisTheme.proTourSignal)
         .preferredColorScheme(.dark)
     }
 }

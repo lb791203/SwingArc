@@ -29,15 +29,21 @@ struct ProjectLibraryView: View {
             .toolbar {
                 if let onClose {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button("练习") { onClose() }
-                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        Button {
+                            onClose()
+                        } label: {
+                            Label("返回", systemImage: "chevron.left")
+                                .labelStyle(.titleAndIcon)
+                        }
+                        .scaledFont(size: 16, weight: .bold)
+                        .accessibilityLabel("返回首页")
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 8) {
                         BrandMarkView(size: 20, showsWordmark: false)
                         Text("挥杆档案")
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .scaledFont(size: 17, weight: .bold, design: .rounded)
                             .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                     }
                 }
@@ -81,18 +87,18 @@ struct ProjectLibraryView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("SWING LIBRARY")
-                .font(.system(size: 14, weight: .black, design: .monospaced))
+                .scaledFont(size: 14, weight: .black, design: .monospaced)
                 .tracking(2.2)
                 .foregroundStyle(AnalysisTheme.proTourSignal)
                 .padding(.top, 22)
 
             Text("挥杆档案")
-                .font(.system(size: 42, weight: .black, design: .rounded))
+                .scaledFont(size: 42, weight: .black, design: .rounded)
                 .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                 .padding(.top, 10)
 
             Text("这里会保存已完成分析的挥杆影片与标注。")
-                .font(.system(size: 17, weight: .medium))
+                .scaledFont(size: 17, weight: .medium)
                 .foregroundStyle(AnalysisTheme.proTourSecondaryText)
                 .padding(.top, 8)
 
@@ -104,11 +110,11 @@ struct ProjectLibraryView: View {
                     .background(AnalysisTheme.proTourSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
 
                 Text("还没有分析影片")
-                    .font(.system(size: 24, weight: .bold))
+                    .scaledFont(size: 24, weight: .bold)
                     .foregroundStyle(AnalysisTheme.proTourPrimaryText)
 
                 Text("所有影片与标注仅保存在这台设备。")
-                    .font(.system(size: 15, weight: .medium))
+                    .scaledFont(size: 15, weight: .medium)
                     .foregroundStyle(AnalysisTheme.proTourSecondaryText)
             }
 
@@ -122,14 +128,14 @@ struct ProjectLibraryView: View {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 7) {
                     Text("ANALYSIS ARCHIVE")
-                        .font(.system(size: 12, weight: .black, design: .monospaced))
+                        .scaledFont(size: 12, weight: .black, design: .monospaced)
                         .tracking(1.8)
                         .foregroundStyle(AnalysisTheme.proTourSignal)
                     Text("已保存影片")
-                        .font(.system(size: 30, weight: .black, design: .rounded))
+                        .scaledFont(size: 30, weight: .black, design: .rounded)
                         .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                     Text("\(projects.count) 段本地挥杆记录")
-                        .font(.system(size: 14, weight: .medium))
+                        .scaledFont(size: 14, weight: .medium)
                         .foregroundStyle(AnalysisTheme.proTourSecondaryText)
                 }
 
@@ -163,26 +169,39 @@ private struct ProjectCard: View {
     let onRename: () -> Void
     let onDelete: () -> Void
 
+    private var savedKeyframes: [KeyframeMarker] {
+        LocalProjectStore.load(for: project.videoURL)?.keyframes ?? []
+    }
+
     var body: some View {
+        let keyframes = savedKeyframes
         HStack(spacing: 14) {
             Button(action: onOpen) {
                 HStack(spacing: 14) {
-                    VideoThumbnailView(url: project.videoURL)
+                    VideoThumbnailView(
+                        url: project.videoURL,
+                        time: ProjectThumbnailPolicy.time(
+                            keyframes: keyframes,
+                            duration: project.duration
+                        )
+                    )
                         .frame(width: 118, height: 82)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
 
                     VStack(alignment: .leading, spacing: 7) {
-                        Text("VIDEO ANALYSIS")
-                            .font(.system(size: 10, weight: .black, design: .monospaced))
-                            .tracking(1.0)
+                        Text(ProjectThumbnailPolicy.dateLine(project.modifiedAt))
+                            .scaledFont(size: 12, weight: .semibold)
                             .foregroundStyle(AnalysisTheme.proTourSecondaryText)
                         Text(project.name)
-                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .scaledFont(size: 20, weight: .bold, design: .rounded)
                             .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                             .lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
-                        Text("\(formatDuration(project.duration)) · \(formatFrameRate(project.sourceFrameRate))")
+                        Text(
+                            "\(formatDuration(project.duration)) · \(formatFrameRate(project.sourceFrameRate))"
+                                + ProjectThumbnailPolicy.stageSummary(keyframes: keyframes)
+                        )
                             .font(.subheadline.monospacedDigit())
                             .foregroundStyle(AnalysisTheme.proTourSecondaryText)
 
@@ -190,7 +209,7 @@ private struct ProjectCard: View {
                             Image(systemName: project.status.systemImage)
                             Text(project.status.label)
                         }
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .scaledFont(size: 12, weight: .bold, design: .monospaced)
                         .foregroundStyle(project.status.proTourColor)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 6)
@@ -230,6 +249,7 @@ private struct ProjectCard: View {
 
 private struct VideoThumbnailView: View {
     let url: URL
+    var time: Double = 0
     @State private var image: UIImage?
 
     var body: some View {
@@ -246,7 +266,7 @@ private struct VideoThumbnailView: View {
             }
         }
         .clipped()
-        .task(id: url) {
+        .task(id: "\(url.path)#\(time)") {
             image = await generateThumbnail()
         }
         .accessibilityHidden(true)
@@ -256,8 +276,17 @@ private struct VideoThumbnailView: View {
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 480, height: 320)
-        guard let result = try? await generator.image(at: .zero) else { return nil }
-        return UIImage(cgImage: result.image)
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.2, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.2, preferredTimescale: 600)
+        // Prefer the swing (top of backswing) over frame 0, which is often
+        // black or shows the golfer walking in; fall back to the start.
+        for seconds in [time, 0] {
+            let requested = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
+            if let result = try? await generator.image(at: requested) {
+                return UIImage(cgImage: result.image)
+            }
+        }
+        return nil
     }
 }
 

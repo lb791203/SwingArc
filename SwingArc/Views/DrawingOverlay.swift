@@ -176,7 +176,12 @@ struct DrawingOverlay: View {
     /// 绘制手动绘制元素
     private func drawElement(context: GraphicsContext, element: DrawingElement, rect: CGRect) {
         guard element.points.count >= 2 else { return }
-        
+        var context = context
+        context.addFilter(.shadow(
+            color: DrawingDefaults.outlineColor,
+            radius: DrawingDefaults.outlineRadius
+        ))
+
         // 转换所有点到屏幕坐标
         let screenPoints = element.points.map {
             DrawingCanvasGeometry.denormalizedPoint($0, in: rect)
@@ -490,7 +495,12 @@ struct DrawingOverlay: View {
     
     private func drawScaledElement(context: inout GraphicsContext, element: DrawingElement, rect: CGRect, center: CGPoint, touchLoc: CGPoint, scale: CGFloat) {
         guard element.points.count >= 2 else { return }
-        
+        var context = context
+        context.addFilter(.shadow(
+            color: DrawingDefaults.outlineColor,
+            radius: DrawingDefaults.outlineRadius * scale
+        ))
+
         let zoomedPoints = element.points.map { pt in
             zoomPoint(pt: pt, rect: rect, center: center, touchLoc: touchLoc, scale: scale)
         }

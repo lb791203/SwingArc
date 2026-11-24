@@ -17,12 +17,15 @@ struct AnalysisWorkspaceView: View {
     let onCorrectPPoints: () -> Void
     /// Opens P-point correction directly on one stage.
     let onCorrectStage: (SwingStage) -> Void
+    /// Swing part of a long clip, when trimming is worthwhile.
+    var trimRange: ClosedRange<Double>? = nil
+    var onTrimToSwing: () -> Void = {}
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var interactionMode: WorkspaceInteractionMode = .idle
     @State private var activeTool: DrawingTool = .line
-    @State private var selectedColor: Color = .white
-    @State private var strokeWidth: CGFloat = 3
+    @State private var selectedColor: Color = DrawingDefaults.color
+    @State private var strokeWidth: CGFloat = DrawingDefaults.lineWidth
     @State private var showsProjectSidebar = true
     @State private var showsInspector = true
     @State private var adjustmentStage: SwingStage?
@@ -228,12 +231,16 @@ struct AnalysisWorkspaceView: View {
         ZStack {
             drawingModeHeader
 
-            DrawingToolRail(
-                activeTool: $activeTool,
-                selectedColor: $selectedColor,
-                isKeyframeMode: $isKeyframeMode,
-                onClear: { drawings.removeAll() }
-            )
+            VStack(spacing: 10) {
+                drawingFrameStepper
+
+                DrawingToolRail(
+                    activeTool: $activeTool,
+                    selectedColor: $selectedColor,
+                    isKeyframeMode: $isKeyframeMode,
+                    onClear: { drawings.removeAll() }
+                )
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(.horizontal, 8)
             .padding(.bottom, WorkspaceAccessoryPolicy.drawingToolbarBottomPadding)
@@ -241,16 +248,57 @@ struct AnalysisWorkspaceView: View {
         }
     }
 
+    /// Step frame by frame while drawing, so a line can be placed on the
+    /// exact frame without leaving drawing mode.
+    private var drawingFrameStepper: some View {
+        HStack(spacing: 10) {
+            drawingStepButton(forward: false)
+
+            Text(
+                PlaybackPositionLabel.text(
+                    time: playbackManager.currentTime,
+                    duration: playbackManager.duration,
+                    sourceFrameRate: playbackManager.sourceFrameRate
+                )
+            )
+            .font(.system(size: 14, weight: .bold).monospacedDigit())
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(minWidth: 150)
+
+            drawingStepButton(forward: true)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(AnalysisTheme.chrome.opacity(0.92), in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 1))
+    }
+
+    private func drawingStepButton(forward: Bool) -> some View {
+        Button {
+            playbackManager.stepFrame(forward: forward)
+        } label: {
+            Image(systemName: forward ? "chevron.right" : "chevron.left")
+                .scaledFont(size: 18, weight: .bold)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(forward ? "下一帧" : "上一帧")
+    }
+
     private var drawingModeHeader: some View {
         ZStack {
             Text("画线")
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                .scaledFont(size: 18, weight: .semibold, design: .rounded)
 
             HStack(spacing: 8) {
                 Button(action: onBack) {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 23, weight: .semibold))
+                        .scaledFont(size: 23, weight: .semibold)
                         .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("返回项目库")
@@ -263,7 +311,7 @@ struct AnalysisWorkspaceView: View {
                     }
                 } label: {
                     Image(systemName: "arrow.uturn.backward")
-                        .font(.system(size: 20, weight: .semibold))
+                        .scaledFont(size: 20, weight: .semibold)
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
@@ -274,7 +322,7 @@ struct AnalysisWorkspaceView: View {
                 Button("完成") {
                     interactionMode = .idle
                 }
-                .font(.system(size: 16, weight: .bold))
+                .scaledFont(size: 16, weight: .bold)
                 .foregroundStyle(AnalysisTheme.proTourSignal)
                 .frame(minWidth: 52, minHeight: 44)
                 .buttonStyle(.plain)
@@ -300,15 +348,16 @@ struct AnalysisWorkspaceView: View {
         HStack(spacing: 12) {
             Button(action: onBack) {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 23, weight: .semibold))
+                    .scaledFont(size: 23, weight: .semibold)
                     .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("返回项目库")
 
             HStack(spacing: 7) {
                 Text(project.name)
-                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    .scaledFont(size: 18, weight: .semibold, design: .rounded)
                     .lineLimit(1)
 
                 if !saveStatus.label.isEmpty {
@@ -323,8 +372,9 @@ struct AnalysisWorkspaceView: View {
 
             Button(action: onExport) {
                 Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 20, weight: .semibold))
+                    .scaledFont(size: 20, weight: .semibold)
                     .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("分享视频")
@@ -373,13 +423,13 @@ struct AnalysisWorkspaceView: View {
                     .controlSize(.small)
                     .tint(AnalysisTheme.proTourSignal)
                 Text("AI 分析 · \(presentation.percentage)%")
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(size: 13, weight: .semibold)
                 Text(presentation.title)
-                    .font(.system(size: 12))
+                    .scaledFont(size: 12)
                     .foregroundStyle(.white.opacity(0.66))
                     .lineLimit(1)
                 Button("取消", action: onCancelAnalysis)
-                    .font(.system(size: 12, weight: .semibold))
+                    .scaledFont(size: 12, weight: .semibold)
                     .foregroundStyle(AnalysisTheme.proTourSignal)
             }
             .padding(.horizontal, 13)
@@ -390,20 +440,43 @@ struct AnalysisWorkspaceView: View {
             .frame(maxWidth: 316)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(presentation.title)，\(presentation.percentage)%")
+        } else if let trimRange, playbackManager.analysisState.hasCompletedResult {
+            Button(action: onTrimToSwing) {
+                HStack(spacing: 8) {
+                    Image(systemName: "scissors")
+                    Text(
+                        "视频 \(Int(playbackManager.duration.rounded())) 秒，挥杆约 "
+                            + String(format: "%.1f", trimRange.upperBound - trimRange.lowerBound)
+                            + " 秒 · 裁剪到挥杆片段"
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
+                }
+                .scaledFont(size: 13, weight: .semibold)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 9)
+                .background(.black.opacity(0.62), in: Capsule())
+                .overlay(Capsule().stroke(AnalysisTheme.proTourSignal.opacity(0.5), lineWidth: 1))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: 340)
+            .accessibilityHint("把挥杆部分另存为新项目，原视频保留")
         } else if let failure = playbackManager.analysisFailure {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(AnalysisTheme.proTourPaused)
                 VStack(alignment: .leading, spacing: 8) {
                     Text(mobileFailureMessage(failure))
-                        .font(.system(size: 13, weight: .semibold))
+                        .scaledFont(size: 13, weight: .semibold)
                         .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(.leading)
 
                     if failure != .analysisCancelled, failure != .noVideo {
                         Button(action: onCorrectPPoints) {
                             Label("手动标 P 点", systemImage: "hand.tap")
-                                .font(.system(size: 13, weight: .bold))
+                                .scaledFont(size: 13, weight: .bold)
                                 .padding(.horizontal, 12)
                                 .frame(minHeight: 32)
                                 .foregroundStyle(AnalysisTheme.proTourBackground)
@@ -464,15 +537,25 @@ struct AnalysisWorkspaceView: View {
                 interactionMode = .idle
                 onAnalyze()
             } label: {
-                Image(
-                    systemName: playbackManager.analysisState.hasCompletedResult
-                        ? "arrow.clockwise"
-                        : "sparkles"
-                )
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 48, height: 48)
-                    .background(.black.opacity(0.46), in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
+                HStack(spacing: 6) {
+                    Image(
+                        systemName: playbackManager.analysisState.hasCompletedResult
+                            ? "arrow.clockwise"
+                            : "sparkles"
+                    )
+                    Text(
+                        playbackManager.analysisState.hasCompletedResult
+                            ? "重新分析"
+                            : "AI 分析"
+                    )
+                }
+                .scaledFont(size: 15, weight: .bold)
+                .lineLimit(1)
+                .padding(.horizontal, 14)
+                .frame(minHeight: 48)
+                .background(.black.opacity(0.46), in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
+                .contentShape(Capsule())
             }
             .buttonStyle(.plain)
             .foregroundStyle(
@@ -485,15 +568,16 @@ struct AnalysisWorkspaceView: View {
                     : "开始 P1–P8 分析"
             )
 
-            Spacer(minLength: 20)
+            Spacer(minLength: 8)
 
             Button(action: toggleDrawingMode) {
                 HStack(spacing: 7) {
                     Image(systemName: "pencil.tip")
                     Text("画线")
                 }
-                .font(.system(size: 15, weight: .bold))
-                .padding(.horizontal, 20)
+                .scaledFont(size: 15, weight: .bold)
+                .lineLimit(1)
+                .padding(.horizontal, 16)
                 .frame(minHeight: 48)
                 .background(
                     interactionMode == .drawing
@@ -514,18 +598,25 @@ struct AnalysisWorkspaceView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(interactionMode == .drawing ? "结束画线" : "开始画线")
 
-            Spacer(minLength: 20)
+            Spacer(minLength: 8)
 
             Button(action: onCorrectPPoints) {
-                ZStack {
-                    Image(systemName: "viewfinder")
-                        .font(.system(size: 22, weight: .medium))
-                    Text("P")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                HStack(spacing: 6) {
+                    ZStack {
+                        Image(systemName: "viewfinder")
+                            .scaledFont(size: 20, weight: .medium)
+                        Text("P")
+                            .scaledFont(size: 9, weight: .bold, design: .rounded)
+                    }
+                    Text("修正 P 点")
+                        .scaledFont(size: 15, weight: .bold)
+                        .lineLimit(1)
                 }
-                    .frame(width: 48, height: 48)
-                    .background(.black.opacity(0.46), in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
+                .padding(.horizontal, 14)
+                .frame(minHeight: 48)
+                .background(.black.opacity(0.46), in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
+                .contentShape(Capsule())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.white)
@@ -705,7 +796,7 @@ struct FullscreenVideoPlaybackView: View {
                     Image(systemName: "figure.golf")
                     Text("动作反馈")
                 }
-                .font(.system(size: 17, weight: .semibold))
+                .scaledFont(size: 17, weight: .semibold)
                 .foregroundStyle(.white)
                 .padding(.horizontal, 18)
                 .frame(minHeight: FullscreenPlaybackPolicy.minimumTouchTarget)
@@ -741,7 +832,7 @@ struct FullscreenVideoPlaybackView: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 19, weight: .semibold))
+                .scaledFont(size: 19, weight: .semibold)
                 .frame(
                     minWidth: FullscreenPlaybackPolicy.minimumTouchTarget,
                     minHeight: FullscreenPlaybackPolicy.minimumTouchTarget

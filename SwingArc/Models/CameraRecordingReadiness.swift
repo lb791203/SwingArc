@@ -114,3 +114,36 @@ enum CameraAccessPresentation {
         }
     }
 }
+
+/// Turns system camera errors (often English) into short Chinese guidance.
+/// The raw domain/code is kept in brackets for troubleshooting.
+enum CameraErrorPresentation {
+    static func message(prefix: String, error: Error?) -> String {
+        guard let error else { return "\(prefix)：未知相机错误，请重试。" }
+        if let startError = error as? CameraRecordingStartError,
+           let description = startError.errorDescription {
+            return description
+        }
+        let nsError = error as NSError
+        let guidance: String
+        if nsError.domain == "AVFoundationErrorDomain" {
+            switch nsError.code {
+            case -11807, -11808:
+                guidance = "手机存储空间不足，请清理后重试"
+            case -11810:
+                guidance = "已达到最长录制时间"
+            case -11818, -11819:
+                guidance = "相机被其他应用或来电占用，请稍候重试"
+            case -11847:
+                guidance = "相机被系统中断，请稍候重试"
+            case -11803, -11814:
+                guidance = "相机暂时不可用，请重新打开录像页"
+            default:
+                guidance = "相机出现问题，请重新打开录像页后重试"
+            }
+        } else {
+            guidance = "相机出现问题，请重新打开录像页后重试"
+        }
+        return "\(prefix)：\(guidance)（\(nsError.domain) \(nsError.code)）"
+    }
+}

@@ -13,6 +13,9 @@ struct DrawingDisplayPolicySmoke {
 
         precondition(DrawingDisplayPolicy.shouldShow(drawing, at: 5.0, isKeyframeMode: false))
         precondition(!DrawingDisplayPolicy.shouldShow(drawing, at: 5.0, isKeyframeMode: true))
+        precondition(DrawingDefaults.color == .yellow, "Default lines must read outdoors")
+        precondition(DrawingDefaults.lineWidth >= 4)
+        precondition(DrawingDefaults.showsOnlyNearDrawnFrame)
 
         precondition(DrawingTool.line.revealsColorPalette)
         precondition(DrawingTool.arrow.revealsColorPalette)

@@ -46,6 +46,7 @@ struct PPointCorrectionWorkspace: View {
         } message: {
             Text(preparationError ?? "")
         }
+        .tint(AnalysisTheme.proTourSignal)
         .preferredColorScheme(.dark)
     }
 
@@ -53,7 +54,8 @@ struct PPointCorrectionWorkspace: View {
         VStack(spacing: 2) {
             HStack {
                 Button("关闭", action: onClose)
-                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                    .scaledFont(size: 15, weight: .semibold)
                     .padding(.horizontal, 12)
                     .frame(minHeight: 38)
                     .background(
@@ -66,7 +68,7 @@ struct PPointCorrectionWorkspace: View {
 
                 VStack(spacing: 0) {
                     Text("P 点修正")
-                        .font(.system(size: 17, weight: .bold))
+                        .scaledFont(size: 17, weight: .bold)
                     Text("当前视频")
                         .font(.caption2)
                         .foregroundStyle(AnalysisTheme.proTourSecondaryText)
@@ -147,7 +149,7 @@ struct PPointCorrectionWorkspace: View {
                     } label: {
                         VStack(spacing: 3) {
                             Text(code.rawValue)
-                                .font(.system(size: 14, weight: .black, design: .monospaced))
+                                .scaledFont(size: 14, weight: .black, design: .monospaced)
                             Circle()
                                 .fill(statusColor(selection.source))
                                 .frame(width: 5, height: 5)
@@ -186,6 +188,7 @@ struct PPointCorrectionWorkspace: View {
                     "帧 \(state.currentSourceFrameIndex + 1) / " +
                         "\(frameController.frameCount)"
                 )
+                .scaledFont(size: 20, weight: .bold, design: .rounded)
                 .monospacedDigit()
 
                 Spacer()
@@ -215,7 +218,7 @@ struct PPointCorrectionWorkspace: View {
                 saveSelectedStage()
             } label: {
                 Text("设为 \(state.selectedCode.rawValue)")
-                    .font(.system(size: 16, weight: .bold))
+                    .scaledFont(size: 16, weight: .bold)
                     .frame(maxWidth: .infinity, minHeight: 46)
                     .foregroundStyle(AnalysisTheme.proTourBackground)
                     .background(
@@ -275,7 +278,7 @@ struct PPointCorrectionWorkspace: View {
             step(amount)
         } label: {
             Text(title)
-                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                .scaledFont(size: 18, weight: .bold, design: .monospaced)
                 .frame(maxWidth: .infinity, minHeight: 42)
                 .background(
                     .black.opacity(0.28),

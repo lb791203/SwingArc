@@ -152,18 +152,18 @@ struct SimplifiedSwingFeedbackView: View {
     private var summaryCard: some View {
         VStack(alignment: .leading, spacing: 9) {
             Text(feedback.summary.title)
-                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .scaledFont(size: 22, weight: .bold, design: .rounded)
                 .foregroundStyle(AnalysisTheme.proTourPrimaryText)
 
             Text(feedback.summary.observation)
-                .font(.system(size: 15, weight: .medium))
+                .scaledFont(size: 15, weight: .medium)
                 .foregroundStyle(AnalysisTheme.proTourPrimaryText.opacity(0.88))
 
             Label(
                 feedback.summary.recommendation,
                 systemImage: "arrow.turn.down.right"
             )
-            .font(.system(size: 14, weight: .semibold))
+            .scaledFont(size: 14, weight: .semibold)
             .foregroundStyle(AnalysisTheme.proTourSignal)
 
             if !feedback.summary.stages.isEmpty {
@@ -196,18 +196,18 @@ struct SimplifiedSwingFeedbackView: View {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(card.category.title)
-                            .font(.system(size: 17, weight: .bold))
+                            .scaledFont(size: 17, weight: .bold)
                             .foregroundStyle(AnalysisTheme.proTourPrimaryText)
 
                         Text(card.status.title)
-                            .font(.system(size: 12, weight: .bold))
+                            .scaledFont(size: 12, weight: .bold)
                             .foregroundStyle(statusColor(card.status))
                     }
 
                     Spacer(minLength: 12)
 
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 13, weight: .bold))
+                        .scaledFont(size: 13, weight: .bold)
                         .foregroundStyle(
                             isExpanded
                                 ? AnalysisTheme.proTourSignal
@@ -219,7 +219,7 @@ struct SimplifiedSwingFeedbackView: View {
             .buttonStyle(.plain)
 
             Text(card.conclusion)
-                .font(.system(size: 15, weight: .medium))
+                .scaledFont(size: 15, weight: .medium)
                 .foregroundStyle(AnalysisTheme.proTourPrimaryText.opacity(0.88))
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -277,7 +277,7 @@ struct SimplifiedSwingFeedbackView: View {
                 .monospacedDigit()
                 .foregroundStyle(AnalysisTheme.proTourSecondaryText)
         }
-        .font(.system(size: 13, weight: .semibold))
+        .scaledFont(size: 13, weight: .semibold)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "证据\(card.evidenceState.title)，置信度\(Int((card.evidenceConfidence * 100).rounded()))%"
@@ -297,7 +297,7 @@ struct SimplifiedSwingFeedbackView: View {
                         .monospacedDigit()
                         .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                 }
-                .font(.system(size: 13, weight: .semibold))
+                .scaledFont(size: 13, weight: .semibold)
                 .accessibilityElement(children: .combine)
             }
         }
@@ -331,7 +331,7 @@ struct SimplifiedSwingFeedbackView: View {
                             ? "修正 \(stage.evidenceCode)"
                             : stage.evidenceCode
                     )
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .scaledFont(size: 12, weight: .bold, design: .monospaced)
                     .foregroundStyle(
                         correctionEnabled
                             ? AnalysisTheme.proTourSignal

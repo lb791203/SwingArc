@@ -427,6 +427,74 @@ enum MobileReplayStageStripPolicy {
     static let currentIndicatorHeight: CGFloat = 2
 }
 
+/// Suggests trimming a long clip down to the swing found by analysis:
+/// one second before the earliest P point to 1.5 seconds after the last.
+/// Returns nil when trimming would save less than three seconds.
+enum SwingTrimPolicy {
+    static let leadIn: Double = 1.0
+    static let tail: Double = 1.5
+    static let minimumSaving: Double = 3.0
+
+    static func range(keyframes: [KeyframeMarker], duration: Double) -> ClosedRange<Double>? {
+        let pStageNames = Set(SwingStage.pStages.map(\.rawValue))
+        let times = keyframes
+            .filter { pStageNames.contains($0.stage) && $0.time.isFinite }
+            .map(\.time)
+        guard duration.isFinite, duration > 0,
+              times.count >= 2,
+              let first = times.min(), let last = times.max() else { return nil }
+        let start = max(0, first - leadIn)
+        let end = min(duration, last + tail)
+        guard end > start, duration - (end - start) >= minimumSaving else { return nil }
+        return start...end
+    }
+}
+
+/// Library card helpers: thumbnail at the top of the swing, a date line and
+/// a P-point summary so saved swings can be told apart at a glance.
+enum ProjectThumbnailPolicy {
+    static func time(keyframes: [KeyframeMarker], duration: Double) -> Double {
+        let preferred: [SwingStage] = [.top, .impact, .address]
+        for stage in preferred {
+            if let marker = keyframes.first(where: { $0.stage == stage.rawValue }) {
+                return marker.time
+            }
+        }
+        guard duration.isFinite, duration > 0 else { return 0 }
+        return min(1.0, duration * 0.3)
+    }
+
+    static func stageSummary(keyframes: [KeyframeMarker]) -> String {
+        let count = Set(keyframes.map(\.stage)).intersection(Set(SwingStage.pStages.map(\.rawValue))).count
+        return count == 0 ? "" : " · P 点 \(count)/8"
+    }
+
+    static func dateLine(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日 EEE HH:mm"
+        return formatter.string(from: date)
+    }
+}
+
+/// Time and approximate source frame shown while scrubbing, e.g.
+/// "1.23 秒 · 帧 37 / 972".
+enum PlaybackPositionLabel {
+    static func frameNumber(time: Double, sourceFrameRate: Double) -> Int {
+        guard time.isFinite, sourceFrameRate.isFinite, sourceFrameRate > 0 else { return 1 }
+        return max(1, Int((max(0, time) * sourceFrameRate).rounded()) + 1)
+    }
+
+    static func text(time: Double, duration: Double, sourceFrameRate: Double) -> String {
+        let safeTime = time.isFinite ? max(0, time) : 0
+        let current = frameNumber(time: safeTime, sourceFrameRate: sourceFrameRate)
+        let total = frameNumber(time: duration, sourceFrameRate: sourceFrameRate) - 1
+        let seconds = String(format: "%.2f 秒", safeTime)
+        guard total > 0 else { return "\(seconds) · 帧 \(current)" }
+        return "\(seconds) · 帧 \(min(current, total)) / \(total)"
+    }
+}
+
 enum ReplayStageSelectionPolicy {
     static func currentStage(
         at currentTime: Double,

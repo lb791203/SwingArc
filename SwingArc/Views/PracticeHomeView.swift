@@ -8,6 +8,9 @@ struct PracticeHomeView: View {
     let onImport: () -> Void
     let onOpenLibrary: () -> Void
     let onOpenAbout: () -> Void
+    /// Most recently saved project, offered as "继续上次分析".
+    var recentProject: LocalProjectSummary? = nil
+    var onOpenRecent: (LocalProjectSummary) -> Void = { _ in }
 
     var body: some View {
         NavigationStack {
@@ -23,7 +26,7 @@ struct PracticeHomeView: View {
                             .padding(.top, metrics.headerTopPadding)
 
                         Text("SWING ANALYSIS")
-                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                            .scaledFont(size: 13, weight: .bold, design: .monospaced)
                             .tracking(1.8)
                             .foregroundStyle(AnalysisTheme.proTourSignal)
                             .padding(.top, metrics.trainingTopPadding)
@@ -52,6 +55,11 @@ struct PracticeHomeView: View {
                             }
                         }
 
+                        if let recentProject {
+                            recentProjectCard(recentProject)
+                                .padding(.top, metrics.cardSpacing)
+                        }
+
                         Spacer(minLength: metrics.bottomPadding)
                     }
                     .padding(.horizontal, 20)
@@ -77,10 +85,10 @@ struct PracticeHomeView: View {
             Button(action: onOpenLibrary) {
                 HStack(spacing: 6) {
                     Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 14, weight: .bold))
+                        .scaledFont(size: 14, weight: .bold)
                         .foregroundStyle(AnalysisTheme.proTourSignal)
                     Text("记录")
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .scaledFont(size: 13, weight: .bold, design: .monospaced)
                         .tracking(0.4)
                         .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                 }
@@ -93,13 +101,45 @@ struct PracticeHomeView: View {
 
             Button(action: onOpenAbout) {
                 Image(systemName: "info.circle")
-                    .font(.system(size: 17, weight: .bold))
+                    .scaledFont(size: 17, weight: .bold)
                     .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
             .foregroundStyle(AnalysisTheme.proTourPrimaryText)
             .accessibilityLabel("关于与隐私")
         }
+    }
+
+    private func recentProjectCard(_ project: LocalProjectSummary) -> some View {
+        Button {
+            onOpenRecent(project)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "arrow.uturn.forward.circle.fill")
+                    .scaledFont(size: 26, weight: .semibold)
+                    .foregroundStyle(AnalysisTheme.proTourSignal)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("继续上次分析")
+                        .scaledFont(size: 16, weight: .bold)
+                        .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                    Text("\(project.name) · \(ProjectThumbnailPolicy.dateLine(project.modifiedAt))")
+                        .scaledFont(size: 13, weight: .medium)
+                        .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .scaledFont(size: 14, weight: .bold)
+                    .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+            }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+            .background(AnalysisTheme.proTourSurface.opacity(0.6), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(AnalysisTheme.proTourRaisedSurface))
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("继续上次分析：\(project.name)")
     }
 
     @ViewBuilder
@@ -197,7 +237,7 @@ private struct PracticeModeSelector: View {
         Button(action: action) {
             HStack(spacing: 16) {
                 Text(index)
-                    .font(.system(size: 13, weight: .black, design: .monospaced))
+                    .scaledFont(size: 13, weight: .black, design: .monospaced)
                     .foregroundStyle(AnalysisTheme.proTourBackground)
                     .frame(width: 38, height: 38)
                     .background(
@@ -207,7 +247,7 @@ private struct PracticeModeSelector: View {
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(eyebrow)
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .scaledFont(size: 11, weight: .bold, design: .monospaced)
                         .tracking(1.1)
                         .foregroundStyle(AnalysisTheme.proTourSecondaryText)
                     Text(title)
@@ -228,9 +268,9 @@ private struct PracticeModeSelector: View {
 
                 VStack(spacing: 10) {
                     Image(systemName: systemImage)
-                        .font(.system(size: 25, weight: .semibold))
+                        .scaledFont(size: 25, weight: .semibold)
                     Image(systemName: "arrow.up.right")
-                        .font(.system(size: 14, weight: .bold))
+                        .scaledFont(size: 14, weight: .bold)
                 }
                 .foregroundStyle(modeAccent)
                 .frame(width: 42)
