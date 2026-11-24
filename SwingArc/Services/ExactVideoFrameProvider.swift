@@ -54,13 +54,12 @@ final class ExactVideoFrameProvider {
         guard let reader = try? AVAssetReader(asset: asset) else {
             throw ExactVideoFrameProviderError.timelineUnavailable
         }
-        let output = AVAssetReaderTrackOutput(
-            track: track,
-            outputSettings: [
-                kCVPixelBufferPixelFormatTypeKey as String:
-                    kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-            ]
-        )
+        // Only presentation timestamps are needed here, so read the
+        // compressed samples instead of decoding every frame to pixels.
+        // Decoding a 240 FPS clip made opening P-point correction take
+        // several seconds.
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+        output.alwaysCopiesSampleData = false
         guard reader.canAdd(output) else {
             throw ExactVideoFrameProviderError.timelineUnavailable
         }
@@ -70,7 +69,7 @@ final class ExactVideoFrameProvider {
         }
         var times: [CMTime] = []
         while let sample = output.copyNextSampleBuffer() {
-            times.append(CMSampleBufferGetPresentationTimeStamp(sample))
+            times.append(contentsOf: displayedPresentationTimes(in: sample))
         }
         guard reader.status == .completed,
               let timeline = SourceFrameTimeline(
@@ -89,6 +88,57 @@ final class ExactVideoFrameProvider {
             timeline: timeline,
             orientedSize: size
         )
+    }
+
+    /// Presentation times of the frames in one compressed sample buffer,
+    /// skipping frames the decoder would not display.
+    private static func displayedPresentationTimes(
+        in sample: CMSampleBuffer
+    ) -> [CMTime] {
+        let count = CMSampleBufferGetNumSamples(sample)
+        guard count > 0 else { return [] }
+        let attachments = CMSampleBufferGetSampleAttachmentsArray(
+            sample,
+            createIfNecessary: false
+        ) as? [[CFString: Any]]
+        func isDisplayed(_ index: Int) -> Bool {
+            guard let attachments, index < attachments.count else { return true }
+            return (attachments[index][kCMSampleAttachmentKey_DoNotDisplay] as? Bool) != true
+        }
+        if count == 1 {
+            return isDisplayed(0)
+                ? [CMSampleBufferGetPresentationTimeStamp(sample)]
+                : []
+        }
+        var entryCount: CMItemCount = 0
+        guard CMSampleBufferGetSampleTimingInfoArray(
+            sample,
+            entryCount: 0,
+            arrayToFill: nil,
+            entriesNeededOut: &entryCount
+        ) == noErr, entryCount > 0 else {
+            return [CMSampleBufferGetPresentationTimeStamp(sample)]
+        }
+        var timing = [CMSampleTimingInfo](repeating: .invalid, count: entryCount)
+        guard CMSampleBufferGetSampleTimingInfoArray(
+            sample,
+            entryCount: entryCount,
+            arrayToFill: &timing,
+            entriesNeededOut: &entryCount
+        ) == noErr else {
+            return [CMSampleBufferGetPresentationTimeStamp(sample)]
+        }
+        if entryCount == count {
+            return (0..<count).filter(isDisplayed).map { timing[$0].presentationTimeStamp }
+        }
+        // A single timing entry describes evenly spaced samples.
+        let first = timing[0]
+        return (0..<count).filter(isDisplayed).map { index in
+            CMTimeAdd(
+                first.presentationTimeStamp,
+                CMTimeMultiply(first.duration, multiplier: Int32(index))
+            )
+        }
     }
 
     func frame(at sourceFrameIndex: Int) throws -> ExactVideoFrame {

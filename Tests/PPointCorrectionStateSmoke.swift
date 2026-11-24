@@ -96,5 +96,46 @@ struct PPointCorrectionStateSmoke {
         )
         PPointCorrectionReducer.reduce(state: &empty, action: .step(5))
         precondition(empty.currentSourceFrameIndex == 0)
+
+        checksScrubAndUnresolvedStart()
+    }
+
+    /// The scrubber jumps within the neighbours' bounds, and an unresolved
+    /// stage opens just after the previous stage instead of at P1.
+    private static func checksScrubAndUnresolvedStart() {
+        var state = PPointCorrectionState(
+            frameCount: 300,
+            predictedFrames: [.p1: 40, .p2: 80, .p3: 120, .p7: 260],
+            suggestedFrames: [.p4: 170],
+            manualFrames: [:]
+        )
+        precondition(state.selectedCode == .p1)
+
+        PPointCorrectionReducer.reduce(state: &state, action: .select(.p5))
+        precondition(
+            state.currentSourceFrameIndex == 171,
+            "Unresolved P5 must start right after the suggested P4 frame"
+        )
+        precondition(state.selectableFrameRange == 121...259)
+        precondition(state.nextCode == .p6)
+
+        PPointCorrectionReducer.reduce(state: &state, action: .jump(200))
+        precondition(state.currentSourceFrameIndex == 200)
+        PPointCorrectionReducer.reduce(state: &state, action: .jump(290))
+        precondition(state.currentSourceFrameIndex == 259, "Jump must not cross P7")
+        PPointCorrectionReducer.reduce(state: &state, action: .jump(-5))
+        precondition(state.currentSourceFrameIndex == 121, "Jump must not cross P3")
+
+        PPointCorrectionReducer.reduce(state: &state, action: .jump(210))
+        PPointCorrectionReducer.reduce(state: &state, action: .setSelectedStage)
+        PPointCorrectionReducer.reduce(state: &state, action: .select(.p6))
+        precondition(
+            state.currentSourceFrameIndex == 211,
+            "P6 must start right after the P5 that was just set"
+        )
+
+        PPointCorrectionReducer.reduce(state: &state, action: .select(.p8))
+        precondition(state.nextCode == nil)
+        precondition(state.currentSourceFrameIndex == 261)
     }
 }

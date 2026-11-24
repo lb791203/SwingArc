@@ -54,11 +54,15 @@ struct CaptureReplayPresentationSmoke {
         precondition(mobileTimeline.contains("accessibilityValue"))
         precondition(!mobileTimeline.contains("Text(formatTime"))
         precondition(!mobileTimeline.contains(".frame(maxHeight: .infinity, alignment: .bottom)"))
-        precondition(!mobileTimeline.contains("Text(stage.pNumber)"))
+        precondition(
+            mobileTimeline.contains("Text(stage.pNumber)"),
+            "Each stage glyph carries a P1–P8 label so the strip is readable"
+        )
+        precondition(mobileTimeline.contains("StageStripLabelStyle.color("))
         precondition(!mobileTimeline.contains("Image(systemName: \"figure.golf\")"))
         precondition(!mobileTimeline.contains(".allowsHitTesting(marker != nil)"))
         precondition(!mobileTimeline.contains(".disabled(marker == nil)"))
-        precondition(mobileTimeline.contains("onCorrectPPoints()"))
+        precondition(mobileTimeline.contains("onCorrectStage(stage)"))
         precondition(components.contains("private struct SwingStagePoseGlyph"))
         precondition(components.contains("Image(SwingStageGlyphAsset.name(for: stage))"))
         precondition(components.contains("private enum SwingStageGlyphAsset"))

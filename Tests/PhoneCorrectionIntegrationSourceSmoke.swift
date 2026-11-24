@@ -50,7 +50,12 @@ struct PhoneCorrectionIntegrationSourceSmoke {
             to: "private struct SwingStagePoseGlyph"
         )
         precondition(mobileTimeline.contains("let onCorrectPPoints: () -> Void"))
-        precondition(mobileTimeline.contains("onCorrectPPoints()"))
+        precondition(mobileTimeline.contains("let onCorrectStage: (SwingStage) -> Void"))
+        precondition(
+            mobileTimeline.contains("onCorrectStage(stage)"),
+            "A tapped unresolved P stage must open correction on that stage"
+        )
+        precondition(content.contains("initialStage: pPointCorrectionStage"))
         precondition(mobileTimeline.contains("playbackManager.seek(to: marker)"))
         precondition(!mobileTimeline.contains("playbackManager.seek(to: marker.time)"))
         precondition(
@@ -68,6 +73,7 @@ struct PhoneCorrectionIntegrationSourceSmoke {
             to: ")"
         )
         precondition(mobileCall.contains("onCorrectPPoints: onCorrectPPoints"))
+        precondition(mobileCall.contains("onCorrectStage: onCorrectStage"))
         precondition(
             playback.contains("func seek(to marker: KeyframeMarker)") &&
                 playback.contains("session?.presentationTime(") &&

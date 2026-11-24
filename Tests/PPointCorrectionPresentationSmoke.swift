@@ -25,7 +25,11 @@ struct PPointCorrectionPresentationSmoke {
             "minHeight: 42",
             "minHeight: 46",
             "marker.sourceFrameIndex",
-            "设为 \\(state.selectedCode.rawValue)"
+            "设为 \\(state.selectedCode.rawValue)",
+            "frameScrubber(state)",
+            "action: .jump(frame)",
+            "state.nextCode",
+            "initialStage"
         ] {
             precondition(source.contains(required), "Missing phone correction control: \(required)")
         }

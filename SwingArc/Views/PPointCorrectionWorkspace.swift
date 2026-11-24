@@ -6,12 +6,16 @@ struct PPointCorrectionWorkspace: View {
     let prediction: AnnotationPredictionSnapshot
     let markers: [KeyframeMarker]
     let initialTime: Double
+    /// The stage the user tapped; the workspace opens on it.
+    var initialStage: SwingStage? = nil
     let onClose: () -> Void
     let onSave: (PPointCode, Int, Double, CGImage) -> Void
 
     @StateObject private var frameController = AnnotationFrameController()
     @State private var correctionState: PPointCorrectionState?
     @State private var preparationError: String?
+    @State private var scrubFrame: Double = 0
+    @State private var savedMessage: String?
 
     var body: some View {
         Group {
@@ -198,6 +202,8 @@ struct PPointCorrectionWorkspace: View {
             .font(.caption)
             .shadow(color: .black.opacity(0.9), radius: 3)
 
+            frameScrubber(state)
+
             HStack(spacing: 9) {
                 stepButton(-5, title: "−5")
                 stepButton(-1, title: "−1")
@@ -222,6 +228,45 @@ struct PPointCorrectionWorkspace: View {
             .accessibilityLabel(
                 "将当前帧设为 \(state.selectedCode.rawValue)"
             )
+
+            if let savedMessage {
+                Text(savedMessage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AnalysisTheme.proTourSignal)
+                    .shadow(color: .black.opacity(0.9), radius: 3)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    /// Drag to move through every source frame the selected stage may use,
+    /// instead of stepping ±1/±5 frames at a time.
+    @ViewBuilder
+    private func frameScrubber(_ state: PPointCorrectionState) -> some View {
+        let range = state.selectableFrameRange
+        if range.upperBound > range.lowerBound {
+            HStack(spacing: 8) {
+                Text("\(range.lowerBound + 1)")
+                Slider(
+                    value: Binding(
+                        get: { scrubFrame },
+                        set: { value in
+                            scrubFrame = value
+                            jump(to: Int(value.rounded()))
+                        }
+                    ),
+                    in: Double(range.lowerBound)...Double(range.upperBound),
+                    step: 1
+                )
+                .tint(AnalysisTheme.proTourSignal)
+                .accessibilityLabel("拖动选择 \(state.selectedCode.rawValue) 帧")
+                .accessibilityValue("帧 \(state.currentSourceFrameIndex + 1)")
+                Text("\(range.upperBound + 1)")
+            }
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+            .shadow(color: .black.opacity(0.9), radius: 3)
+            .padding(.horizontal, 4)
         }
     }
 
@@ -317,7 +362,15 @@ struct PPointCorrectionWorkspace: View {
                 action: .step(initialFrame)
             )
         }
+        if let initialStage,
+           let code = Self.code(for: initialStage.rawValue) {
+            PPointCorrectionReducer.reduce(
+                state: &initial,
+                action: .select(code)
+            )
+        }
         correctionState = initial
+        scrubFrame = Double(initial.currentSourceFrameIndex)
         _ = await frameController.show(
             index: initial.currentSourceFrameIndex
         )
@@ -327,12 +380,22 @@ struct PPointCorrectionWorkspace: View {
         guard var state = correctionState else { return }
         PPointCorrectionReducer.reduce(state: &state, action: .select(code))
         correctionState = state
+        scrubFrame = Double(state.currentSourceFrameIndex)
         show(frame: state.currentSourceFrameIndex)
     }
 
     private func step(_ amount: Int) {
         guard var state = correctionState else { return }
         PPointCorrectionReducer.reduce(state: &state, action: .step(amount))
+        correctionState = state
+        scrubFrame = Double(state.currentSourceFrameIndex)
+        show(frame: state.currentSourceFrameIndex)
+    }
+
+    private func jump(to frame: Int) {
+        guard var state = correctionState,
+              frame != state.currentSourceFrameIndex else { return }
+        PPointCorrectionReducer.reduce(state: &state, action: .jump(frame))
         correctionState = state
         show(frame: state.currentSourceFrameIndex)
     }
@@ -354,12 +417,33 @@ struct PPointCorrectionWorkspace: View {
             action: .setSelectedStage
         )
         correctionState = state
+        let savedCode = state.selectedCode
         onSave(
-            state.selectedCode,
+            savedCode,
             state.currentSourceFrameIndex,
             frame.presentationTime.seconds,
             frame.image
         )
+        // Move straight on to the next stage so P1→P8 can be set in one pass.
+        if let next = state.nextCode {
+            PPointCorrectionReducer.reduce(state: &state, action: .select(next))
+            correctionState = state
+            scrubFrame = Double(state.currentSourceFrameIndex)
+            show(frame: state.currentSourceFrameIndex)
+            flashSaved("已设 \(savedCode.rawValue)，下一个 \(next.rawValue)")
+        } else {
+            flashSaved("已设 \(savedCode.rawValue)")
+        }
+    }
+
+    private func flashSaved(_ message: String) {
+        withAnimation { savedMessage = message }
+        Task {
+            try? await Task.sleep(for: .seconds(1.6))
+            if savedMessage == message {
+                withAnimation { savedMessage = nil }
+            }
+        }
     }
 
     private func statusColor(

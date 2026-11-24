@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import AudioToolbox
 import Combine
 import UIKit
 
@@ -14,6 +15,10 @@ struct CameraView: View {
     @State private var useFrontCamera = false
     @State private var pendingAutomaticStop: DispatchWorkItem?
     @State private var recordingAlertMessage: String?
+    @AppStorage(ManualCaptureDelay.storageKey)
+    private var delaySeconds = ManualCaptureDelay.defaultSeconds
+    @State private var delayRemaining: Int?
+    @State private var delayTask: Task<Void, Never>?
 
     @StateObject private var cameraState = CameraStateModel()
 
@@ -87,6 +92,8 @@ struct CameraView: View {
                 Spacer(minLength: 24)
                 captureStatus
                 Spacer(minLength: 24)
+                delayPicker
+                    .padding(.bottom, 10)
                 captureControl
             }
             .padding(.horizontal, 20)
@@ -102,6 +109,7 @@ struct CameraView: View {
             }
         }
         .onDisappear {
+            cancelDelayedStart()
             pendingAutomaticStop?.cancel()
             if isRecording || isStartingRecording {
                 captureLifecycle.didFinish()
@@ -222,8 +230,66 @@ struct CameraView: View {
         .allowsHitTesting(false)
     }
 
+    private var isDelaying: Bool {
+        delayRemaining != nil
+    }
+
+    private var delayPicker: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "timer")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+            ForEach(ManualCaptureDelay.options, id: \.self) { seconds in
+                let selected = ManualCaptureDelay.sanitized(delaySeconds) == seconds
+                Button {
+                    delaySeconds = seconds
+                } label: {
+                    Text(ManualCaptureDelay.label(for: seconds))
+                        .font(.system(size: 13, weight: .bold))
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 34)
+                        .foregroundStyle(
+                            selected ? AnalysisTheme.proTourBackground : AnalysisTheme.proTourPrimaryText
+                        )
+                        .background(
+                            selected ? AnalysisTheme.proTourSignal : AnalysisTheme.proTourSurface.opacity(0.9),
+                            in: Capsule()
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("录制倒计时 \(ManualCaptureDelay.label(for: seconds))")
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .disabled(isRecording || isStartingRecording || isDelaying)
+        .opacity(isRecording || isStartingRecording ? 0.4 : 1)
+    }
+
     @ViewBuilder
     private var captureStatus: some View {
+        if let delayRemaining {
+            VStack(spacing: 8) {
+                Text("\(delayRemaining)")
+                    .font(.system(size: 96, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(AnalysisTheme.proTourSignal)
+                    .contentTransition(.numericText(countsDown: true))
+                Text("走到球位，倒计时结束自动开始录制")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AnalysisTheme.proTourSecondaryText)
+            }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 20)
+            .background(AnalysisTheme.proTourBackground.opacity(0.82), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(delayRemaining) 秒后开始录制")
+        } else {
+            recordingStatusCard
+        }
+    }
+
+    private var recordingStatusCard: some View {
         VStack(spacing: 11) {
                 HStack(spacing: 9) {
                     Circle()
@@ -252,18 +318,20 @@ struct CameraView: View {
         Button {
             if isRecording {
                 stopRecording()
+            } else if isDelaying {
+                cancelDelayedStart()
             } else {
-                startRecording()
+                requestRecording()
             }
         } label: {
             VStack(spacing: 4) {
                 Label(
-                    isRecording ? "结束录制" : "开始录像",
-                    systemImage: isRecording ? "stop.fill" : "record.circle"
+                    isRecording ? "结束录制" : (isDelaying ? "取消倒计时" : "开始录像"),
+                    systemImage: isRecording ? "stop.fill" : (isDelaying ? "xmark" : "record.circle")
                 )
                 .font(.system(size: 20, weight: .black, design: .rounded))
 
-                Text(isRecording ? "保存当前挥杆影片" : "点击立即录制")
+                Text(captureControlDetail)
                     .font(.system(size: 13, weight: .bold))
                     .opacity(0.68)
             }
@@ -282,6 +350,50 @@ struct CameraView: View {
         )
     }
     
+    private var captureControlDetail: String {
+        if isRecording { return "保存当前挥杆影片" }
+        if isDelaying { return "倒计时中" }
+        let delay = ManualCaptureDelay.sanitized(delaySeconds)
+        return delay == 0 ? "点击立即录制" : "点击后 \(delay) 秒开始录制"
+    }
+
+    /// Starts recording now, or after the chosen delay with a tick each
+    /// second and a higher tone when recording begins.
+    private func requestRecording() {
+        guard CameraAccessPresentation.canRecord(cameraState.accessState) else {
+            return
+        }
+        let delay = ManualCaptureDelay.sanitized(delaySeconds)
+        guard delay > 0 else {
+            startRecording()
+            return
+        }
+        cancelDelayedStart()
+        delayRemaining = delay
+        CaptureDelayFeedback.tick()
+        delayTask = Task { @MainActor in
+            for remaining in stride(from: delay - 1, through: 0, by: -1) {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                if remaining == 0 {
+                    delayRemaining = nil
+                    delayTask = nil
+                    CaptureDelayFeedback.go()
+                    startRecording()
+                } else {
+                    withAnimation { delayRemaining = remaining }
+                    CaptureDelayFeedback.tick()
+                }
+            }
+        }
+    }
+
+    private func cancelDelayedStart() {
+        delayTask?.cancel()
+        delayTask = nil
+        delayRemaining = nil
+    }
+
     private func startRecording() {
         guard CameraAccessPresentation.canRecord(cameraState.accessState) else {
             return
@@ -319,6 +431,20 @@ struct CameraView: View {
 }
 
 // MARK: - 相机状态模型类
+
+/// Countdown sounds and haptics for the delayed manual recording start.
+/// System sounds follow the ring/silent switch, so a haptic is played too.
+enum CaptureDelayFeedback {
+    static func tick() {
+        AudioServicesPlaySystemSound(1103)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    static func go() {
+        AudioServicesPlaySystemSound(1057)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+}
 
 class CameraStateModel: NSObject, ObservableObject, AVCaptureFileOutputRecordingDelegate, AVCaptureVideoDataOutputSampleBufferDelegate {
     @Published var session = AVCaptureSession()

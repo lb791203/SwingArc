@@ -42,5 +42,14 @@ struct AnalysisFailureSourceContractSmoke {
                 "case .insufficientStageEvidence:\n            return \"人体已识别，但未能自动确定完整 P1–P8。你可以手动设置 P 点。\""
             )
         )
+        precondition(detector.contains("case poseDetectionUnavailable"))
+        precondition(
+            analyzer.contains("activeFailure(.poseDetectionUnavailable, runID: runID, gate: gate)"),
+            "Vision failing on every frame must not be reported as an unstable person"
+        )
+        precondition(
+            workspace.contains("Label(\"手动标 P 点\", systemImage: \"hand.tap\")"),
+            "The failure banner must offer manual P-point marking"
+        )
     }
 }

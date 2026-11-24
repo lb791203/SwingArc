@@ -154,6 +154,8 @@ struct AnalysisFailurePresentation: Equatable {
                 }
             }.joined(separator: "；")
             return "当前视频不适合自动分析：\(guidance)。视频仍可播放和手工标注。"
+        case .poseDetectionUnavailable:
+            return "本设备暂时无法运行人体姿势识别（模拟器不支持），请在真机上分析。视频仍可播放和手工标注。"
         case .analysisCancelled:
             return "分析已取消"
         }
@@ -417,9 +419,10 @@ enum FullscreenPlaybackPolicy {
 enum MobileReplayStageStripPolicy {
     static let stackSpacing: CGFloat = 8
     static let stageSpacing: CGFloat = 4
-    static let buttonHeight: CGFloat = 44
+    static let buttonHeight: CGFloat = 54
     static let glyphWidth: CGFloat = 38
-    static let glyphHeight: CGFloat = 34
+    static let glyphHeight: CGFloat = 30
+    static let labelFontSize: CGFloat = 10
     static let currentIndicatorWidth: CGFloat = 14
     static let currentIndicatorHeight: CGFloat = 2
 }

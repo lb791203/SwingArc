@@ -307,3 +307,19 @@ enum ManualCapturePresentation {
 enum ManualCaptureTiming {
     static let maximumDuration: TimeInterval = 15
 }
+
+/// Optional delay before manual recording starts, so a golfer alone at the
+/// range can tap record and walk to the ball. 0 records immediately.
+enum ManualCaptureDelay {
+    static let options: [Int] = [0, 3, 5, 10]
+    static let defaultSeconds = 5
+    static let storageKey = "manualCaptureDelaySeconds"
+
+    static func sanitized(_ seconds: Int) -> Int {
+        options.contains(seconds) ? seconds : defaultSeconds
+    }
+
+    static func label(for seconds: Int) -> String {
+        seconds == 0 ? "立即" : "\(seconds) 秒"
+    }
+}
