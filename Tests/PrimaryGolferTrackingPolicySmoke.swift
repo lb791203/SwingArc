@@ -13,6 +13,11 @@ struct PrimaryGolferTrackingPolicySmoke {
         precondition(history.center(before: 0.90) == nil, "No earlier pose must not borrow a later one")
         precondition(history.center(before: 1.90) == nil, "A pose more than 0.25 s earlier is too old")
         precondition(history.center(before: 2.00) == CGPoint(x: 0.6, y: 0.5))
+        history.insert(time: 2.10, center: nil)
+        precondition(
+            history.center(before: 2.15) == nil,
+            "A centre cleared by consecutive misses must not be revived"
+        )
         let anchor = PrimaryGolferIdentity(
             center: CGPoint(x: 0.50, y: 0.56),
             scale: 0.54

@@ -243,11 +243,10 @@ class VideoPlaybackManager: ObservableObject {
             // samples can hold a frame index that disagrees with its own
             // decoded-frame time. The time is what the decoder showed, so
             // when the two point at different frames, follow the time.
-            var resolvedIndex = sourceFrameIndex
-            if let nearest = await session?.nearestSourceFrameIndex(at: marker.time),
-               nearest != sourceFrameIndex {
-                resolvedIndex = nearest
-            }
+            let resolvedIndex = await session?.resolvedSourceFrameIndex(
+                storedIndex: sourceFrameIndex,
+                time: marker.time
+            ) ?? sourceFrameIndex
             let exactTime = await session?.presentationTime(
                 at: resolvedIndex
             )
@@ -640,7 +639,10 @@ class VideoPlaybackManager: ObservableObject {
             }
             let exactBodyFrames = exactMarkers.compactMap {
                 marker -> SwingFrameObservation? in
-                guard let sourceFrameIndex = marker.sourceFrameIndex,
+                guard let sourceFrameIndex = provider.timeline.resolvedSourceFrameIndex(
+                          storedIndex: marker.sourceFrameIndex,
+                          time: marker.time
+                      ),
                       let frame = try? provider.frame(
                           at: sourceFrameIndex
                       ),

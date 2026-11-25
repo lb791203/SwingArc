@@ -92,6 +92,17 @@ nonisolated struct SourceFrameTimeline: Equatable {
         return presentationTimes[sourceFrameIndex]
     }
 
+    /// The source frame a saved marker refers to. Projects saved while the
+    /// timeline was read from compressed samples can hold a frame index that
+    /// disagrees with the marker's decoded-frame time; the time is what the
+    /// decoder showed, so it wins when the two point at different frames.
+    func resolvedSourceFrameIndex(storedIndex: Int?, time: Double) -> Int? {
+        let byTime = nearestSourceFrameIndex(at: time)
+        guard let storedIndex, storedIndex >= 0, storedIndex < count else { return byTime }
+        guard let byTime else { return storedIndex }
+        return byTime == storedIndex ? storedIndex : byTime
+    }
+
     func nearestSourceFrameIndex(at time: Double) -> Int? {
         guard time.isFinite else { return nil }
         let insertion = firstSourceFrameIndex(atOrAfter: time)

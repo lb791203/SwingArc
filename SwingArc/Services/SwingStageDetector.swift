@@ -3624,6 +3624,9 @@ enum PoseOnlyStageRules {
     static let maximumLeadArmTilt: CGFloat = 30
     /// Straight-arm frames tilted up to this much are kept, flagged for review.
     static let coarseLeadArmTilt: CGFloat = 45
+    /// A horizontal crossing only counts between frames this close.
+    static let maximumCrossingFrameGap = 4
+    static let maximumCrossingTimeGap = 0.15
     static let minimumTakeawayElbowAngle: CGFloat = 145
 
     /// P3/P5: the frame whose lead arm (shoulder to wrist) is closest to
@@ -3670,8 +3673,8 @@ enum PoseOnlyStageRules {
                     coarse = (index, tilt)
                 }
             }
-            if measured * 2 >= range.count {
-                if let best { return best.index }
+            if let best { return best.index }
+            if measured * 2 >= range.count || bentNearHorizontal {
                 // At 30 fps a fast swing can pass horizontal between two
                 // frames, both straight-armed. The closer one (within 45°) is
                 // kept for review instead of leaving the stage empty.
@@ -3679,15 +3682,27 @@ enum PoseOnlyStageRules {
                     indices.weakEvidence.insert(stage)
                     return coarse.index
                 }
-                // A measured bent arm near horizontal means this is not P3/P5.
-                // If instead no frame near horizontal was measured (the arm
-                // crossed it in a sampling or detection gap), fall through to
-                // the height fallback for review; the refinement pass then
-                // samples the gap and can settle it on real geometry.
+                // A measured bent arm near horizontal means this is not P3/P5,
+                // however few frames were measured. If instead no frame near
+                // horizontal was measured (the arm crossed it in a sampling or
+                // detection gap), fall through to the height fallback for
+                // review; the refinement pass then samples the gap.
                 if bentNearHorizontal { return nil }
             }
         }
-        let fallback = closestIndex(in: range, hands: hands, samples: samples, target: fallbackTarget)
+        // The height fallback never picks a frame whose lead elbow is
+        // measured as bent.
+        let fallback = closestIndex(
+            in: range,
+            hands: hands,
+            samples: samples,
+            target: fallbackTarget,
+            accept: { sample in
+                guard let leadSide,
+                      let elbow = elbowAngle(sample, side: leadSide, aspect: aspect) else { return true }
+                return elbow >= minimumLeadElbowAngle
+            }
+        )
         if fallback != nil { indices.weakEvidence.insert(stage) }
         return fallback
     }
@@ -3709,9 +3724,18 @@ enum PoseOnlyStageRules {
         }
         guard let here = wristAbove(index) else { return false }
         for neighbour in [index - 1, index + 1] where range.contains(neighbour) {
+            // The two frames must be close in time and both near horizontal,
+            // or the "crossing" says nothing about where the arm was level.
+            if let a = samples[index].sourceFrameIndex, let b = samples[neighbour].sourceFrameIndex {
+                guard abs(a - b) <= maximumCrossingFrameGap else { continue }
+            } else {
+                guard abs(samples[index].time - samples[neighbour].time) <= maximumCrossingTimeGap else { continue }
+            }
             guard let there = wristAbove(neighbour), there != here,
                   let elbow = elbowAngle(samples[neighbour], side: side, aspect: aspect),
-                  elbow >= minimumLeadElbowAngle else { continue }
+                  elbow >= minimumLeadElbowAngle,
+                  let tilt = leadArmTilt(samples[neighbour], side: side, aspect: aspect),
+                  tilt <= coarseLeadArmTilt else { continue }
             return true
         }
         return false
@@ -4747,8 +4771,12 @@ enum LocalStageRefinementPlan {
                   let center = detection.sourceFrameIndex,
                   center >= 0,
                   center <= maximumSourceFrameIndex else { continue }
-            let previous = observed.last(where: { $0 < center }) ?? Int.min
-            let next = observed.first(where: { $0 > center }) ?? Int.max
+            // Bound the strided fill by the nearest observed frames outside
+            // the ±2 neighbourhood, so once the neighbours are sampled the
+            // next pass still narrows the wider gaps on either side instead
+            // of returning nothing.
+            let previous = observed.last(where: { $0 < center - 2 }) ?? Int.min
+            let next = observed.first(where: { $0 > center + 2 }) ?? Int.max
             let lower = max(0, center - maximumHalfSpan, previous == Int.min ? 0 : previous + 1)
             let upper = min(
                 maximumSourceFrameIndex,

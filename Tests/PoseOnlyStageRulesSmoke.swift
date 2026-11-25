@@ -16,6 +16,8 @@ struct PoseOnlyStageRulesSmoke {
         checksRefinementKeepsResolvedStages()
         checksVisionAvailabilityPolicy()
         checksAngleUsesFrameAspect()
+        checksMeasuredBentArmVetoesFallback()
+        checksDistantCrossingIsNotCoarseCandidate()
         checksMissingLeadElbowIsOnlyForReview()
         checksRefinementPlanKeepsTwoFrameNeighbourhood()
         checksLeadArmGeometryDefinesArmParallel()
@@ -233,6 +235,59 @@ struct PoseOnlyStageRulesSmoke {
         precondition(abs(elbow - 180) < 0.5, "A straight arm stays straight at any aspect: \(elbow)")
     }
 
+    private static func armSample(
+        frame: Int, wrist: CGPoint, elbow: CGPoint?
+    ) -> SwingPoseSample {
+        SwingPoseSample(
+            time: Double(frame) / 240,
+            leftWrist: wrist, rightWrist: CGPoint(x: wrist.x + 0.02, y: wrist.y),
+            leftElbow: elbow, rightElbow: nil,
+            leftShoulder: CGPoint(x: 0.50, y: 0.50), rightShoulder: CGPoint(x: 0.60, y: 0.47),
+            leftHip: CGPoint(x: 0.50, y: 0.75), rightHip: CGPoint(x: 0.60, y: 0.75),
+            head: nil, spineAngle: nil, aggregateConfidence: 1,
+            sourceFrameIndex: frame
+        )
+    }
+
+    /// Only the middle frame is measured and its elbow is bent (~67°): the
+    /// stage must stay empty, not fall back to that frame by hand height.
+    private static func checksMeasuredBentArmVetoesFallback() {
+        let samples = [
+            armSample(frame: 0, wrist: CGPoint(x: 0.70, y: 0.55), elbow: nil),
+            armSample(frame: 1, wrist: CGPoint(x: 0.56, y: 0.52), elbow: CGPoint(x: 0.62, y: 0.62)),
+            armSample(frame: 2, wrist: CGPoint(x: 0.70, y: 0.45), elbow: nil)
+        ]
+        var indices = PoseOnlyStageRules.Indices()
+        let result = PoseOnlyStageRules.leadArmParallelIndex(
+            in: 0..<3,
+            samples: samples,
+            hands: samples.map { $0.leftWrist },
+            leadSide: .left,
+            fallbackTarget: { _ in 0.50 },
+            stage: .leadArmParallelDownswing,
+            indices: &indices
+        )
+        precondition(result == nil, "A measured bent arm near horizontal must veto P5, got \(String(describing: result))")
+    }
+
+    /// Straight arms 40° above and below horizontal but 120 frames apart do
+    /// not show where the arm was level: no coarse geometry candidate.
+    private static func checksDistantCrossingIsNotCoarseCandidate() {
+        let up = CGPoint(x: 0.50 + 0.30 * cos(.pi * 40 / 180), y: 0.50 - 0.30 * sin(.pi * 40 / 180))
+        let down = CGPoint(x: up.x, y: 0.50 + 0.30 * sin(.pi * 40 / 180))
+        let samples = [
+            armSample(frame: 0, wrist: up, elbow: CGPoint(x: (0.50 + up.x) / 2, y: (0.50 + up.y) / 2)),
+            armSample(frame: 120, wrist: down, elbow: CGPoint(x: (0.50 + down.x) / 2, y: (0.50 + down.y) / 2))
+        ]
+        precondition(!PoseOnlyStageRules.crossesHorizontalWithStraightArm(
+            at: 0, in: 0..<2, samples: samples, side: .left, aspect: 1
+        ), "A crossing 120 frames apart must not count")
+        let close = [samples[0], armSample(frame: 2, wrist: down, elbow: samples[1].leftElbow)]
+        precondition(PoseOnlyStageRules.crossesHorizontalWithStraightArm(
+            at: 0, in: 0..<2, samples: close, side: .left, aspect: 1
+        ), "Adjacent straight-arm frames either side of horizontal do count")
+    }
+
     /// Without the lead elbow the arm cannot be called straight: P3/P5 come
     /// only from the height fallback and are flagged for review.
     private static func checksMissingLeadElbowIsOnlyForReview() {
@@ -270,6 +325,18 @@ struct PoseOnlyStageRulesSmoke {
             maximumHalfSpan: 60
         )
         precondition(frames.contains(58) && frames.contains(62), "Plan \(frames) misses ±2")
+        // Neighbours already sampled: the next pass must still narrow the
+        // wider gaps rather than return nothing.
+        let next = LocalStageRefinementPlan.sourceFrames(
+            around: [detection],
+            observedSourceFrames: [0, 48, 58, 59, 60, 61, 62, 72, 120],
+            maximumSourceFrameIndex: 239,
+            maximumHalfSpan: 60
+        )
+        precondition(
+            next.contains(where: { $0 > 48 && $0 < 58 }) && next.contains(where: { $0 > 62 && $0 < 72 }),
+            "Plan \(next) leaves the 48–58 and 62–72 gaps open"
+        )
     }
 
     private static func checksVisionAvailabilityPolicy() {

@@ -340,15 +340,12 @@ struct PPointCorrectionWorkspace: View {
             guard let code = Self.code(for: marker.stage) else {
                 continue
             }
-            let frame: Int?
-            if let exactFrame = marker.sourceFrameIndex,
-               (0..<frameController.frameCount).contains(exactFrame) {
-                frame = exactFrame
-            } else {
-                frame = await frameController.nearestSourceFrameIndex(
-                    at: marker.time
-                )
-            }
+            // Same rule as replay: a stored index that disagrees with the
+            // marker's time (older projects) follows the time.
+            let frame = await frameController.resolvedSourceFrameIndex(
+                storedIndex: marker.sourceFrameIndex,
+                time: marker.time
+            )
             guard let frame else { continue }
             PPointCorrectionMarkerPolicy.apply(
                 code: code,

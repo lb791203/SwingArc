@@ -15,6 +15,7 @@ enum ExactVideoFrameProviderError: Error, Equatable {
     case decodeFailed(Int)
     case decodedNeighborFrame(requested: Int)
     case cancelled
+    case fileChangedDuringDecode
 }
 
 final class ExactVideoFrameProvider {
@@ -51,17 +52,39 @@ final class ExactVideoFrameProvider {
         url: URL,
         isCancelled: @escaping () -> Bool = { false }
     ) throws -> ExactVideoFrameProvider {
-        let asset = AVURLAsset(url: url)
-        guard let track = asset.tracks(withMediaType: .video).first else {
-            throw ExactVideoFrameProviderError.missingVideoTrack
-        }
         // Decoded output is required: compressed samples carry media-time
         // PTS before the edit list is applied, which shifted frames by two
         // on B-frame H.264 clips. The decoded timeline is cached per file
         // version and concurrent opens of the same file share one decode.
-        let timeline = try SourceFrameTimelineCache.timeline(for: url) {
-            try decodeTimeline(asset: asset, track: track, isCancelled: isCancelled)
+        // If the file is replaced while it decodes, open it again so the
+        // asset and the timeline describe the same file.
+        var attempt = 0
+        while true {
+            attempt += 1
+            let asset = AVURLAsset(url: url)
+            guard let track = asset.tracks(withMediaType: .video).first else {
+                throw ExactVideoFrameProviderError.missingVideoTrack
+            }
+            do {
+                let timeline = try SourceFrameTimelineCache.timeline(
+                    for: url,
+                    isCancelled: isCancelled
+                ) {
+                    try decodeTimeline(asset: asset, track: track, isCancelled: isCancelled)
+                }
+                return makeProvider(url: url, asset: asset, track: track, timeline: timeline)
+            } catch ExactVideoFrameProviderError.fileChangedDuringDecode where attempt < 2 {
+                continue
+            }
         }
+    }
+
+    private static func makeProvider(
+        url: URL,
+        asset: AVURLAsset,
+        track: AVAssetTrack,
+        timeline: SourceFrameTimeline
+    ) -> ExactVideoFrameProvider {
         let transformed = track.naturalSize.applying(track.preferredTransform)
         return .init(
             url: url,
@@ -177,6 +200,10 @@ actor ExactVideoFrameSession {
         provider?.timeline.nearestSourceFrameIndex(at: time)
     }
 
+    func resolvedSourceFrameIndex(storedIndex: Int?, time: Double) -> Int? {
+        provider?.timeline.resolvedSourceFrameIndex(storedIndex: storedIndex, time: time)
+    }
+
     func presentationTimeSeconds(
         at sourceFrameIndex: Int
     ) -> Double? {
@@ -238,35 +265,46 @@ nonisolated enum SourceFrameTimelineCache {
 
     /// Returns the cached timeline for the file's current version, or runs
     /// `decode` once (other callers for the same version wait for it).
+    /// - Throws: `cancelled` as soon as `isCancelled` turns true while
+    ///   waiting for another caller's decode (checked every 50 ms), and
+    ///   `fileChangedDuringDecode` when the file version changed while it
+    ///   was decoded; the stale timeline is neither stored nor returned.
     static func timeline(
         for url: URL,
+        isCancelled: () -> Bool = { false },
         decode: () throws -> SourceFrameTimeline
     ) throws -> SourceFrameTimeline {
         guard let key = key(for: url) else { return try decode() }
         condition.lock()
         while true {
+            if isCancelled() {
+                condition.unlock()
+                throw ExactVideoFrameProviderError.cancelled
+            }
             if let cached = entries[key] {
                 touch(key)
                 condition.unlock()
                 return cached
             }
             if !inFlight.contains(key) { break }
-            condition.wait()
+            _ = condition.wait(until: Date().addingTimeInterval(0.05))
         }
         inFlight.insert(key)
         condition.unlock()
 
         let result = Result { try decode() }
+        let unchanged = Self.key(for: url) == key
 
         condition.lock()
         inFlight.remove(key)
-        // Store only if the file did not change while it was decoded.
-        if case let .success(timeline) = result, Self.key(for: url) == key {
+        if case let .success(timeline) = result, unchanged {
             store(timeline, for: key)
         }
         condition.broadcast()
         condition.unlock()
-        return try result.get()
+        let timeline = try result.get()
+        guard unchanged else { throw ExactVideoFrameProviderError.fileChangedDuringDecode }
+        return timeline
     }
 
     static func cachedTimeline(for url: URL) -> SourceFrameTimeline? {
@@ -290,6 +328,8 @@ nonisolated enum SourceFrameTimelineCache {
 
     // Caller holds the lock.
     private static func store(_ timeline: SourceFrameTimeline, for key: Key) {
+        // A single timeline over the budget is returned but not kept.
+        guard timeline.count <= maximumTotalFrames else { return }
         // A newer version of the same path replaces the old one.
         for stale in entries.keys where stale.path == key.path && stale != key {
             entries[stale] = nil

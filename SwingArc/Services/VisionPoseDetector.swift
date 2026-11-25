@@ -278,9 +278,12 @@ class VisionPoseDetector {
 struct ContinuityHistory {
     static let maximumGap: Double = 0.25
     private(set) var times: [Double] = []
-    private(set) var centers: [CGPoint] = []
+    /// nil marks a point where the tracker had cleared continuity after
+    /// consecutive misses; lookups after it return nil instead of reviving
+    /// an older centre.
+    private(set) var centers: [CGPoint?] = []
 
-    mutating func insert(time: Double, center: CGPoint) {
+    mutating func insert(time: Double, center: CGPoint?) {
         if let last = times.last, time < last {
             let index = firstIndex(after: time)
             times.insert(time, at: index)
@@ -294,7 +297,7 @@ struct ContinuityHistory {
     func center(before time: Double) -> CGPoint? {
         let index = firstIndex(after: time) - 1
         guard index >= 0, time - times[index] <= Self.maximumGap else { return nil }
-        return centers[index]
+        return centers[index] ?? nil
     }
 
     /// First index whose time is greater than `time`.
@@ -369,6 +372,9 @@ final class PrimaryGolferTracker {
     func seedContinuity(center: CGPoint?) {
         previousCenter = center
     }
+
+    /// False once consecutive misses have cleared the continuity reference.
+    var hasContinuity: Bool { previousCenter != nil }
 
     /// The body centre used for continuity, exposed so callers can keep a
     /// compact history instead of whole poses.
@@ -875,11 +881,22 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         /// Vision working.
         private var acceptedGolferCount = 0
 
+        /// Outcomes of the most recent requests, so Vision breaking down
+        /// later in a run is not hidden by golfers accepted early on.
+        private var recentOutcomes: [(failed: Bool, accepted: Bool)] = []
+        static let recentWindow = 24
+
         var isPoseDetectionUnavailable: Bool {
-            PoseDetectionAvailabilityPolicy.isUnavailable(
+            if PoseDetectionAvailabilityPolicy.isUnavailable(
                 requests: vision.poseRequestCount,
                 failed: vision.failedPoseRequestCount,
                 withPerson: acceptedGolferCount
+            ) { return true }
+            guard recentOutcomes.count >= Self.recentWindow else { return false }
+            return PoseDetectionAvailabilityPolicy.isUnavailable(
+                requests: recentOutcomes.count,
+                failed: recentOutcomes.filter(\.failed).count,
+                withPerson: recentOutcomes.filter(\.accepted).count
             )
         }
 
@@ -888,11 +905,19 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             time: Double,
             recordsCoreAnchorCandidate: Bool
         ) -> PoseEstimationResult? {
-            selectPose(
-                from: vision.detectPoses(in: image, orientation: .up),
+            let failuresBefore = vision.failedPoseRequestCount
+            let candidates = vision.detectPoses(in: image, orientation: .up)
+            let failed = vision.failedPoseRequestCount > failuresBefore
+            let selected = selectPose(
+                from: candidates,
                 time: time,
                 recordsCoreAnchorCandidate: recordsCoreAnchorCandidate
             )
+            recentOutcomes.append((failed: failed, accepted: selected != nil))
+            if recentOutcomes.count > Self.recentWindow {
+                recentOutcomes.removeFirst(recentOutcomes.count - Self.recentWindow)
+            }
+            return selected
         }
 
         private func selectPose(
@@ -901,6 +926,9 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             recordsCoreAnchorCandidate: Bool
         ) -> PoseEstimationResult? {
             let selected = golferTracker.select(from: candidates, stableBall: nil)
+            if selected == nil, !golferTracker.hasContinuity {
+                acceptedCenters.insert(time: time, center: nil)
+            }
             if let selected {
                 acceptedGolferCount += 1
                 if recordsCoreAnchorCandidate {
