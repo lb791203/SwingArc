@@ -63,9 +63,33 @@ struct WorkspaceModelsSmoke {
             KeyframeMarker(time: 1.13, stage: .impact)
         ]
         let trim = SwingTrimPolicy.range(keyframes: swingMarkers, duration: 32.4)
-        precondition(trim?.lowerBound == 0 && abs((trim?.upperBound ?? 0) - 2.63) < 1e-9)
-        precondition(SwingTrimPolicy.range(keyframes: swingMarkers, duration: 4.0) == nil)
+        precondition(trim?.lowerBound == 0 && abs((trim?.upperBound ?? 0) - 3.63) < 1e-9)
+        precondition(SwingTrimPolicy.range(keyframes: swingMarkers, duration: 5.0) == nil)
         precondition(SwingTrimPolicy.range(keyframes: [], duration: 32.4) == nil)
+        // Two review points must not decide the cut, and P7 is required.
+        precondition(SwingTrimPolicy.range(keyframes: [
+            KeyframeMarker(time: 10.0, stage: .address, automaticStatus: .lowConfidence),
+            KeyframeMarker(time: 10.8, stage: .top, automaticStatus: .lowConfidence)
+        ], duration: 32.4) == nil)
+        precondition(SwingTrimPolicy.range(keyframes: [
+            KeyframeMarker(time: 10.0, stage: .address),
+            KeyframeMarker(time: 10.8, stage: .top)
+        ], duration: 32.4) == nil, "Without P7 the cut could drop impact")
+        precondition(SwingTrimPolicy.range(keyframes: [
+            KeyframeMarker(time: 10.8, stage: .top),
+            KeyframeMarker(time: 11.1, stage: .impact, automaticStatus: .lowConfidence)
+        ], duration: 32.4) == nil)
+        // A hand-set P7 counts; untrusted P1 widens the lead-in to 2.5 s.
+        let manualImpact = SwingTrimPolicy.range(keyframes: [
+            KeyframeMarker(time: 10.0, stage: .address, automaticStatus: .lowConfidence),
+            KeyframeMarker(time: 10.8, stage: .top),
+            KeyframeMarker(time: 11.1, stage: .impact, source: .manual),
+            KeyframeMarker(time: 11.9, stage: .followThrough)
+        ], duration: 32.4)
+        precondition(
+            manualImpact.map { abs($0.lowerBound - 8.3) < 1e-9 && abs($0.upperBound - 13.4) < 1e-9 } == true,
+            "Trim range \(String(describing: manualImpact))"
+        )
         precondition(ProjectThumbnailPolicy.time(keyframes: swingMarkers, duration: 32.4) == 0.83)
         precondition(ProjectThumbnailPolicy.stageSummary(keyframes: swingMarkers) == " · P 点 3/8")
         precondition(PlaybackPositionLabel.frameNumber(time: 0, sourceFrameRate: 30) == 1)

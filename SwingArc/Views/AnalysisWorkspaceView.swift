@@ -301,7 +301,7 @@ struct AnalysisWorkspaceView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("返回项目库")
+                .accessibilityLabel("返回首页")
 
                 Spacer(minLength: 0)
 
@@ -353,7 +353,7 @@ struct AnalysisWorkspaceView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("返回项目库")
+            .accessibilityLabel("返回首页")
 
             HStack(spacing: 7) {
                 Text(project.name)

@@ -29,6 +29,22 @@ struct CameraAccessSourceSmoke {
         precondition(viewLifecycle.contains(".onChange(of: scenePhase)"))
         precondition(viewLifecycle.contains("phase == .active"))
         precondition(viewLifecycle.contains("cameraState.setupSession()"))
+        precondition(
+            viewLifecycle.contains("} else {\n                cancelDelayedStart()"),
+            "Leaving the foreground must cancel the record countdown"
+        )
+        precondition(viewLifecycle.contains(".onChange(of: cameraState.accessState)"))
+
+        let countdown = try section(
+            of: camera,
+            from: "private func requestRecording()",
+            to: "private func cancelDelayedStart()"
+        )
+        guard let readinessCheck = countdown.range(of: "guard countdownMayContinue else {\n                    cancelDelayedStart()"),
+              let goTone = countdown.range(of: "CaptureDelayFeedback.go()") else {
+            preconditionFailure("The countdown must re-check readiness before the go tone")
+        }
+        precondition(readinessCheck.lowerBound < goTone.lowerBound)
 
         let setup = try section(
             of: camera,

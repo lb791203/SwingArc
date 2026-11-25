@@ -12,18 +12,46 @@ struct PoseOnlyStageRulesSmoke {
         checksTempoInvariance()
         checksLocalRefinementReachesDenseResult()
         checksStrictResultIsNeverRefined()
-        checksLeadShoulderDefinesArmParallel()
+        checksRefinementPlanIncludesAdjacentFrames()
+        checksRefinementKeepsResolvedStages()
+        checksVisionAvailabilityPolicy()
+        checksLeadArmGeometryDefinesArmParallel()
+        checksBentLeadArmIsNotArmParallel()
+        checksHeightFallbackIsOnlyForReview()
         checksDenseWristSpikeIsIgnored()
     }
 
-    /// With the lead shoulder clearly lower at the top, P3/P5 use the lead
-    /// shoulder height instead of the shoulder midpoint.
-    private static func checksLeadShoulderDefinesArmParallel() {
-        let tilted = takeawayScenario(timeScale: 1, leftShoulderY: 0.40, rightShoulderY: 0.30)
-        let result = SwingStageDetector.detectPoseOnlyCandidates(tilted)
-        precondition(frame(.leadArmParallelBackswing, in: result) == 8, "P3 must follow the lead (lower) shoulder")
-        precondition(frame(.leadArmParallelDownswing, in: result) == 15, "P5 must follow the lead (lower) shoulder")
-        precondition(frame(.top, in: result) == 12)
+    /// P3/P5 come from lead-arm geometry: the straight lead arm closest to
+    /// horizontal. P2 and P7 have no shaft or ball evidence on the body-only
+    /// path, so they are reported for review, not confirmed.
+    private static func checksLeadArmGeometryDefinesArmParallel() {
+        let result = SwingStageDetector.detectPoseOnlyCandidates(armSwingScenario(bentLeadArmNearParallel: false))
+        precondition(frame(.address, in: result) == 5, "P1 \(String(describing: frame(.address, in: result)))")
+        precondition(frame(.takeaway, in: result) == 8, "P2 \(String(describing: frame(.takeaway, in: result)))")
+        precondition(frame(.leadArmParallelBackswing, in: result) == 12, "P3 must be the straight lead arm nearest horizontal")
+        precondition(frame(.top, in: result) == 17)
+        precondition(frame(.leadArmParallelDownswing, in: result) == 24, "P5 must be the straight lead arm nearest horizontal")
+        precondition(frame(.impact, in: result) == 30)
+        precondition(status(.leadArmParallelBackswing, in: result) == .confirmed)
+        precondition(status(.takeaway, in: result) == .lowConfidence, "Body-only P2 has no shaft evidence")
+        precondition(status(.impact, in: result) == .lowConfidence, "Body-only P7 cannot tell a practice swing from a hit")
+    }
+
+    /// A bent lead arm is not "lead arm parallel"; with the arm joints visible
+    /// the stage stays unresolved instead of falling back to hand height.
+    private static func checksBentLeadArmIsNotArmParallel() {
+        let result = SwingStageDetector.detectPoseOnlyCandidates(armSwingScenario(bentLeadArmNearParallel: true))
+        precondition(frame(.leadArmParallelBackswing, in: result) == nil, "Bent lead arm must not become P3")
+        precondition(frame(.leadArmParallelDownswing, in: result) == nil, "Bent lead arm must not become P5")
+        precondition(frame(.top, in: result) == 17)
+    }
+
+    /// Without lead-arm joints, P3/P5 fall back to hand height but are only
+    /// offered for review.
+    private static func checksHeightFallbackIsOnlyForReview() {
+        let result = SwingStageDetector.detectPoseOnlyCandidates(takeawayScenario(timeScale: 1))
+        precondition(status(.leadArmParallelBackswing, in: result) == .lowConfidence)
+        precondition(status(.leadArmParallelDownswing, in: result) != .confirmed)
     }
 
     /// One bad Vision wrist in a dense refinement run must not become P4.
@@ -108,6 +136,69 @@ struct PoseOnlyStageRulesSmoke {
         )
     }
 
+    /// Observed 0, 60, 120 with a candidate on 60: the plan must request 59
+    /// and 61 as well as the strided frames.
+    private static func checksRefinementPlanIncludesAdjacentFrames() {
+        let detection = SwingStageDetection(
+            stage: .top,
+            time: 1,
+            sourceFrameIndex: 60,
+            confidence: 0.8,
+            status: .confirmed
+        )
+        let frames = LocalStageRefinementPlan.sourceFrames(
+            around: [detection],
+            observedSourceFrames: [0, 60, 120],
+            maximumSourceFrameIndex: 239,
+            maximumHalfSpan: 60
+        )
+        precondition(frames.contains(59) && frames.contains(61), "Plan \(frames) skips the adjacent frames")
+        precondition(!frames.contains(60), "Observed frames must not be requested again")
+    }
+
+    private static func checksRefinementKeepsResolvedStages() {
+        func result(_ statuses: [SwingStage: SwingStageDetectionStatus]) -> SwingAnalysisResult {
+            SwingAnalysisResult(
+                detectedMarkers: [],
+                unresolvedStages: [],
+                detections: statuses.map { stage, status in
+                    SwingStageDetection(
+                        stage: stage,
+                        time: status == .unresolved ? nil : 1,
+                        sourceFrameIndex: status == .unresolved ? nil : 30,
+                        confidence: status == .confirmed ? 0.8 : 0.5,
+                        status: status
+                    )
+                }
+            )
+        }
+        let current = result([.top: .confirmed, .impact: .lowConfidence, .followThrough: .unresolved])
+        precondition(LocalStageRefinement.isAcceptable(
+            result([.top: .confirmed, .impact: .confirmed, .followThrough: .unresolved]),
+            replacing: current
+        ))
+        precondition(!LocalStageRefinement.isAcceptable(
+            result([.top: .unresolved, .impact: .confirmed, .followThrough: .confirmed]),
+            replacing: current
+        ), "Swapping a resolved stage for another must be rejected")
+        precondition(!LocalStageRefinement.isAcceptable(
+            result([.top: .lowConfidence, .impact: .lowConfidence, .followThrough: .unresolved]),
+            replacing: current
+        ), "Downgrading a confirmed stage must be rejected")
+    }
+
+    private static func checksVisionAvailabilityPolicy() {
+        typealias Policy = PoseDetectionAvailabilityPolicy
+        precondition(Policy.isUnavailable(requests: 40, failed: 40, withPerson: 0))
+        precondition(
+            Policy.isUnavailable(requests: 40, failed: 30, withPerson: 0),
+            "Mostly failed requests with no person found are a Vision problem"
+        )
+        precondition(!Policy.isUnavailable(requests: 40, failed: 30, withPerson: 4))
+        precondition(!Policy.isUnavailable(requests: 40, failed: 5, withPerson: 0))
+        precondition(!Policy.isUnavailable(requests: 0, failed: 0, withPerson: 0))
+    }
+
     private static func checksStrictResultIsNeverRefined() {
         let strictSuccess = SwingAnalysisResult(
             detectedMarkers: [KeyframeMarker(time: 0.42, stage: .impact)],
@@ -158,6 +249,49 @@ struct PoseOnlyStageRulesSmoke {
                 hand: CGPoint(x: hand.0, y: hand.1),
                 leftShoulderY: leftShoulderY,
                 rightShoulderY: rightShoulderY
+            )
+        }
+    }
+
+    /// A swing driven by the lead-arm angle φ from straight down (lead =
+    /// left, the lower shoulder). Address 0–5, backswing 6–17, top hold
+    /// 17–19, downswing 20–31 (impact at φ≈22° on frame 30), follow-through.
+    private static func armSwingScenario(bentLeadArmNearParallel: Bool) -> [SwingPoseSample] {
+        var angles: [Double] = Array(repeating: 10, count: 6)
+        angles += (1...12).map { 10 + 140 * Double($0) / 12 }
+        angles += [150, 150]
+        angles += (1...12).map { 150 - 140 * Double($0) / 12 }
+        angles += [-20, -50, -80, -110, -130, -140]
+        let leadShoulder = CGPoint(x: 0.46, y: 0.37)
+        let trailShoulder = CGPoint(x: 0.56, y: 0.34)
+        let armLength = 0.32
+        return angles.enumerated().map { index, degrees in
+            let radians = degrees * .pi / 180
+            let wrist = CGPoint(
+                x: leadShoulder.x + armLength * sin(radians),
+                y: leadShoulder.y + armLength * cos(radians)
+            )
+            var elbow = CGPoint(x: (leadShoulder.x + wrist.x) / 2, y: (leadShoulder.y + wrist.y) / 2)
+            if bentLeadArmNearParallel, (60...120).contains(abs(degrees)) {
+                // Push the elbow off the shoulder–wrist line: ~127° elbow.
+                elbow.x += 0.08 * cos(radians)
+                elbow.y -= 0.08 * sin(radians)
+            }
+            let trailWrist = CGPoint(x: wrist.x + 0.02, y: wrist.y)
+            return SwingPoseSample(
+                time: Double(index) / 30,
+                leftWrist: wrist,
+                rightWrist: trailWrist,
+                leftElbow: elbow,
+                rightElbow: CGPoint(x: (trailShoulder.x + trailWrist.x) / 2 + 0.05, y: (trailShoulder.y + trailWrist.y) / 2 + 0.05),
+                leftShoulder: leadShoulder,
+                rightShoulder: trailShoulder,
+                leftHip: CGPoint(x: 0.47, y: 0.60),
+                rightHip: CGPoint(x: 0.57, y: 0.60),
+                head: CGPoint(x: 0.51, y: 0.20),
+                spineAngle: 18,
+                aggregateConfidence: 0.92,
+                sourceFrameIndex: index
             )
         }
     }
@@ -219,6 +353,10 @@ struct PoseOnlyStageRulesSmoke {
             aggregateConfidence: 0.92,
             sourceFrameIndex: frame
         )
+    }
+
+    private static func status(_ stage: SwingStage, in result: SwingAnalysisResult) -> SwingStageDetectionStatus? {
+        result.detections.first { $0.stage == stage }?.status
     }
 
     private static func frame(_ stage: SwingStage, in result: SwingAnalysisResult) -> Int? {

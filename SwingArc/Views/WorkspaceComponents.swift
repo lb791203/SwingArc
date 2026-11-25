@@ -19,7 +19,7 @@ struct WorkspaceHeaderView: View {
                     .frame(width: 44, height: 44)
                     .background(AnalysisTheme.proTourSurface, in: Circle())
             }
-            .accessibilityLabel("返回项目库")
+            .accessibilityLabel("返回首页")
 
             if isRegularLayout {
                 Button(action: onToggleProjectSidebar) {

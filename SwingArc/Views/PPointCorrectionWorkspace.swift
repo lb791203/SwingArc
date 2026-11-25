@@ -16,6 +16,12 @@ struct PPointCorrectionWorkspace: View {
     @State private var preparationError: String?
     @State private var scrubFrame: Double = 0
     @State private var savedMessage: String?
+    /// Latest frame the user asked for while a decode was running. Slider
+    /// drags overwrite it, so only the newest request is decoded next instead
+    /// of a backlog of one decode per slider tick.
+    @State private var pendingFrame: Int?
+    @State private var isDecodingFrame = false
+    @State private var frameReadFailed = false
 
     var body: some View {
         Group {
@@ -227,7 +233,17 @@ struct PPointCorrectionWorkspace: View {
                     )
             }
             .buttonStyle(.plain)
-            .disabled(frameController.currentFrame == nil)
+            .disabled(!isShowingCurrentFrame(state))
+            .opacity(isShowingCurrentFrame(state) ? 1 : 0.5)
+
+            if frameReadFailed {
+                Text(
+                    "无法读取第 \(state.currentSourceFrameIndex + 1) 帧，请用 ±1 换一帧"
+                )
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.orange)
+                .shadow(color: .black.opacity(0.9), radius: 3)
+            }
             .accessibilityLabel(
                 "将当前帧设为 \(state.selectedCode.rawValue)"
             )
@@ -404,15 +420,37 @@ struct PPointCorrectionWorkspace: View {
     }
 
     private func show(frame: Int) {
-        Task {
-            _ = await frameController.show(index: frame)
+        pendingFrame = frame
+        guard !isDecodingFrame else { return }
+        isDecodingFrame = true
+        Task { @MainActor in
+            while let next = pendingFrame {
+                pendingFrame = nil
+                let loaded = await frameController.show(index: next)
+                if pendingFrame == nil {
+                    frameReadFailed = !loaded
+                    if loaded { frameController.errorMessage = nil }
+                }
+            }
+            isDecodingFrame = false
         }
+    }
+
+    /// True once the frame on screen is the frame the selected stage would be
+    /// set to; "设为" stays disabled until then.
+    private func isShowingCurrentFrame(_ state: PPointCorrectionState) -> Bool {
+        frameController.currentFrame?.sourceFrameIndex == state.currentSourceFrameIndex
     }
 
     private func saveSelectedStage() {
         guard var state = correctionState,
               let frame = frameController.currentFrame,
               frame.sourceFrameIndex == state.currentSourceFrameIndex else {
+            flashSaved(
+                frameReadFailed
+                    ? "无法读取第 \(((correctionState?.currentSourceFrameIndex ?? 0) + 1)) 帧，请换一帧"
+                    : "画面还在加载，请稍候"
+            )
             return
         }
         PPointCorrectionReducer.reduce(

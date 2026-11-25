@@ -54,11 +54,26 @@ final class ExactVideoFrameProvider {
         guard let reader = try? AVAssetReader(asset: asset) else {
             throw ExactVideoFrameProviderError.timelineUnavailable
         }
-        // Only presentation timestamps are needed here, so read the
-        // compressed samples instead of decoding every frame to pixels.
-        // Decoding a 240 FPS clip made opening P-point correction take
-        // several seconds.
-        let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+        // Decoded output is required: compressed samples carry media-time
+        // PTS before the edit list is applied, which shifted frames by two
+        // on B-frame H.264 clips. The decoded timeline is cached per file
+        // (SourceFrameTimelineCache) so later opens of the same clip are fast.
+        if let cached = SourceFrameTimelineCache.timeline(for: url) {
+            let transformed = track.naturalSize.applying(track.preferredTransform)
+            return .init(
+                url: url,
+                asset: asset,
+                timeline: cached,
+                orientedSize: CGSize(width: abs(transformed.width), height: abs(transformed.height))
+            )
+        }
+        let output = AVAssetReaderTrackOutput(
+            track: track,
+            outputSettings: [
+                kCVPixelBufferPixelFormatTypeKey as String:
+                    kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+            ]
+        )
         output.alwaysCopiesSampleData = false
         guard reader.canAdd(output) else {
             throw ExactVideoFrameProviderError.timelineUnavailable
@@ -69,7 +84,7 @@ final class ExactVideoFrameProvider {
         }
         var times: [CMTime] = []
         while let sample = output.copyNextSampleBuffer() {
-            times.append(contentsOf: displayedPresentationTimes(in: sample))
+            times.append(CMSampleBufferGetPresentationTimeStamp(sample))
         }
         guard reader.status == .completed,
               let timeline = SourceFrameTimeline(
@@ -77,6 +92,7 @@ final class ExactVideoFrameProvider {
               ) else {
             throw ExactVideoFrameProviderError.timelineUnavailable
         }
+        SourceFrameTimelineCache.store(timeline, for: url)
         let transformed = track.naturalSize.applying(track.preferredTransform)
         let size = CGSize(
             width: abs(transformed.width),
@@ -88,57 +104,6 @@ final class ExactVideoFrameProvider {
             timeline: timeline,
             orientedSize: size
         )
-    }
-
-    /// Presentation times of the frames in one compressed sample buffer,
-    /// skipping frames the decoder would not display.
-    private static func displayedPresentationTimes(
-        in sample: CMSampleBuffer
-    ) -> [CMTime] {
-        let count = CMSampleBufferGetNumSamples(sample)
-        guard count > 0 else { return [] }
-        let attachments = CMSampleBufferGetSampleAttachmentsArray(
-            sample,
-            createIfNecessary: false
-        ) as? [[CFString: Any]]
-        func isDisplayed(_ index: Int) -> Bool {
-            guard let attachments, index < attachments.count else { return true }
-            return (attachments[index][kCMSampleAttachmentKey_DoNotDisplay] as? Bool) != true
-        }
-        if count == 1 {
-            return isDisplayed(0)
-                ? [CMSampleBufferGetPresentationTimeStamp(sample)]
-                : []
-        }
-        var entryCount: CMItemCount = 0
-        guard CMSampleBufferGetSampleTimingInfoArray(
-            sample,
-            entryCount: 0,
-            arrayToFill: nil,
-            entriesNeededOut: &entryCount
-        ) == noErr, entryCount > 0 else {
-            return [CMSampleBufferGetPresentationTimeStamp(sample)]
-        }
-        var timing = [CMSampleTimingInfo](repeating: .invalid, count: entryCount)
-        guard CMSampleBufferGetSampleTimingInfoArray(
-            sample,
-            entryCount: entryCount,
-            arrayToFill: &timing,
-            entriesNeededOut: &entryCount
-        ) == noErr else {
-            return [CMSampleBufferGetPresentationTimeStamp(sample)]
-        }
-        if entryCount == count {
-            return (0..<count).filter(isDisplayed).map { timing[$0].presentationTimeStamp }
-        }
-        // A single timing entry describes evenly spaced samples.
-        let first = timing[0]
-        return (0..<count).filter(isDisplayed).map { index in
-            CMTimeAdd(
-                first.presentationTimeStamp,
-                CMTimeMultiply(first.duration, multiplier: Int32(index))
-            )
-        }
     }
 
     func frame(at sourceFrameIndex: Int) throws -> ExactVideoFrame {
@@ -218,5 +183,41 @@ actor ExactVideoFrameSession {
         provider?.timeline.presentationTime(
             sourceFrameIndex: sourceFrameIndex
         )
+    }
+}
+
+/// In-memory cache of decoded source-frame timelines, keyed by file path,
+/// size and modification date, so analysis and the P-point correction page
+/// decode a clip's timeline only once per launch.
+enum SourceFrameTimelineCache {
+    private struct Key: Hashable {
+        let path: String
+        let size: Int
+        let modified: Date
+    }
+
+    private static let lock = NSLock()
+    private static var entries: [Key: SourceFrameTimeline] = [:]
+
+    private static func key(for url: URL) -> Key? {
+        guard let values = try? url.resourceValues(
+            forKeys: [.fileSizeKey, .contentModificationDateKey]
+        ), let size = values.fileSize, let modified = values.contentModificationDate else {
+            return nil
+        }
+        return Key(path: url.standardizedFileURL.path, size: size, modified: modified)
+    }
+
+    static func timeline(for url: URL) -> SourceFrameTimeline? {
+        guard let key = key(for: url) else { return nil }
+        lock.lock(); defer { lock.unlock() }
+        return entries[key]
+    }
+
+    static func store(_ timeline: SourceFrameTimeline, for url: URL) {
+        guard let key = key(for: url) else { return }
+        lock.lock(); defer { lock.unlock() }
+        if entries.count > 16 { entries.removeAll() }
+        entries[key] = timeline
     }
 }

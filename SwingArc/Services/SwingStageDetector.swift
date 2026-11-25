@@ -2902,6 +2902,17 @@ enum AnalysisFailure: Equatable {
     case analysisCancelled
 }
 
+/// Decides when a failed analysis is Vision's fault rather than the video's.
+/// Vision failing on most frames while the frames it did read showed nobody
+/// is still a runtime problem, not 人物检测不稳定.
+enum PoseDetectionAvailabilityPolicy {
+    nonisolated static func isUnavailable(requests: Int, failed: Int, withPerson: Int) -> Bool {
+        guard requests > 0 else { return false }
+        if failed == requests { return true }
+        return withPerson == 0 && failed * 2 >= requests
+    }
+}
+
 enum SwingAnalysisState: Equatable {
     case idle
     case scanning(progress: Double)
@@ -3274,7 +3285,10 @@ enum SwingStageDetector {
             guard let sample = resolved[stage] else {
                 return SwingStageDetection(stage: stage, time: nil, confidence: 0, status: .unresolved)
             }
-            let confidence = evidenceConfidence(for: stage, sample: sample)
+            var confidence = evidenceConfidence(for: stage, sample: sample)
+            if indices.weakEvidence.contains(stage) {
+                confidence = min(confidence, weakEvidenceConfidenceCap)
+            }
             let status: SwingStageDetectionStatus
             if confidence >= 0.75 {
                 status = .confirmed
@@ -3295,6 +3309,10 @@ enum SwingStageDetector {
         let unresolved = Set(detections.filter { $0.status == .unresolved }.map(\.stage))
         return SwingAnalysisResult(detectedMarkers: markers, unresolvedStages: unresolved, detections: detections)
     }
+
+    /// Body-only stages without their defining geometry are capped below the
+    /// confirmed threshold, so the UI shows them as 待核对.
+    static let weakEvidenceConfidenceCap = 0.6
 
     /// Compatibility adapter retained only for standalone legacy smoke fixtures.
     @available(iOS, unavailable, message: "Legacy smoke-test adapter; use detect(frames:) in production")
@@ -3435,6 +3453,10 @@ enum PoseOnlyStageRules {
         var top: Int?
         var leadArmParallelDownswing: Int?
         var impact: Int?
+        /// Stages chosen without the geometry that defines them (no shaft for
+        /// P2, no lead-arm joints for P3/P5, no ball or club for P7). They are
+        /// reported for review rather than as confirmed.
+        var weakEvidence: Set<SwingStage> = []
 
         var byStage: [(SwingStage, Int)] {
             var pairs: [(SwingStage, Int)] = []
@@ -3464,6 +3486,7 @@ enum PoseOnlyStageRules {
         guard let apexY = hands[apexIndex]?.y else { return indices }
         let torso = torsoScale(samples)
         let leadShoulderY = leadShoulderLevel(atTop: samples[apexIndex])
+        let leadSide = leadArmSide(atTop: samples[apexIndex])
 
         var addressY: CGFloat?
         var rise: CGFloat?
@@ -3483,18 +3506,31 @@ enum PoseOnlyStageRules {
             indices.address = address
             indices.top = top
 
+            // P2 is defined by the shaft, which the body-only path cannot
+            // see: hands at hip height with the lead arm still extended is
+            // used as a stand-in and always flagged for review.
             if let takeaway = closestIndex(
                 in: (address + 1)..<top,
                 hands: hands,
                 samples: samples,
-                target: hipY
+                target: hipY,
+                accept: { sample in
+                    guard let leadSide, let angle = elbowAngle(sample, side: leadSide) else {
+                        return true
+                    }
+                    return angle >= minimumTakeawayElbowAngle
+                }
             ) {
                 indices.takeaway = takeaway
-                indices.leadArmParallelBackswing = closestIndex(
+                indices.weakEvidence.insert(.takeaway)
+                indices.leadArmParallelBackswing = leadArmParallelIndex(
                     in: (takeaway + 1)..<top,
-                    hands: hands,
                     samples: samples,
-                    target: leadShoulderY
+                    hands: hands,
+                    leadSide: leadSide,
+                    fallbackTarget: leadShoulderY,
+                    stage: .leadArmParallelBackswing,
+                    indices: &indices
                 )
             }
         }
@@ -3502,11 +3538,16 @@ enum PoseOnlyStageRules {
         let downswingEnd = downswingEndIndex(samples: samples, hands: hands, after: top)
         let downswing = (top + 1)..<downswingEnd
         var impact: Int?
-        if let addressY, let rise {
+        if let addressY, let rise, let address = indices.address, let addressHand = hands[address] {
+            // Hands back at the address height AND close to the address
+            // position horizontally; height alone also matches a half swing
+            // that drops the hands off to one side.
             let tolerance = max(0.01, rise * 0.08)
+            let lateralTolerance = max(0.05, torso * 0.6)
             impact = downswing.first { index in
                 guard let hand = hands[index] else { return false }
                 return hand.y >= addressY - tolerance
+                    && abs(hand.x - addressHand.x) <= lateralTolerance
             }
         }
         if impact == nil {
@@ -3522,13 +3563,112 @@ enum PoseOnlyStageRules {
             impact = lowest?.index
         }
         indices.impact = impact
-        indices.leadArmParallelDownswing = closestIndex(
+        // Without a ball or club a practice swing looks the same as a real
+        // one, so body-only P7 is always a candidate for review.
+        if impact != nil { indices.weakEvidence.insert(.impact) }
+        indices.leadArmParallelDownswing = leadArmParallelIndex(
             in: (top + 1)..<(impact ?? downswingEnd),
-            hands: hands,
             samples: samples,
-            target: leadShoulderY
+            hands: hands,
+            leadSide: leadSide,
+            fallbackTarget: leadShoulderY,
+            stage: .leadArmParallelDownswing,
+            indices: &indices
         )
         return indices
+    }
+
+    enum ArmSide: Equatable { case left, right }
+
+    /// Lead elbow must be at least this straight (shoulder–elbow–wrist angle)
+    /// for P3/P5, and the shoulder-to-wrist line within this many degrees of
+    /// horizontal.
+    static let minimumLeadElbowAngle: CGFloat = 140
+    static let maximumLeadArmTilt: CGFloat = 30
+    static let minimumTakeawayElbowAngle: CGFloat = 145
+
+    /// P3/P5: the frame whose lead arm (shoulder to wrist) is closest to
+    /// horizontal with the elbow extended. When lead-arm joints are visible
+    /// but no frame meets the constraints, the stage stays unresolved instead
+    /// of being guessed. Only when the joints are missing does it fall back to
+    /// hands at lead-shoulder height, flagged for review.
+    static func leadArmParallelIndex(
+        in range: Range<Int>,
+        samples: [SwingPoseSample],
+        hands: [CGPoint?],
+        leadSide: ArmSide?,
+        fallbackTarget: (SwingPoseSample) -> CGFloat?,
+        stage: SwingStage,
+        indices: inout Indices
+    ) -> Int? {
+        guard !range.isEmpty else { return nil }
+        if let leadSide {
+            var measured = 0
+            var best: (index: Int, tilt: CGFloat)?
+            for index in range {
+                guard let tilt = leadArmTilt(samples[index], side: leadSide) else { continue }
+                measured += 1
+                if let elbow = elbowAngle(samples[index], side: leadSide),
+                   elbow < minimumLeadElbowAngle {
+                    continue
+                }
+                guard tilt <= maximumLeadArmTilt else { continue }
+                if best == nil || tilt < best!.tilt {
+                    best = (index, tilt)
+                }
+            }
+            if measured * 2 >= range.count {
+                return best?.index
+            }
+        }
+        let fallback = closestIndex(in: range, hands: hands, samples: samples, target: fallbackTarget)
+        if fallback != nil { indices.weakEvidence.insert(stage) }
+        return fallback
+    }
+
+    /// Lead side at the top: the lower shoulder, or else the straighter arm
+    /// (the trail elbow folds at the top). Nil when neither is clear.
+    static func leadArmSide(atTop top: SwingPoseSample) -> ArmSide? {
+        if let left = top.leftShoulder, let right = top.rightShoulder, abs(left.y - right.y) >= 0.01 {
+            return left.y > right.y ? .left : .right
+        }
+        // At the top the trail elbow folds to roughly 90° while the lead arm
+        // stays close to straight; demand a clear difference.
+        if let left = elbowAngle(top, side: .left), let right = elbowAngle(top, side: .right),
+           abs(left - right) >= 45 {
+            return left > right ? .left : .right
+        }
+        return nil
+    }
+
+    static func joints(_ sample: SwingPoseSample, side: ArmSide) -> (shoulder: CGPoint?, elbow: CGPoint?, wrist: CGPoint?) {
+        switch side {
+        case .left: return (sample.leftShoulder, sample.leftElbow, sample.leftWrist)
+        case .right: return (sample.rightShoulder, sample.rightElbow, sample.rightWrist)
+        }
+    }
+
+    /// Interior elbow angle in degrees (180 = straight arm).
+    static func elbowAngle(_ sample: SwingPoseSample, side: ArmSide) -> CGFloat? {
+        let arm = joints(sample, side: side)
+        guard let shoulder = arm.shoulder, let elbow = arm.elbow, let wrist = arm.wrist else { return nil }
+        let upper = CGVector(dx: shoulder.x - elbow.x, dy: shoulder.y - elbow.y)
+        let lower = CGVector(dx: wrist.x - elbow.x, dy: wrist.y - elbow.y)
+        let upperLength = hypot(upper.dx, upper.dy)
+        let lowerLength = hypot(lower.dx, lower.dy)
+        guard upperLength > 0.001, lowerLength > 0.001 else { return nil }
+        let cosine = (upper.dx * lower.dx + upper.dy * lower.dy) / (upperLength * lowerLength)
+        return acos(min(1, max(-1, cosine))) * 180 / .pi
+    }
+
+    /// Angle of the lead shoulder-to-wrist line from horizontal, 0–90°.
+    static func leadArmTilt(_ sample: SwingPoseSample, side: ArmSide) -> CGFloat? {
+        let arm = joints(sample, side: side)
+        guard let shoulder = arm.shoulder, let wrist = arm.wrist else { return nil }
+        let dx = abs(wrist.x - shoulder.x)
+        let dy = abs(wrist.y - shoulder.y)
+        guard hypot(dx, dy) > 0.02 else { return nil }
+        return atan2(dy, dx) * 180 / .pi
     }
 
     /// Takeaway onset: walk back from the top to the last frame whose hands are
@@ -3608,11 +3748,13 @@ enum PoseOnlyStageRules {
         in range: Range<Int>,
         hands: [CGPoint?],
         samples: [SwingPoseSample],
-        target: (SwingPoseSample) -> CGFloat?
+        target: (SwingPoseSample) -> CGFloat?,
+        accept: (SwingPoseSample) -> Bool = { _ in true }
     ) -> Int? {
         var best: (index: Int, distance: CGFloat)?
         for index in range {
-            guard let hand = hands[index], let level = target(samples[index]) else { continue }
+            guard let hand = hands[index], let level = target(samples[index]),
+                  accept(samples[index]) else { continue }
             let distance = abs(hand.y - level)
             if best == nil || distance < best!.distance {
                 best = (index, distance)
@@ -3693,19 +3835,19 @@ enum PoseOnlyStageRules {
         return { $0.rightShoulder?.y ?? PoseOnlyStageRules.shoulderY($0) }
     }
 
-    static func handCenter(_ sample: SwingPoseSample) -> CGPoint? {
+    nonisolated static func handCenter(_ sample: SwingPoseSample) -> CGPoint? {
         if let left = sample.leftWrist, let right = sample.rightWrist {
             return CGPoint(x: (left.x + right.x) / 2, y: (left.y + right.y) / 2)
         }
         return sample.rightWrist ?? sample.leftWrist
     }
 
-    static func hipY(_ sample: SwingPoseSample) -> CGFloat? {
+    nonisolated static func hipY(_ sample: SwingPoseSample) -> CGFloat? {
         guard let left = sample.leftHip, let right = sample.rightHip else { return nil }
         return (left.y + right.y) / 2
     }
 
-    static func shoulderY(_ sample: SwingPoseSample) -> CGFloat? {
+    nonisolated static func shoulderY(_ sample: SwingPoseSample) -> CGFloat? {
         guard let left = sample.leftShoulder, let right = sample.rightShoulder else { return nil }
         return (left.y + right.y) / 2
     }
@@ -4481,8 +4623,9 @@ enum FineSwingSamplingPlan {
 /// 20-frame stride on a real-time 240 FPS original, and the coarse fallback is
 /// sparser still. A ±2 source-frame target cannot be met at that stride, so
 /// each resolved candidate gets extra frames between its observed neighbours.
-/// Run twice, the first pass narrows the gap and the second fills it frame by
-/// frame, so the cost stays at roughly 16 decoded frames per stage.
+/// Each pass also requests the candidate's immediate neighbours; repeated
+/// passes narrow the gap until it is filled frame by frame, at roughly 16
+/// decoded frames per stage.
 enum LocalStageRefinementPlan {
     static let refinedStages: Set<SwingStage> = [
         .address,
@@ -4521,13 +4664,20 @@ enum LocalStageRefinementPlan {
             guard widestSide > 0 else { continue }
             let framesPerSide = max(1, maximumFramesPerStage / 2)
             let step = max(1, Int(ceil(Double(widestSide) / Double(framesPerSide))))
+            // The immediate neighbours are always requested, so the final
+            // pass can settle on the exact frame even when the stride of the
+            // previous pass skipped it.
+            var offsets: [Int] = [1]
             var offset = step
             while offset <= widestSide {
+                offsets.append(offset)
+                offset += step
+            }
+            for offset in offsets {
                 for frame in [center - offset, center + offset]
                 where frame >= lower && frame <= upper && !observedSourceFrames.contains(frame) {
                     planned.insert(frame)
                 }
-                offset += step
             }
         }
         return planned.sorted()
@@ -4535,10 +4685,13 @@ enum LocalStageRefinementPlan {
 }
 
 /// Re-resolves body-only stages after sampling the frames planned by
-/// `LocalStageRefinementPlan`. Strict solver results are returned unchanged,
-/// and a pass is only kept when it resolves at least as many stages.
+/// `LocalStageRefinementPlan`. Strict solver results are returned unchanged.
+/// Passes repeat until the gap around every candidate is filled frame by
+/// frame (each pass shrinks it about five-fold: 59 → 11 → 2 → 0), and a pass
+/// is kept only when it loses no resolved stage and downgrades no confirmed
+/// stage.
 enum LocalStageRefinement {
-    static let passCount = 2
+    static let passCount = 4
 
     static func refine(
         strictResult: SwingAnalysisResult,
@@ -4571,11 +4724,29 @@ enum LocalStageRefinement {
                 strictResult: strictResult,
                 poseSamples: merged
             )
-            guard resolvedStageCount(refined) >= resolvedStageCount(result) else { break }
+            guard isAcceptable(refined, replacing: result) else { break }
             samples = merged
             result = refined
         }
         return (result, samples)
+    }
+
+    /// A refined result replaces the current one only if every stage that was
+    /// resolved stays resolved and no confirmed stage drops to review.
+    static func isAcceptable(
+        _ refined: SwingAnalysisResult,
+        replacing current: SwingAnalysisResult
+    ) -> Bool {
+        let refinedByStage = Dictionary(
+            refined.detections.map { ($0.stage, $0.status) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for detection in current.detections where detection.status != .unresolved {
+            guard let status = refinedByStage[detection.stage],
+                  status != .unresolved else { return false }
+            if detection.status == .confirmed && status != .confirmed { return false }
+        }
+        return true
     }
 
     static func resolvedStageCount(_ result: SwingAnalysisResult) -> Int {

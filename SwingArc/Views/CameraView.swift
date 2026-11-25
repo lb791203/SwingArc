@@ -106,6 +106,13 @@ struct CameraView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 cameraState.setupSession()
+            } else {
+                cancelDelayedStart()
+            }
+        }
+        .onChange(of: cameraState.accessState) { _, _ in
+            if isDelaying && !countdownMayContinue {
+                cancelDelayedStart()
             }
         }
         .onDisappear {
@@ -369,12 +376,23 @@ struct CameraView: View {
             return
         }
         cancelDelayedStart()
+        guard countdownMayContinue else {
+            recordingAlertMessage = "相机尚未准备好，请稍候后重试。"
+            return
+        }
         delayRemaining = delay
         CaptureDelayFeedback.tick()
         delayTask = Task { @MainActor in
             for remaining in stride(from: delay - 1, through: 0, by: -1) {
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled else { return }
+                // Check before any tone, so an interruption during the
+                // countdown never ends with a "go" beep and no recording.
+                guard countdownMayContinue else {
+                    cancelDelayedStart()
+                    recordingAlertMessage = "相机被中断，倒计时已取消，请重新开始。"
+                    return
+                }
                 if remaining == 0 {
                     delayRemaining = nil
                     delayTask = nil
@@ -386,6 +404,16 @@ struct CameraView: View {
                 }
             }
         }
+    }
+
+    private var countdownMayContinue: Bool {
+        CaptureCountdownPolicy.shouldContinue(
+            appIsActive: scenePhase == .active,
+            canRecord: CameraAccessPresentation.canRecord(cameraState.accessState),
+            // accessState drops to .checking on an interruption or runtime
+            // error, so canRecord covers those; this covers a start in flight.
+            cameraIsReady: !isRecording && !isStartingRecording
+        )
     }
 
     private func cancelDelayedStart() {

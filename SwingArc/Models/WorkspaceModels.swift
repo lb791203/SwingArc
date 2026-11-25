@@ -431,22 +431,39 @@ enum MobileReplayStageStripPolicy {
 /// one second before the earliest P point to 1.5 seconds after the last.
 /// Returns nil when trimming would save less than three seconds.
 enum SwingTrimPolicy {
+    /// Kept before P1 when P1 is trusted.
     static let leadIn: Double = 1.0
+    /// Kept before P4 when P1 is not trusted, enough for a slow backswing.
+    static let backswingAllowance: Double = 2.5
+    /// Kept after P8 when P8 is trusted.
     static let tail: Double = 1.5
+    /// Kept after P7 when P8 is not trusted, enough for the full finish.
+    static let followThroughAllowance: Double = 2.5
     static let minimumSaving: Double = 3.0
 
+    /// The trim range, or nil unless both the top (P4) and impact (P7) are
+    /// trusted: confirmed automatically or set by hand. Points still marked
+    /// for review (待核对) never decide where the clip is cut.
     static func range(keyframes: [KeyframeMarker], duration: Double) -> ClosedRange<Double>? {
-        let pStageNames = Set(SwingStage.pStages.map(\.rawValue))
-        let times = keyframes
-            .filter { pStageNames.contains($0.stage) && $0.time.isFinite }
-            .map(\.time)
-        guard duration.isFinite, duration > 0,
-              times.count >= 2,
-              let first = times.min(), let last = times.max() else { return nil }
-        let start = max(0, first - leadIn)
-        let end = min(duration, last + tail)
+        guard duration.isFinite, duration > 0 else { return nil }
+        func trustedTime(_ stage: SwingStage) -> Double? {
+            keyframes.first {
+                $0.stage == stage.rawValue && $0.time.isFinite && isTrusted($0)
+            }?.time
+        }
+        guard let top = trustedTime(.top),
+              let impact = trustedTime(.impact),
+              impact > top else { return nil }
+        let start = trustedTime(.address).map { max(0, $0 - leadIn) }
+            ?? max(0, top - backswingAllowance)
+        let end = trustedTime(.followThrough).map { min(duration, max($0, impact) + tail) }
+            ?? min(duration, impact + followThroughAllowance)
         guard end > start, duration - (end - start) >= minimumSaving else { return nil }
         return start...end
+    }
+
+    static func isTrusted(_ marker: KeyframeMarker) -> Bool {
+        marker.source == .manual || marker.automaticStatus != .lowConfidence
     }
 }
 
