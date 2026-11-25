@@ -40,11 +40,25 @@ struct CameraAccessSourceSmoke {
             from: "private func requestRecording()",
             to: "private func cancelDelayedStart()"
         )
-        guard let readinessCheck = countdown.range(of: "guard countdownMayContinue else {\n                    cancelDelayedStart()"),
-              let goTone = countdown.range(of: "CaptureDelayFeedback.go()") else {
-            preconditionFailure("The countdown must re-check readiness before the go tone")
+        precondition(
+            countdown.contains("guard countdownMayContinue else {\n                    cancelDelayedStart()"),
+            "The countdown must re-check readiness every second"
+        )
+        precondition(
+            !countdown.contains("CaptureDelayFeedback.go()")
+                && countdown.contains("startRecording(playsStartTone: true)"),
+            "The go tone must wait for the recording to start"
+        )
+        let start = try section(
+            of: camera,
+            from: "private func startRecording(playsStartTone: Bool = false)",
+            to: "private func scheduleAutomaticStop()"
+        )
+        guard let success = start.range(of: "case .success:"),
+              let goTone = start.range(of: "if playsStartTone { CaptureDelayFeedback.go() }") else {
+            preconditionFailure("The go tone must play from the recording-started callback")
         }
-        precondition(readinessCheck.lowerBound < goTone.lowerBound)
+        precondition(success.lowerBound < goTone.lowerBound)
 
         let setup = try section(
             of: camera,

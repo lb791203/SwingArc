@@ -90,7 +90,10 @@ struct ContentView: View {
                         keyframes: keyframes,
                         duration: playbackManager.duration
                     ),
-                    onTrimToSwing: trimToSwing
+                    onTrimToSwing: trimToSwing,
+                    // closeWorkspace returns to the library when the project
+                    // was opened from it, otherwise to the home screen.
+                    backAccessibilityLabel: showProjectLibrary ? "返回项目库" : "返回首页"
                 )
             } else if showProjectLibrary {
                 ProjectLibraryView(

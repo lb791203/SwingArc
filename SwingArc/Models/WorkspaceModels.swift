@@ -454,11 +454,23 @@ enum SwingTrimPolicy {
         guard let top = trustedTime(.top),
               let impact = trustedTime(.impact),
               impact > top else { return nil }
-        let start = trustedTime(.address).map { max(0, $0 - leadIn) }
-            ?? max(0, top - backswingAllowance)
-        let end = trustedTime(.followThrough).map { min(duration, max($0, impact) + tail) }
-            ?? min(duration, impact + followThroughAllowance)
-        guard end > start, duration - (end - start) >= minimumSaving else { return nil }
+        // Allowances scale with the swing's own tempo, so slow-motion clips
+        // (where the downswing alone can take 2–3 s) keep the whole motion.
+        // A typical backswing is about three downswings and the finish a
+        // few more.
+        let downswing = impact - top
+        let backswing = max(backswingAllowance, downswing * 4)
+        let finish = max(followThroughAllowance, downswing * 3)
+        // P1 and P8 only bound the cut when they are in swing order; a
+        // mis-set P1 after the top (or P8 before impact) is ignored.
+        let address = trustedTime(.address).flatMap { $0 < top ? $0 : nil }
+        let followThrough = trustedTime(.followThrough).flatMap { $0 > impact ? $0 : nil }
+        let start = address.map { max(0, $0 - leadIn) } ?? max(0, top - backswing)
+        let end = followThrough.map { min(duration, max($0 + tail, impact + finish * 0.5)) }
+            ?? min(duration, impact + finish)
+        // Never cut away the top or impact themselves.
+        guard start <= top, end >= impact, end > start,
+              duration - (end - start) >= minimumSaving else { return nil }
         return start...end
     }
 

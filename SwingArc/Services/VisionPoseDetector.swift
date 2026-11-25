@@ -273,6 +273,42 @@ class VisionPoseDetector {
     }
 }
 
+/// Time-sorted body centres of accepted poses. Appends in time order are
+/// O(1); out-of-order inserts and lookups use binary search.
+struct ContinuityHistory {
+    static let maximumGap: Double = 0.25
+    private(set) var times: [Double] = []
+    private(set) var centers: [CGPoint] = []
+
+    mutating func insert(time: Double, center: CGPoint) {
+        if let last = times.last, time < last {
+            let index = firstIndex(after: time)
+            times.insert(time, at: index)
+            centers.insert(center, at: index)
+        } else {
+            times.append(time)
+            centers.append(center)
+        }
+    }
+
+    func center(before time: Double) -> CGPoint? {
+        let index = firstIndex(after: time) - 1
+        guard index >= 0, time - times[index] <= Self.maximumGap else { return nil }
+        return centers[index]
+    }
+
+    /// First index whose time is greater than `time`.
+    private func firstIndex(after time: Double) -> Int {
+        var lower = 0
+        var upper = times.count
+        while lower < upper {
+            let middle = (lower + upper) / 2
+            if times[middle] <= time { lower = middle + 1 } else { upper = middle }
+        }
+        return lower
+    }
+}
+
 struct PrimaryGolferIdentity: Equatable {
     let center: CGPoint
     let scale: Double
@@ -330,8 +366,14 @@ final class PrimaryGolferTracker {
     /// Sets the continuity reference to `pose` (or clears it). Out-of-order
     /// decodes, such as the local refinement pass jumping back to an earlier
     /// stage, must not score candidates against a later frame's position.
-    func seedContinuity(with pose: PoseEstimationResult?) {
-        previousCenter = pose.flatMap { bodyCenter($0) }
+    func seedContinuity(center: CGPoint?) {
+        previousCenter = center
+    }
+
+    /// The body centre used for continuity, exposed so callers can keep a
+    /// compact history instead of whole poses.
+    func continuityCenter(of pose: PoseEstimationResult) -> CGPoint? {
+        bodyCenter(pose)
     }
 
     func select(from candidates: [PoseEstimationResult], stableBall: CGPoint?) -> PoseEstimationResult? {
@@ -821,15 +863,24 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         let vision = VisionPoseDetector()
         let golferTracker = PrimaryGolferTracker()
         private var selectedCoarsePoses: [TimedPose] = []
-        /// Every accepted pose, sorted by time, for continuity seeding.
-        private var acceptedPoses: [TimedPose] = []
+        /// Body centres of accepted poses, sorted by time, for seeding.
+        private var acceptedCenters = ContinuityHistory()
 
         var diagnostics: PrimaryGolferTrackingDiagnostics {
             golferTracker.diagnostics
         }
 
+        /// Frames on which the tracker accepted a golfer. A bystander or an
+        /// empty keypoint result that the tracker rejected does not count as
+        /// Vision working.
+        private var acceptedGolferCount = 0
+
         var isPoseDetectionUnavailable: Bool {
-            vision.isPoseDetectionUnavailable
+            PoseDetectionAvailabilityPolicy.isUnavailable(
+                requests: vision.poseRequestCount,
+                failed: vision.failedPoseRequestCount,
+                withPerson: acceptedGolferCount
+            )
         }
 
         func selectPose(
@@ -851,23 +902,23 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         ) -> PoseEstimationResult? {
             let selected = golferTracker.select(from: candidates, stableBall: nil)
             if let selected {
+                acceptedGolferCount += 1
                 if recordsCoreAnchorCandidate {
                     selectedCoarsePoses.append(TimedPose(time: time, pose: selected))
                 }
-                let insertion = acceptedPoses.firstIndex(where: { $0.time > time })
-                    ?? acceptedPoses.endIndex
-                acceptedPoses.insert(TimedPose(time: time, pose: selected), at: insertion)
+                if let center = golferTracker.continuityCenter(of: selected) {
+                    acceptedCenters.insert(time: time, center: center)
+                }
             }
             return selected
         }
 
         /// Seeds tracker continuity from the closest accepted pose at or
-        /// before `time` (the closest later one if none is earlier), so a
-        /// backward jump is not scored against the last decoded frame.
+        /// before `time`, at most `ContinuityHistory.maximumGap` earlier.
+        /// With none, continuity is cleared rather than borrowed from a later
+        /// frame or a pose from long before.
         func seedContinuity(before time: Double) {
-            let earlier = acceptedPoses.last(where: { $0.time <= time })
-            let reference = earlier ?? acceptedPoses.first
-            golferTracker.seedContinuity(with: reference?.pose)
+            golferTracker.seedContinuity(center: acceptedCenters.center(before: time))
         }
 
         func lockIdentityAnchor(near time: Double) -> Bool {
@@ -883,6 +934,9 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
     private struct LocalRefinementBounds {
         let maximumSourceFrameIndex: Int
         let maximumHalfSpan: Int
+        /// Oriented frame width / height, for angle geometry on normalised
+        /// Vision coordinates.
+        let frameAspectRatio: CGFloat
     }
 
     private struct PoseFrameExtraction {
@@ -920,17 +974,15 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         guard metadataFrameRate.isFinite, metadataFrameRate > 0 else {
             return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)
         }
-        let sourceFrameTimeline: SourceFrameTimeline?
-        if SourceFrameTimelineLoadingPolicy.canUseConstantTimeline(
-            metadataFrameRate: metadataFrameRate
-        ) {
-            sourceFrameTimeline = SourceFrameTimeline(
-                duration: duration,
-                constantFrameRate: metadataFrameRate
-            )
-        } else {
-            sourceFrameTimeline = try? ExactVideoFrameProvider.load(url: url).timeline
-        }
+        // Always the decoded timeline, even at an integer nominal rate: a
+        // constant-rate grid can be a frame short (115 vs 116 on a trimmed
+        // 30 fps clip) and then disagrees with the correction page. The
+        // timeline is cached per file, so the player and correction page
+        // share this decode.
+        let sourceFrameTimeline = try? ExactVideoFrameProvider.load(
+            url: url,
+            isCancelled: { !gate.isActive(runID) }
+        ).timeline
         guard let sourceFrameTimeline else {
             return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)
         }
@@ -990,9 +1042,14 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             }
             return samples
         }
+        let orientedTrackSize = videoTrack.naturalSize.applying(videoTrack.preferredTransform)
+        let orientedAspect = abs(orientedTrackSize.height) > 0
+            ? abs(orientedTrackSize.width) / abs(orientedTrackSize.height)
+            : 1
         let refinementBounds = LocalRefinementBounds(
             maximumSourceFrameIndex: sourceFrameTimeline.maximumSourceFrameIndex,
-            maximumHalfSpan: max(1, Int(ceil(sourceFrameRate / 4)))
+            maximumHalfSpan: max(1, Int(ceil(sourceFrameRate / 4))),
+            frameAspectRatio: orientedAspect.isFinite && orientedAspect > 0 ? orientedAspect : 1
         )
 
         // One tracker is intentionally reused for the complete coarse pass and
@@ -1807,6 +1864,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             poseSamples: observedPoseSamples,
             maximumSourceFrameIndex: refinementBounds.maximumSourceFrameIndex,
             maximumHalfSpan: refinementBounds.maximumHalfSpan,
+            frameAspectRatio: refinementBounds.frameAspectRatio,
             sampler: localPoseSampler
         )
         guard gate.isActive(runID) else { return .cancelled }

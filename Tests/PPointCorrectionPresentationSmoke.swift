@@ -36,12 +36,15 @@ struct PPointCorrectionPresentationSmoke {
             "while let next = pendingFrame",
             // A failed frame read is shown and blocks "设为".
             ".disabled(!isShowingCurrentFrame(state))",
-            "if frameReadFailed {"
+            "if frameReadFailed {",
+            // The first jump uses the same reporting path.
+            "show(frame: initial.currentSourceFrameIndex)"
         ] {
             precondition(source.contains(required), "Missing phone correction control: \(required)")
         }
 
         for forbidden in [
+            "_ = await frameController.show(",
             "NavigationStack",
             ".ultraThinMaterial",
             "ScrollView(.vertical",

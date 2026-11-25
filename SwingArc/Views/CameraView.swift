@@ -396,8 +396,9 @@ struct CameraView: View {
                 if remaining == 0 {
                     delayRemaining = nil
                     delayTask = nil
-                    CaptureDelayFeedback.go()
-                    startRecording()
+                    // The go tone plays only once the camera has actually
+                    // started recording, never before the readiness check.
+                    startRecording(playsStartTone: true)
                 } else {
                     withAnimation { delayRemaining = remaining }
                     CaptureDelayFeedback.tick()
@@ -422,14 +423,18 @@ struct CameraView: View {
         delayRemaining = nil
     }
 
-    private func startRecording() {
+    private func startRecording(playsStartTone: Bool = false) {
         guard CameraAccessPresentation.canRecord(cameraState.accessState) else {
+            if playsStartTone {
+                recordingAlertMessage = "相机被中断，倒计时已取消，请重新开始。"
+            }
             return
         }
         guard captureLifecycle.requestStart() else { return }
         cameraState.startRecording { result in
             switch result {
             case .success:
+                if playsStartTone { CaptureDelayFeedback.go() }
                 captureLifecycle.didStart()
                 scheduleAutomaticStop()
             case .failure(let error):

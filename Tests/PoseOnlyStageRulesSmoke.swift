@@ -15,6 +15,9 @@ struct PoseOnlyStageRulesSmoke {
         checksRefinementPlanIncludesAdjacentFrames()
         checksRefinementKeepsResolvedStages()
         checksVisionAvailabilityPolicy()
+        checksAngleUsesFrameAspect()
+        checksMissingLeadElbowIsOnlyForReview()
+        checksRefinementPlanKeepsTwoFrameNeighbourhood()
         checksLeadArmGeometryDefinesArmParallel()
         checksBentLeadArmIsNotArmParallel()
         checksHeightFallbackIsOnlyForReview()
@@ -129,7 +132,7 @@ struct PoseOnlyStageRulesSmoke {
                 "\(stage) refined to \(actual), dense pass found \(expected)"
             )
         }
-        precondition(decodedFrames <= 120, "Refinement decoded \(decodedFrames) frames; budget is 120")
+        precondition(decodedFrames <= 150, "Refinement decoded \(decodedFrames) frames; budget is 150")
         precondition(
             refined.poseSamples.count == Set(refined.poseSamples.compactMap(\.sourceFrameIndex)).count,
             "Refined samples must not duplicate source frames"
@@ -185,6 +188,88 @@ struct PoseOnlyStageRulesSmoke {
             result([.top: .lowConfidence, .impact: .lowConfidence, .followThrough: .unresolved]),
             replacing: current
         ), "Downgrading a confirmed stage must be rejected")
+        let reviewOnly = SwingAnalysisResult(
+            detectedMarkers: [], unresolvedStages: [],
+            detections: [SwingStageDetection(stage: .top, time: 1, sourceFrameIndex: 30, confidence: 0.65, status: .lowConfidence)]
+        )
+        let weaker = SwingAnalysisResult(
+            detectedMarkers: [], unresolvedStages: [],
+            detections: [SwingStageDetection(stage: .top, time: 1, sourceFrameIndex: 31, confidence: 0.40, status: .lowConfidence)]
+        )
+        precondition(
+            !LocalStageRefinement.isAcceptable(weaker, replacing: reviewOnly),
+            "On the 待核对-only production path a large confidence drop must be rejected"
+        )
+    }
+
+    /// Normalised (0.15, 0.10) on a 16:9 frame is 20.6° in the picture, not
+    /// the 33.7° the raw coordinates give.
+    private static func checksAngleUsesFrameAspect() {
+        let arm = sample(
+            frame: 0,
+            time: 0,
+            hand: CGPoint(x: 0.65, y: 0.60),
+            leftShoulderY: 0.50,
+            rightShoulderY: 0.50
+        )
+        let lifted = SwingPoseSample(
+            time: 0,
+            leftWrist: CGPoint(x: 0.65, y: 0.60), rightWrist: arm.rightWrist,
+            leftElbow: CGPoint(x: 0.575, y: 0.55), rightElbow: arm.rightElbow,
+            leftShoulder: CGPoint(x: 0.50, y: 0.50), rightShoulder: arm.rightShoulder,
+            leftHip: arm.leftHip, rightHip: arm.rightHip,
+            head: arm.head, spineAngle: arm.spineAngle, aggregateConfidence: 1,
+            sourceFrameIndex: 0
+        )
+        guard let square = PoseOnlyStageRules.leadArmTilt(lifted, side: .left),
+              let wide = PoseOnlyStageRules.leadArmTilt(lifted, side: .left, aspect: 16.0 / 9.0) else {
+            preconditionFailure("Lead-arm tilt must be measurable")
+        }
+        precondition(abs(square - 33.69) < 0.1, "Raw tilt \(square)")
+        precondition(abs(wide - 20.56) < 0.1, "16:9 tilt \(wide) must use image proportions")
+        guard let elbow = PoseOnlyStageRules.elbowAngle(lifted, side: .left, aspect: 16.0 / 9.0) else {
+            preconditionFailure("Elbow angle must be measurable")
+        }
+        precondition(abs(elbow - 180) < 0.5, "A straight arm stays straight at any aspect: \(elbow)")
+    }
+
+    /// Without the lead elbow the arm cannot be called straight: P3/P5 come
+    /// only from the height fallback and are flagged for review.
+    private static func checksMissingLeadElbowIsOnlyForReview() {
+        let samples = armSwingScenario(bentLeadArmNearParallel: false).map { sample in
+            SwingPoseSample(
+                time: sample.time,
+                leftWrist: sample.leftWrist, rightWrist: sample.rightWrist,
+                leftElbow: nil, rightElbow: sample.rightElbow,
+                leftShoulder: sample.leftShoulder, rightShoulder: sample.rightShoulder,
+                leftHip: sample.leftHip, rightHip: sample.rightHip,
+                head: sample.head, spineAngle: sample.spineAngle,
+                aggregateConfidence: sample.aggregateConfidence,
+                sourceFrameIndex: sample.sourceFrameIndex
+            )
+        }
+        let result = SwingStageDetector.detectPoseOnlyCandidates(samples)
+        for stage in [SwingStage.leadArmParallelBackswing, .leadArmParallelDownswing] {
+            precondition(
+                status(stage, in: result) != .confirmed,
+                "\(stage) must not be confirmed without the lead elbow"
+            )
+        }
+    }
+
+    /// A candidate that stays on 60 after its ±1 neighbours were sampled
+    /// must still get 58 and 62.
+    private static func checksRefinementPlanKeepsTwoFrameNeighbourhood() {
+        let detection = SwingStageDetection(
+            stage: .top, time: 1, sourceFrameIndex: 60, confidence: 0.6, status: .lowConfidence
+        )
+        let frames = LocalStageRefinementPlan.sourceFrames(
+            around: [detection],
+            observedSourceFrames: [0, 59, 60, 61, 120],
+            maximumSourceFrameIndex: 239,
+            maximumHalfSpan: 60
+        )
+        precondition(frames.contains(58) && frames.contains(62), "Plan \(frames) misses ±2")
     }
 
     private static func checksVisionAvailabilityPolicy() {

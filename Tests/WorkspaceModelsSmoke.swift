@@ -90,6 +90,26 @@ struct WorkspaceModelsSmoke {
             manualImpact.map { abs($0.lowerBound - 8.3) < 1e-9 && abs($0.upperBound - 13.4) < 1e-9 } == true,
             "Trim range \(String(describing: manualImpact))"
         )
+        // A hand-set P1 after P7 must not move the start past the top.
+        let disordered = SwingTrimPolicy.range(keyframes: [
+            KeyframeMarker(time: 15.0, stage: .address, source: .manual),
+            KeyframeMarker(time: 10.0, stage: .top, source: .manual),
+            KeyframeMarker(time: 12.0, stage: .impact, source: .manual),
+            KeyframeMarker(time: 17.0, stage: .followThrough, source: .manual)
+        ], duration: 32.4)
+        precondition(
+            disordered.map { $0.contains(10.0) && $0.contains(12.0) && $0.contains(17.0) } == true,
+            "Trim range \(String(describing: disordered)) drops the top or impact"
+        )
+        // Slow motion: a 2.4 s downswing keeps 7.2 s after impact.
+        let slowMotion = SwingTrimPolicy.range(keyframes: [
+            KeyframeMarker(time: 20.0, stage: .top, automaticStatus: .confirmed),
+            KeyframeMarker(time: 22.4, stage: .impact, automaticStatus: .confirmed)
+        ], duration: 60)
+        precondition(
+            slowMotion.map { abs($0.upperBound - 29.6) < 1e-9 && abs($0.lowerBound - 10.4) < 1e-9 } == true,
+            "Slow-motion trim \(String(describing: slowMotion))"
+        )
         precondition(ProjectThumbnailPolicy.time(keyframes: swingMarkers, duration: 32.4) == 0.83)
         precondition(ProjectThumbnailPolicy.stageSummary(keyframes: swingMarkers) == " · P 点 3/8")
         precondition(PlaybackPositionLabel.frameNumber(time: 0, sourceFrameRate: 30) == 1)

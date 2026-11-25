@@ -390,9 +390,9 @@ struct PPointCorrectionWorkspace: View {
         }
         correctionState = initial
         scrubFrame = Double(initial.currentSourceFrameIndex)
-        _ = await frameController.show(
-            index: initial.currentSourceFrameIndex
-        )
+        // The first jump (often to the tapped P4) goes through the same
+        // decode path as every later one, so a failed read is shown.
+        show(frame: initial.currentSourceFrameIndex)
     }
 
     private func select(_ code: PPointCode) {

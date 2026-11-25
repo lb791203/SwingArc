@@ -7,6 +7,7 @@ struct WorkspaceHeaderView: View {
     let showsProjectSidebar: Bool
     let showsInspector: Bool
     let onBack: () -> Void
+    let backAccessibilityLabel: String
     let onToggleProjectSidebar: () -> Void
     let onToggleInspector: () -> Void
     let onCorrectPPoints: () -> Void
@@ -19,7 +20,7 @@ struct WorkspaceHeaderView: View {
                     .frame(width: 44, height: 44)
                     .background(AnalysisTheme.proTourSurface, in: Circle())
             }
-            .accessibilityLabel("返回首页")
+            .accessibilityLabel(backAccessibilityLabel)
 
             if isRegularLayout {
                 Button(action: onToggleProjectSidebar) {

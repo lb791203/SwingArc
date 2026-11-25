@@ -239,8 +239,17 @@ class VideoPlaybackManager: ObservableObject {
 
         Task { [weak self] in
             let session = await sessionTask?.value
+            // A project saved while the timeline was read from compressed
+            // samples can hold a frame index that disagrees with its own
+            // decoded-frame time. The time is what the decoder showed, so
+            // when the two point at different frames, follow the time.
+            var resolvedIndex = sourceFrameIndex
+            if let nearest = await session?.nearestSourceFrameIndex(at: marker.time),
+               nearest != sourceFrameIndex {
+                resolvedIndex = nearest
+            }
             let exactTime = await session?.presentationTime(
-                at: sourceFrameIndex
+                at: resolvedIndex
             )
             await MainActor.run {
                 guard let self,

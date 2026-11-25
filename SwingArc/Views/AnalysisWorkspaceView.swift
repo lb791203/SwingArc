@@ -20,6 +20,8 @@ struct AnalysisWorkspaceView: View {
     /// Swing part of a long clip, when trimming is worthwhile.
     var trimRange: ClosedRange<Double>? = nil
     var onTrimToSwing: () -> Void = {}
+    /// VoiceOver label for the back arrow: where onBack actually goes.
+    var backAccessibilityLabel: String = "返回首页"
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var interactionMode: WorkspaceInteractionMode = .idle
@@ -108,6 +110,7 @@ struct AnalysisWorkspaceView: View {
                 showsProjectSidebar: showsProjectSidebar,
                 showsInspector: showsInspector,
                 onBack: onBack,
+                backAccessibilityLabel: backAccessibilityLabel,
                 onToggleProjectSidebar: { showsProjectSidebar.toggle() },
                 onToggleInspector: { showsInspector.toggle() },
                 onCorrectPPoints: onCorrectPPoints,
@@ -301,7 +304,7 @@ struct AnalysisWorkspaceView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("返回首页")
+                .accessibilityLabel(backAccessibilityLabel)
 
                 Spacer(minLength: 0)
 
@@ -353,7 +356,7 @@ struct AnalysisWorkspaceView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("返回首页")
+            .accessibilityLabel(backAccessibilityLabel)
 
             HStack(spacing: 7) {
                 Text(project.name)
