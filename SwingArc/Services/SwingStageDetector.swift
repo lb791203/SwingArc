@@ -3648,13 +3648,17 @@ enum PoseOnlyStageRules {
             var measured = 0
             var best: (index: Int, tilt: CGFloat)?
             var coarse: (index: Int, tilt: CGFloat)?
+            var bentNearHorizontal = false
             for index in range {
                 guard let tilt = leadArmTilt(samples[index], side: leadSide, aspect: aspect),
                       let elbow = elbowAngle(samples[index], side: leadSide, aspect: aspect) else {
                     continue
                 }
                 measured += 1
-                guard elbow >= minimumLeadElbowAngle else { continue }
+                guard elbow >= minimumLeadElbowAngle else {
+                    if tilt <= coarseLeadArmTilt { bentNearHorizontal = true }
+                    continue
+                }
                 if tilt <= maximumLeadArmTilt {
                     if best == nil || tilt < best!.tilt { best = (index, tilt) }
                 } else if tilt <= coarseLeadArmTilt,
@@ -3675,7 +3679,12 @@ enum PoseOnlyStageRules {
                     indices.weakEvidence.insert(stage)
                     return coarse.index
                 }
-                return nil
+                // A measured bent arm near horizontal means this is not P3/P5.
+                // If instead no frame near horizontal was measured (the arm
+                // crossed it in a sampling or detection gap), fall through to
+                // the height fallback for review; the refinement pass then
+                // samples the gap and can settle it on real geometry.
+                if bentNearHorizontal { return nil }
             }
         }
         let fallback = closestIndex(in: range, hands: hands, samples: samples, target: fallbackTarget)
