@@ -4765,7 +4765,7 @@ enum LocalStageRefinementPlan {
     ]
     static let maximumFramesPerStage = 10
     /// Closest unsampled gaps whose middle is requested per stage per pass.
-    static let maximumGapFillsPerStage = 4
+    static let maximumGapFillsPerStage = 2
 
     static func sourceFrames(
         around detections: [SwingStageDetection],
@@ -4826,7 +4826,8 @@ enum LocalStageRefinementPlan {
                   let center = detection.sourceFrameIndex,
                   center >= 0,
                   center <= maximumSourceFrameIndex else { continue }
-            let reach = max(2, maximumHalfSpan / 6)
+            // Never past the configured candidate window.
+            let reach = min(maximumHalfSpan, max(2, maximumHalfSpan / 6))
             let windowLower = max(0, center - reach)
             let windowUpper = min(maximumSourceFrameIndex, center + reach)
             let known = (observed + Array(planned))

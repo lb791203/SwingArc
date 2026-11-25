@@ -155,15 +155,22 @@ extension ManualStageDetectionPolicy {
         sourceFrameRate: Double,
         halfFrame: Double
     ) -> (frame: Int, hasExactPose: Bool) {
-        if let stored = marker.sourceFrameIndex,
-           let time = sampleTimeByFrame[stored],
-           abs(time - marker.time) <= halfFrame {
-            return (stored, true)
+        // The pose sample nearest the marker time. Nearest, not "within half
+        // an average frame": on variable-frame-rate clips the local frame
+        // interval can be much shorter than the average one.
+        let nearest = sampleTimeByFrame.min { first, second in
+            let a = abs(first.value - marker.time)
+            let b = abs(second.value - marker.time)
+            return a != b ? a < b : first.key < second.key
         }
-        if let match = sampleTimeByFrame
-            .filter({ abs($0.value - marker.time) <= halfFrame })
-            .min(by: { abs($0.value - marker.time) < abs($1.value - marker.time) }) {
-            return (match.key, true)
+        if let nearest, abs(nearest.value - marker.time) <= halfFrame {
+            // The stored frame wins only if it is (one of) the nearest.
+            if let stored = marker.sourceFrameIndex,
+               let storedTime = sampleTimeByFrame[stored],
+               abs(storedTime - marker.time) <= abs(nearest.value - marker.time) + 1e-9 {
+                return (stored, true)
+            }
+            return (nearest.key, true)
         }
         if let stored = marker.sourceFrameIndex, sampleTimeByFrame[stored] == nil {
             // No pose at either; keep the stored frame for review.

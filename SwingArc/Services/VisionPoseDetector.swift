@@ -887,12 +887,21 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         static let recentWindow = 24
         static let trailingFailureLimit = 12
 
-        var isPoseDetectionUnavailable: Bool {
-            if PoseDetectionAvailabilityPolicy.isUnavailable(
+        /// Vision failed across the whole run so far: nothing usable came
+        /// out of it. Checked before segmentation.
+        var hasNoUsableVisionResults: Bool {
+            PoseDetectionAvailabilityPolicy.isUnavailable(
                 requests: vision.poseRequestCount,
                 failed: vision.failedPoseRequestCount,
                 withPerson: acceptedGolferCount
-            ) { return true }
+            )
+        }
+
+        /// Also true when Vision broke down later in the run. Used only to
+        /// name the failure once analysis has failed anyway, so a late
+        /// breakdown never discards a swing already found in earlier frames.
+        var isPoseDetectionUnavailable: Bool {
+            if hasNoUsableVisionResults { return true }
             // Vision still throwing on the latest requests in a row means it
             // broke down, even if it worked earlier in a short run.
             let trailingFailures = recentOutcomes.reversed().prefix(while: \.failed).count
@@ -1193,7 +1202,9 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         }
         // Vision failing on every frame is a device/runtime problem, not a
         // person-stability problem; do not report it as 人物检测不稳定.
-        guard !trackedPoseDetector.isPoseDetectionUnavailable else {
+        // A breakdown only at the end of the clip does not stop here: the
+        // earlier frames may still hold a complete swing.
+        guard !trackedPoseDetector.hasNoUsableVisionResults else {
             return activeFailure(.poseDetectionUnavailable, runID: runID, gate: gate)
         }
 

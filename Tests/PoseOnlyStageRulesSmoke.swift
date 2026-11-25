@@ -379,6 +379,14 @@ struct PoseOnlyStageRulesSmoke {
             [55, 56, 64, 65].allSatisfy(third.contains),
             "Plan \(third) leaves the 55–56 and 64–65 gaps open"
         )
+        // A one-frame candidate window is never exceeded.
+        let narrow = LocalStageRefinementPlan.sourceFrames(
+            around: [detection],
+            observedSourceFrames: [0, 60, 120],
+            maximumSourceFrameIndex: 239,
+            maximumHalfSpan: 1
+        )
+        precondition(narrow.allSatisfy { abs($0 - 60) <= 1 }, "Plan \(narrow) leaves the 59–61 window")
     }
 
     private static func checksVisionAvailabilityPolicy() {

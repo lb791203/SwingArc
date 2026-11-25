@@ -131,6 +131,29 @@ struct TechniqueFeedbackPresentationSmoke {
         )
         precondition(staleOnly[0].sourceFrameIndex != 100 && staleOnly[0].status == .lowConfidence,
                      "A pose at the stale index must not be used for feedback")
+
+        // Variable frame rate: frame 3 at 0.300 s, frame 5 at 0.308 s (the
+        // average half frame at 30 fps is 16.7 ms). A marker at 0.308 s
+        // stored as frame 3 must use frame 5.
+        func vfrSample(frame: Int, time: Double) -> SwingPoseSample {
+            let base = sample(frame: frame)
+            return SwingPoseSample(
+                time: time,
+                leftWrist: nil, rightWrist: nil, leftElbow: nil, rightElbow: nil,
+                leftShoulder: nil, rightShoulder: nil, leftHip: nil, rightHip: nil,
+                head: nil, spineAngle: nil, aggregateConfidence: base.aggregateConfidence,
+                sourceFrameIndex: frame
+            )
+        }
+        let vfrMarker = KeyframeMarker(time: 0.308, stage: .top, source: .manual, sourceFrameIndex: 3)
+        let vfr = ManualStageDetectionPolicy.applying(
+            manualMarkers: [vfrMarker],
+            sourceFrameRate: 30,
+            automatic: [automaticTop],
+            availablePoseSamples: [vfrSample(frame: 3, time: 0.300), vfrSample(frame: 5, time: 0.308)]
+        )
+        precondition(vfr[0].sourceFrameIndex == 5 && vfr[0].status == .confirmed,
+                     "VFR: the pose nearest the marker time (frame 5) must be used, got \(String(describing: vfr[0].sourceFrameIndex))")
     }
 
     private static func sample(frame: Int) -> SwingPoseSample {
