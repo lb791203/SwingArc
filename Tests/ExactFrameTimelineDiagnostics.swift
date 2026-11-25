@@ -107,11 +107,13 @@ struct ExactFrameTimelineDiagnostics {
         try FileManager.default.removeItem(at: copy)
         try FileManager.default.moveItem(at: replacement, to: copy)
         var redecoded = false
+        let replacedAsset = AVURLAsset(url: copy)
+        let replacedTrack = replacedAsset.tracks(withMediaType: .video).first!
         _ = try SourceFrameTimelineCache.timeline(for: copy) {
             redecoded = true
             return try ExactVideoFrameProvider.decodeTimeline(
-                asset: AVURLAsset(url: copy),
-                track: AVURLAsset(url: copy).tracks(withMediaType: .video).first!,
+                asset: replacedAsset,
+                track: replacedTrack,
                 isCancelled: { false }
             )
         }

@@ -3622,6 +3622,8 @@ enum PoseOnlyStageRules {
     /// horizontal.
     static let minimumLeadElbowAngle: CGFloat = 140
     static let maximumLeadArmTilt: CGFloat = 30
+    /// Straight-arm frames tilted up to this much are kept, flagged for review.
+    static let coarseLeadArmTilt: CGFloat = 45
     static let minimumTakeawayElbowAngle: CGFloat = 145
 
     /// P3/P5: the frame whose lead arm (shoulder to wrist) is closest to
@@ -3645,24 +3647,65 @@ enum PoseOnlyStageRules {
             // all visible; a missing elbow must not pass as a straight arm.
             var measured = 0
             var best: (index: Int, tilt: CGFloat)?
+            var coarse: (index: Int, tilt: CGFloat)?
             for index in range {
                 guard let tilt = leadArmTilt(samples[index], side: leadSide, aspect: aspect),
                       let elbow = elbowAngle(samples[index], side: leadSide, aspect: aspect) else {
                     continue
                 }
                 measured += 1
-                guard elbow >= minimumLeadElbowAngle, tilt <= maximumLeadArmTilt else { continue }
-                if best == nil || tilt < best!.tilt {
-                    best = (index, tilt)
+                guard elbow >= minimumLeadElbowAngle else { continue }
+                if tilt <= maximumLeadArmTilt {
+                    if best == nil || tilt < best!.tilt { best = (index, tilt) }
+                } else if tilt <= coarseLeadArmTilt,
+                          crossesHorizontalWithStraightArm(
+                              at: index, in: range, samples: samples,
+                              side: leadSide, aspect: aspect
+                          ),
+                          coarse == nil || tilt < coarse!.tilt {
+                    coarse = (index, tilt)
                 }
             }
             if measured * 2 >= range.count {
-                return best?.index
+                if let best { return best.index }
+                // At 30 fps a fast swing can pass horizontal between two
+                // frames, both straight-armed. The closer one (within 45°) is
+                // kept for review instead of leaving the stage empty.
+                if let coarse {
+                    indices.weakEvidence.insert(stage)
+                    return coarse.index
+                }
+                return nil
             }
         }
         let fallback = closestIndex(in: range, hands: hands, samples: samples, target: fallbackTarget)
         if fallback != nil { indices.weakEvidence.insert(stage) }
         return fallback
+    }
+
+    /// True when a neighbouring frame has the lead wrist on the other side
+    /// of shoulder height with the elbow still straight: the arm passed
+    /// horizontal between the two frames.
+    static func crossesHorizontalWithStraightArm(
+        at index: Int,
+        in range: Range<Int>,
+        samples: [SwingPoseSample],
+        side: ArmSide,
+        aspect: CGFloat
+    ) -> Bool {
+        func wristAbove(_ i: Int) -> Bool? {
+            let arm = joints(samples[i], side: side)
+            guard let shoulder = arm.shoulder, let wrist = arm.wrist else { return nil }
+            return wrist.y < shoulder.y
+        }
+        guard let here = wristAbove(index) else { return false }
+        for neighbour in [index - 1, index + 1] where range.contains(neighbour) {
+            guard let there = wristAbove(neighbour), there != here,
+                  let elbow = elbowAngle(samples[neighbour], side: side, aspect: aspect),
+                  elbow >= minimumLeadElbowAngle else { continue }
+            return true
+        }
+        return false
     }
 
     /// Lead side at the top: the lower shoulder, or else the straighter arm

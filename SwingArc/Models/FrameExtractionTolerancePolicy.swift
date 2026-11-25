@@ -13,7 +13,7 @@ enum SourceFrameTimelineLoadingPolicy {
     }
 }
 
-struct SourceFrameTimeline: Equatable {
+nonisolated struct SourceFrameTimeline: Equatable {
     private let presentationTimes: [CMTime]
     private let seconds: [Double]
 

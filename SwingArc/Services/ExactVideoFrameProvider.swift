@@ -213,7 +213,7 @@ nonisolated enum SourceFrameTimelineCache {
     /// About 2.4 MB of CMTime values: roughly 80 minutes of 30 fps video.
     static let maximumTotalFrames = 150_000
 
-    nonisolated(unsafe) private static let condition = NSCondition()
+    private static let condition = NSCondition()
     nonisolated(unsafe) private static var entries: [Key: SourceFrameTimeline] = [:]
     nonisolated(unsafe) private static var lastUse: [Key: UInt64] = [:]
     nonisolated(unsafe) private static var useCounter: UInt64 = 0
