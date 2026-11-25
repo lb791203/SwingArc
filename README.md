@@ -126,6 +126,7 @@ xcrun swiftc -parse-as-library \
   SwingArc/Models/SwingObservationModels.swift \
   SwingArc/Models/WorkspaceModels.swift \
   SwingArc/Models/FrameExtractionTolerancePolicy.swift \
+  SwingArc/Services/ExactVideoFrameProvider.swift \
   SwingArc/Services/StageCalibration.swift \
   SwingArc/Services/SwingInputQualityEvaluator.swift \
   SwingArc/Services/SwingTrajectoryTracker.swift \

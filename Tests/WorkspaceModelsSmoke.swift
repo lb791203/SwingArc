@@ -58,9 +58,9 @@ struct WorkspaceModelsSmoke {
         precondition(MobileReplayStageStripPolicy.glyphHeight == 30)
         precondition(MobileReplayStageStripPolicy.labelFontSize == 10)
         let swingMarkers = [
-            KeyframeMarker(time: 0.33, stage: .address),
-            KeyframeMarker(time: 0.83, stage: .top),
-            KeyframeMarker(time: 1.13, stage: .impact)
+            KeyframeMarker(time: 0.33, stage: .address, automaticStatus: .confirmed),
+            KeyframeMarker(time: 0.83, stage: .top, automaticStatus: .confirmed),
+            KeyframeMarker(time: 1.13, stage: .impact, automaticStatus: .confirmed)
         ]
         let trim = SwingTrimPolicy.range(keyframes: swingMarkers, duration: 32.4)
         precondition(trim?.lowerBound == 0 && abs((trim?.upperBound ?? 0) - 3.63) < 1e-9)
@@ -72,19 +72,19 @@ struct WorkspaceModelsSmoke {
             KeyframeMarker(time: 10.8, stage: .top, automaticStatus: .lowConfidence)
         ], duration: 32.4) == nil)
         precondition(SwingTrimPolicy.range(keyframes: [
-            KeyframeMarker(time: 10.0, stage: .address),
-            KeyframeMarker(time: 10.8, stage: .top)
+            KeyframeMarker(time: 10.0, stage: .address, automaticStatus: .confirmed),
+            KeyframeMarker(time: 10.8, stage: .top, automaticStatus: .confirmed)
         ], duration: 32.4) == nil, "Without P7 the cut could drop impact")
         precondition(SwingTrimPolicy.range(keyframes: [
-            KeyframeMarker(time: 10.8, stage: .top),
+            KeyframeMarker(time: 10.8, stage: .top, automaticStatus: .confirmed),
             KeyframeMarker(time: 11.1, stage: .impact, automaticStatus: .lowConfidence)
         ], duration: 32.4) == nil)
         // A hand-set P7 counts; untrusted P1 widens the lead-in to 2.5 s.
         let manualImpact = SwingTrimPolicy.range(keyframes: [
             KeyframeMarker(time: 10.0, stage: .address, automaticStatus: .lowConfidence),
-            KeyframeMarker(time: 10.8, stage: .top),
+            KeyframeMarker(time: 10.8, stage: .top, automaticStatus: .confirmed),
             KeyframeMarker(time: 11.1, stage: .impact, source: .manual),
-            KeyframeMarker(time: 11.9, stage: .followThrough)
+            KeyframeMarker(time: 11.9, stage: .followThrough, automaticStatus: .confirmed)
         ], duration: 32.4)
         precondition(
             manualImpact.map { abs($0.lowerBound - 8.3) < 1e-9 && abs($0.upperBound - 13.4) < 1e-9 } == true,

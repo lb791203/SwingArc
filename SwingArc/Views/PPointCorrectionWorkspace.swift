@@ -235,6 +235,9 @@ struct PPointCorrectionWorkspace: View {
             .buttonStyle(.plain)
             .disabled(!isShowingCurrentFrame(state))
             .opacity(isShowingCurrentFrame(state) ? 1 : 0.5)
+            .accessibilityLabel(
+                "将当前帧设为 \(state.selectedCode.rawValue)"
+            )
 
             if frameReadFailed {
                 Text(
@@ -244,9 +247,6 @@ struct PPointCorrectionWorkspace: View {
                 .foregroundStyle(.orange)
                 .shadow(color: .black.opacity(0.9), radius: 3)
             }
-            .accessibilityLabel(
-                "将当前帧设为 \(state.selectedCode.rawValue)"
-            )
 
             if let savedMessage {
                 Text(savedMessage)
