@@ -29,12 +29,22 @@ struct PPointCorrectionPresentationSmoke {
             "frameScrubber(state)",
             "action: .jump(frame)",
             "state.nextCode",
-            "initialStage"
+            "initialStage",
+            // Slider drags coalesce into one pending decode.
+            "pendingFrame = frame",
+            "guard !isDecodingFrame else { return }",
+            "while let next = pendingFrame",
+            // A failed frame read is shown and blocks "设为".
+            ".disabled(!isShowingCurrentFrame(state))",
+            "if frameReadFailed {",
+            // The first jump uses the same reporting path.
+            "show(frame: initial.currentSourceFrameIndex)"
         ] {
             precondition(source.contains(required), "Missing phone correction control: \(required)")
         }
 
         for forbidden in [
+            "_ = await frameController.show(",
             "NavigationStack",
             ".ultraThinMaterial",
             "ScrollView(.vertical",
@@ -60,6 +70,10 @@ struct PPointCorrectionPresentationSmoke {
         let saveImplementation = source[
             saveStart.lowerBound..<statusStart.lowerBound
         ]
+        precondition(
+            saveImplementation.contains("flashSaved(\n                frameReadFailed"),
+            "Saving without a decoded frame must say why instead of returning silently"
+        )
         precondition(
             !saveImplementation.contains("onClose()"),
             "Saving one P point must keep the correction workspace open"

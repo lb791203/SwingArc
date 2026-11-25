@@ -36,7 +36,12 @@ SwingArc 当前分析单机位视频中的二维挥杆动作，不检测或展�
 2. 点击 Run (▶) 编译并启动。
 3. 真机阶段仅在模拟器 UI 验收完成、且另行确认后执行；届时需启用 Developer Mode，并授予相机、麦克风和相册权限。
 
-开发构建仅提供模拟器画面检查参数：`-swingarc-preview-dtl`、`-swingarc-preview-ready`、`-swingarc-preview-face-on`、`-swingarc-preview-face-on-ready`、`-swingarc-preview-waiting`、`-swingarc-preview-paused`、`-swingarc-preview-manual-capture`、`-swingarc-preview-library`、`-swingarc-preview-new-project`，以及配合本地测试影片的 `-swingarc-preview-import` / `-swingarc-preview-analysis`。它们被 `#if DEBUG` 隔离，不会进入发布构建或改变真机正常流程。
+开发构建仅提供模拟器画面检查参数，它们被 `#if DEBUG` 隔离，不会进入发布构建或改变真机正常流程：
+
+- 可单独使用：`-swingarc-preview-library`（打开挥杆档案）、`-swingarc-preview-new-project`、`-swingarc-preview-manual-capture`（打开手动录像页）。
+- 需要配合 `-swingarc-preview-import <本地影片路径>` 使用（单独使用没有效果）：`-swingarc-preview-analysis`（导入后自动分析），以及标记拍摄视角的 `-swingarc-preview-dtl`、`-swingarc-preview-ready`、`-swingarc-preview-face-on`、`-swingarc-preview-face-on-ready`、`-swingarc-preview-waiting`、`-swingarc-preview-paused`。
+
+注意：iOS 模拟器无法运行 Apple Vision 人体姿势识别，分析会显示“本设备暂时无法运行人体姿势识别”。要检查 P 点识别结果，请在真机上运行。
 
 ---
 
@@ -121,6 +126,7 @@ xcrun swiftc -parse-as-library \
   SwingArc/Models/SwingObservationModels.swift \
   SwingArc/Models/WorkspaceModels.swift \
   SwingArc/Models/FrameExtractionTolerancePolicy.swift \
+  SwingArc/Services/ExactVideoFrameProvider.swift \
   SwingArc/Services/StageCalibration.swift \
   SwingArc/Services/SwingInputQualityEvaluator.swift \
   SwingArc/Services/SwingTrajectoryTracker.swift \

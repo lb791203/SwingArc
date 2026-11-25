@@ -16,6 +16,12 @@ struct PPointCorrectionWorkspace: View {
     @State private var preparationError: String?
     @State private var scrubFrame: Double = 0
     @State private var savedMessage: String?
+    /// Latest frame the user asked for while a decode was running. Slider
+    /// drags overwrite it, so only the newest request is decoded next instead
+    /// of a backlog of one decode per slider tick.
+    @State private var pendingFrame: Int?
+    @State private var isDecodingFrame = false
+    @State private var frameReadFailed = false
 
     var body: some View {
         Group {
@@ -46,6 +52,7 @@ struct PPointCorrectionWorkspace: View {
         } message: {
             Text(preparationError ?? "")
         }
+        .tint(AnalysisTheme.proTourSignal)
         .preferredColorScheme(.dark)
     }
 
@@ -53,7 +60,8 @@ struct PPointCorrectionWorkspace: View {
         VStack(spacing: 2) {
             HStack {
                 Button("关闭", action: onClose)
-                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(AnalysisTheme.proTourPrimaryText)
+                    .scaledFont(size: 15, weight: .semibold)
                     .padding(.horizontal, 12)
                     .frame(minHeight: 38)
                     .background(
@@ -66,7 +74,7 @@ struct PPointCorrectionWorkspace: View {
 
                 VStack(spacing: 0) {
                     Text("P 点修正")
-                        .font(.system(size: 17, weight: .bold))
+                        .scaledFont(size: 17, weight: .bold)
                     Text("当前视频")
                         .font(.caption2)
                         .foregroundStyle(AnalysisTheme.proTourSecondaryText)
@@ -147,7 +155,7 @@ struct PPointCorrectionWorkspace: View {
                     } label: {
                         VStack(spacing: 3) {
                             Text(code.rawValue)
-                                .font(.system(size: 14, weight: .black, design: .monospaced))
+                                .scaledFont(size: 14, weight: .black, design: .monospaced)
                             Circle()
                                 .fill(statusColor(selection.source))
                                 .frame(width: 5, height: 5)
@@ -186,6 +194,7 @@ struct PPointCorrectionWorkspace: View {
                     "帧 \(state.currentSourceFrameIndex + 1) / " +
                         "\(frameController.frameCount)"
                 )
+                .scaledFont(size: 20, weight: .bold, design: .rounded)
                 .monospacedDigit()
 
                 Spacer()
@@ -215,7 +224,7 @@ struct PPointCorrectionWorkspace: View {
                 saveSelectedStage()
             } label: {
                 Text("设为 \(state.selectedCode.rawValue)")
-                    .font(.system(size: 16, weight: .bold))
+                    .scaledFont(size: 16, weight: .bold)
                     .frame(maxWidth: .infinity, minHeight: 46)
                     .foregroundStyle(AnalysisTheme.proTourBackground)
                     .background(
@@ -224,10 +233,20 @@ struct PPointCorrectionWorkspace: View {
                     )
             }
             .buttonStyle(.plain)
-            .disabled(frameController.currentFrame == nil)
+            .disabled(!isShowingCurrentFrame(state))
+            .opacity(isShowingCurrentFrame(state) ? 1 : 0.5)
             .accessibilityLabel(
                 "将当前帧设为 \(state.selectedCode.rawValue)"
             )
+
+            if frameReadFailed {
+                Text(
+                    "无法读取第 \(state.currentSourceFrameIndex + 1) 帧，请用 ±1 换一帧"
+                )
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.orange)
+                .shadow(color: .black.opacity(0.9), radius: 3)
+            }
 
             if let savedMessage {
                 Text(savedMessage)
@@ -275,7 +294,7 @@ struct PPointCorrectionWorkspace: View {
             step(amount)
         } label: {
             Text(title)
-                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                .scaledFont(size: 18, weight: .bold, design: .monospaced)
                 .frame(maxWidth: .infinity, minHeight: 42)
                 .background(
                     .black.opacity(0.28),
@@ -321,15 +340,12 @@ struct PPointCorrectionWorkspace: View {
             guard let code = Self.code(for: marker.stage) else {
                 continue
             }
-            let frame: Int?
-            if let exactFrame = marker.sourceFrameIndex,
-               (0..<frameController.frameCount).contains(exactFrame) {
-                frame = exactFrame
-            } else {
-                frame = await frameController.nearestSourceFrameIndex(
-                    at: marker.time
-                )
-            }
+            // Same rule as replay: a stored index that disagrees with the
+            // marker's time (older projects) follows the time.
+            let frame = await frameController.resolvedSourceFrameIndex(
+                storedIndex: marker.sourceFrameIndex,
+                time: marker.time
+            )
             guard let frame else { continue }
             PPointCorrectionMarkerPolicy.apply(
                 code: code,
@@ -371,9 +387,9 @@ struct PPointCorrectionWorkspace: View {
         }
         correctionState = initial
         scrubFrame = Double(initial.currentSourceFrameIndex)
-        _ = await frameController.show(
-            index: initial.currentSourceFrameIndex
-        )
+        // The first jump (often to the tapped P4) goes through the same
+        // decode path as every later one, so a failed read is shown.
+        show(frame: initial.currentSourceFrameIndex)
     }
 
     private func select(_ code: PPointCode) {
@@ -401,15 +417,37 @@ struct PPointCorrectionWorkspace: View {
     }
 
     private func show(frame: Int) {
-        Task {
-            _ = await frameController.show(index: frame)
+        pendingFrame = frame
+        guard !isDecodingFrame else { return }
+        isDecodingFrame = true
+        Task { @MainActor in
+            while let next = pendingFrame {
+                pendingFrame = nil
+                let loaded = await frameController.show(index: next)
+                if pendingFrame == nil {
+                    frameReadFailed = !loaded
+                    if loaded { frameController.errorMessage = nil }
+                }
+            }
+            isDecodingFrame = false
         }
+    }
+
+    /// True once the frame on screen is the frame the selected stage would be
+    /// set to; "设为" stays disabled until then.
+    private func isShowingCurrentFrame(_ state: PPointCorrectionState) -> Bool {
+        frameController.currentFrame?.sourceFrameIndex == state.currentSourceFrameIndex
     }
 
     private func saveSelectedStage() {
         guard var state = correctionState,
               let frame = frameController.currentFrame,
               frame.sourceFrameIndex == state.currentSourceFrameIndex else {
+            flashSaved(
+                frameReadFailed
+                    ? "无法读取第 \(((correctionState?.currentSourceFrameIndex ?? 0) + 1)) 帧，请换一帧"
+                    : "画面还在加载，请稍候"
+            )
             return
         }
         PPointCorrectionReducer.reduce(

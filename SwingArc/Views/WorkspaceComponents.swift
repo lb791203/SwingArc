@@ -7,6 +7,7 @@ struct WorkspaceHeaderView: View {
     let showsProjectSidebar: Bool
     let showsInspector: Bool
     let onBack: () -> Void
+    let backAccessibilityLabel: String
     let onToggleProjectSidebar: () -> Void
     let onToggleInspector: () -> Void
     let onCorrectPPoints: () -> Void
@@ -19,7 +20,7 @@ struct WorkspaceHeaderView: View {
                     .frame(width: 44, height: 44)
                     .background(AnalysisTheme.proTourSurface, in: Circle())
             }
-            .accessibilityLabel("返回项目库")
+            .accessibilityLabel(backAccessibilityLabel)
 
             if isRegularLayout {
                 Button(action: onToggleProjectSidebar) {
@@ -31,11 +32,11 @@ struct WorkspaceHeaderView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("ANALYSIS ROOM")
-                    .font(.system(size: 9, weight: .black, design: .monospaced))
+                    .scaledFont(size: 9, weight: .black, design: .monospaced)
                     .tracking(1.0)
                     .foregroundStyle(AnalysisTheme.proTourSecondaryText)
                 Text(projectName)
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .scaledFont(size: 17, weight: .bold, design: .rounded)
                     .lineLimit(1)
                 if !saveStatus.label.isEmpty {
                     Label(saveStatus.label, systemImage: saveStatus == .failed ? "exclamationmark.circle" : "checkmark")
@@ -49,7 +50,7 @@ struct WorkspaceHeaderView: View {
 
             Button(action: onCorrectPPoints) {
                 Text("修正 P 点")
-                    .font(.system(size: 14, weight: .semibold))
+                    .scaledFont(size: 14, weight: .semibold)
                     .frame(minWidth: 72, minHeight: 44)
             }
             .accessibilityLabel("修正 P 点")
@@ -122,7 +123,7 @@ struct StageTimelineView: View {
                                     .indicator(for: descriptor.resultState)
                                     .rawValue
                             )
-                            .font(.system(size: 8, weight: .bold))
+                            .scaledFont(size: 8, weight: .bold)
                             .foregroundStyle(descriptor.stageStripColor)
                         }
                         .frame(maxWidth: .infinity)
@@ -177,6 +178,8 @@ struct MobileReplayTimelineView: View {
     let onCorrectPPoints: () -> Void
     let onCorrectStage: (SwingStage) -> Void
 
+    @State private var isScrubbing = false
+
     var body: some View {
         VStack(spacing: MobileReplayStageStripPolicy.stackSpacing) {
             Slider(
@@ -187,9 +190,25 @@ struct MobileReplayTimelineView: View {
                         playbackManager.seek(to: time)
                     }
                 ),
-                in: 0...max(playbackManager.duration, 0.001)
+                in: 0...max(playbackManager.duration, 0.001),
+                onEditingChanged: { editing in
+                    withAnimation(.easeInOut(duration: 0.12)) { isScrubbing = editing }
+                }
             )
             .tint(.white)
+            .overlay(alignment: .top) {
+                if isScrubbing {
+                    Text(positionLabel)
+                        .font(.system(size: 15, weight: .bold).monospacedDigit())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.78), in: Capsule())
+                        .offset(y: -40)
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
+                }
+            }
             .accessibilityLabel("视频进度")
             .accessibilityValue("\(progressPercentage)%")
 
@@ -265,6 +284,14 @@ struct MobileReplayTimelineView: View {
             .onTapGesture { }
         }
         .accessibilityElement(children: .contain)
+    }
+
+    private var positionLabel: String {
+        PlaybackPositionLabel.text(
+            time: playbackManager.currentTime,
+            duration: playbackManager.duration,
+            sourceFrameRate: playbackManager.sourceFrameRate
+        )
     }
 
     private var progressPercentage: Int {
@@ -857,6 +884,7 @@ struct DrawingToolRail: View {
 
     @State private var confirmsClear = false
     @State private var showsColorPalette = false
+    @State private var showsMoreOptions = false
 
     var body: some View {
         HStack(spacing: WorkspaceAccessoryPolicy.drawingToolbarItemSpacing) {
@@ -866,26 +894,17 @@ struct DrawingToolRail: View {
                 toolButton(tool)
             }
 
-            Menu {
-                Button {
+            // An inline panel instead of a system Menu: a Menu swallows the
+            // next tap, so "完成" needed two taps while it was open.
+            Button {
+                withAnimation(.easeInOut(duration: 0.16)) {
                     showsColorPalette = false
-                    isKeyframeMode.toggle()
-                } label: {
-                    Label(
-                        isKeyframeMode ? "切换为全视频显示" : "切换为仅当前 P 点显示",
-                        systemImage: isKeyframeMode ? "rectangle.inset.filled" : "pin.fill"
-                    )
-                }
-
-                Button(role: .destructive) {
-                    showsColorPalette = false
-                    confirmsClear = true
-                } label: {
-                    Label("清除所有标注", systemImage: "trash")
+                    showsMoreOptions.toggle()
                 }
             } label: {
-                toolbarItemLabel(systemImage: "ellipsis", isActive: false)
+                toolbarItemLabel(systemImage: "ellipsis", isActive: showsMoreOptions)
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("更多画线选项")
             .accessibilityHint("调整标注显示范围或清除全部标注")
         }
@@ -895,6 +914,14 @@ struct DrawingToolRail: View {
         .background(AnalysisTheme.chrome.opacity(0.96), in: Capsule())
         .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 1))
         .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+        .overlay(alignment: .topTrailing) {
+            if showsMoreOptions {
+                moreOptionsPanel
+                    .fixedSize()
+                    .offset(y: -104)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
         .overlay(alignment: .top) {
             if showsColorPalette {
                 DrawingColorPalette(selectedColor: $selectedColor) {
@@ -918,12 +945,50 @@ struct DrawingToolRail: View {
         }
         .onChange(of: activeTool) { _, _ in
             showsColorPalette = false
+            showsMoreOptions = false
         }
+        .onDisappear {
+            showsMoreOptions = false
+        }
+    }
+
+    private var moreOptionsPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                isKeyframeMode.toggle()
+                withAnimation(.easeInOut(duration: 0.16)) { showsMoreOptions = false }
+            } label: {
+                Label(
+                    isKeyframeMode ? "切换为全视频显示" : "切换为仅当前帧附近显示",
+                    systemImage: isKeyframeMode ? "rectangle.inset.filled" : "pin.fill"
+                )
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            Divider().overlay(.white.opacity(0.12))
+            Button {
+                withAnimation(.easeInOut(duration: 0.16)) { showsMoreOptions = false }
+                confirmsClear = true
+            } label: {
+                Label("清除所有标注", systemImage: "trash")
+                    .foregroundStyle(AnalysisTheme.proTourPaused)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+        }
+        .buttonStyle(.plain)
+        .scaledFont(size: 15, weight: .semibold)
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .frame(width: 240)
+        .background(AnalysisTheme.chrome.opacity(0.98), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 1))
     }
 
     private var colorButton: some View {
         Button {
             withAnimation(.easeInOut(duration: 0.16)) {
+                showsMoreOptions = false
                 showsColorPalette.toggle()
             }
         } label: {
@@ -975,7 +1040,7 @@ struct DrawingToolRail: View {
     ) -> some View {
         ZStack(alignment: .bottom) {
             Image(systemName: systemImage)
-                .font(.system(size: 19, weight: .medium))
+                .scaledFont(size: 19, weight: .medium)
                 .foregroundStyle(isActive ? AnalysisTheme.proTourSignal : .white)
 
             Capsule()
@@ -1115,7 +1180,7 @@ struct AnalysisFailureBanner: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(AnalysisTheme.proTourPaused)
             Text(AnalysisFailurePresentation(failure: failure).message)
-                .font(.system(size: 14, weight: .semibold))
+                .scaledFont(size: 14, weight: .semibold)
                 .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }

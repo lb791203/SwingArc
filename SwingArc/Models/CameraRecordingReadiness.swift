@@ -114,3 +114,53 @@ enum CameraAccessPresentation {
         }
     }
 }
+
+/// Turns system camera errors (often English) into short Chinese guidance.
+/// The raw domain/code is kept in brackets for troubleshooting.
+/// Whether a delayed-start countdown may keep running. It stops when the
+/// app leaves the foreground, the camera loses access or is interrupted, so
+/// no "go" tone plays for a recording that cannot start.
+enum CaptureCountdownPolicy {
+    static func shouldContinue(
+        appIsActive: Bool,
+        canRecord: Bool,
+        cameraIsReady: Bool
+    ) -> Bool {
+        appIsActive && canRecord && cameraIsReady
+    }
+}
+
+enum CameraErrorPresentation {
+    static func message(prefix: String, error: Error?) -> String {
+        guard let error else { return "\(prefix)：未知相机错误，请重试。" }
+        if let startError = error as? CameraRecordingStartError,
+           let description = startError.errorDescription {
+            return description
+        }
+        let nsError = error as NSError
+        let guidance: String
+        if nsError.domain == "AVFoundationErrorDomain" {
+            switch nsError.code {
+            case -11807:  // AVError.diskFull
+                guidance = "手机存储空间不足，请清理后重试"
+            case -11810:  // maximumDurationReached
+                guidance = "已达到最长录制时间"
+            case -11815, -11818:  // deviceInUseByAnotherApplication, sessionWasInterrupted
+                guidance = "相机被其他应用或来电占用，请稍候重试"
+            case -11847:  // operationInterrupted
+                guidance = "相机被系统中断，请稍候重试"
+            case -11808, -11814:  // deviceWasDisconnected, deviceNotConnected
+                guidance = "相机已断开，请关闭录像页后重新打开"
+            case -11819:  // mediaServicesWereReset
+                guidance = "系统媒体服务已重置，请关闭录像页后重新打开"
+            case -11803:  // sessionNotRunning
+                guidance = "相机暂时不可用，请重新打开录像页"
+            default:
+                guidance = "相机出现问题，请重新打开录像页后重试"
+            }
+        } else {
+            guidance = "相机出现问题，请重新打开录像页后重试"
+        }
+        return "\(prefix)：\(guidance)（\(nsError.domain) \(nsError.code)）"
+    }
+}

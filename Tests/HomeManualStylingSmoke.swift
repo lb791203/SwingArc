@@ -18,10 +18,10 @@ struct HomeManualStylingSmoke {
 
         precondition(
             home.contains(
-                ".font(.system(size: 13, weight: .bold, design: .monospaced))"
+                ".scaledFont(size: 13, weight: .bold, design: .monospaced)"
             )
         )
-        precondition(home.contains(".font(.system(size: 14, weight: .bold))"))
+        precondition(home.contains(".scaledFont(size: 14, weight: .bold)"))
         precondition(home.contains(".frame(minWidth: 44, minHeight: 44)"))
         precondition(!home.contains("Capsule()"))
         precondition(home.contains(".frame(width: 38, height: 38)"))

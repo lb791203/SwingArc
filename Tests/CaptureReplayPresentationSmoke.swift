@@ -32,7 +32,7 @@ struct CaptureReplayPresentationSmoke {
         precondition(mobileHeader.contains("Image(systemName: \"chevron.left\")"))
         precondition(!mobileHeader.contains("Image(systemName: \"chevron.down\")"))
         precondition(mobileHeader.contains(".frame(width: 44, height: 44)"))
-        precondition(mobileHeader.contains(".accessibilityLabel(\"返回项目库\")"))
+        precondition(mobileHeader.contains(".accessibilityLabel(backAccessibilityLabel)"))
         precondition(mobileHeader.contains("Button(action: onExport)"))
         precondition(mobileHeader.contains("Image(systemName: \"square.and.arrow.up\")"))
         precondition(mobileHeader.contains(".accessibilityLabel(\"分享视频\")"))

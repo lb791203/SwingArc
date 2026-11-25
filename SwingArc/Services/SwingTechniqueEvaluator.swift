@@ -100,7 +100,8 @@ enum ManualStageDetectionPolicy {
         manualMarkers: [KeyframeMarker],
         sourceFrameRate: Double,
         automatic: [SwingStageDetection],
-        availablePoseSamples: [SwingPoseSample]
+        availablePoseSamples: [SwingPoseSample],
+        sourceFrameTimeline: SourceFrameTimeline? = nil
     ) -> [SwingStageDetection] {
         guard sourceFrameRate.isFinite, sourceFrameRate > 0 else { return automatic }
         var manualByStage: [SwingStage: KeyframeMarker] = [:]
@@ -108,17 +109,30 @@ enum ManualStageDetectionPolicy {
             guard let stage = SwingStage(rawValue: marker.stage) else { continue }
             manualByStage[stage] = marker
         }
-        let availableFrames = Set(availablePoseSamples.compactMap(\.sourceFrameIndex))
+        let sampleTimeByFrame = Dictionary(
+            availablePoseSamples.compactMap { sample in
+                sample.sourceFrameIndex.map { ($0, sample.time) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let halfFrame = 0.5 / sourceFrameRate
         return automatic.map { detection in
             guard let marker = manualByStage[detection.stage] else { return detection }
-            let frame = marker.sourceFrameIndex
-                ?? Int((marker.time * sourceFrameRate).rounded())
+            let resolved = resolvedFrame(
+                for: marker,
+                sampleTimeByFrame: sampleTimeByFrame,
+                sourceFrameRate: sourceFrameRate,
+                halfFrame: halfFrame,
+                sourceFrameTimeline: sourceFrameTimeline
+            )
+            let frame = resolved.frame
+            let hasExactPose = resolved.hasExactPose
             return SwingStageDetection(
                 stage: detection.stage,
                 time: marker.time,
                 sourceFrameIndex: frame,
-                confidence: availableFrames.contains(frame) ? 1 : 0,
-                status: availableFrames.contains(frame) ? .confirmed : .lowConfidence,
+                confidence: hasExactPose ? 1 : 0,
+                status: hasExactPose ? .confirmed : .lowConfidence,
                 hasClubEvidence: detection.hasClubEvidence,
                 hasBallEvidence: detection.hasBallEvidence,
                 hasBallChangeEvidence: detection.hasBallChangeEvidence,
@@ -129,6 +143,56 @@ enum ManualStageDetectionPolicy {
                 )
             )
         }
+    }
+}
+
+extension ManualStageDetectionPolicy {
+    /// The frame a manual marker refers to, checked against the pose
+    /// samples' own times. Older projects can store a frame index that
+    /// disagrees with the marker's decoded-frame time; then the sample at the
+    /// marker's time is used, and a sample at the stale index is never.
+    static func resolvedFrame(
+        for marker: KeyframeMarker,
+        sampleTimeByFrame: [Int: Double],
+        sourceFrameRate: Double,
+        halfFrame: Double,
+        sourceFrameTimeline: SourceFrameTimeline?
+    ) -> (frame: Int, hasExactPose: Bool) {
+        // Use the same frame identity as replay, including frames where
+        // Vision did not find a pose. Sparse samples cannot resolve VFR.
+        if let sourceFrameTimeline,
+           let frame = sourceFrameTimeline.resolvedSourceFrameIndex(
+               storedIndex: marker.sourceFrameIndex,
+               time: marker.time
+           ) {
+            let hasExactPose = sampleTimeByFrame[frame].map {
+                sourceFrameTimeline.nearestSourceFrameIndex(at: $0) == frame
+            } ?? false
+            return (frame, hasExactPose)
+        }
+
+        // The pose sample nearest the marker time. Nearest, not "within half
+        // an average frame": on variable-frame-rate clips the local frame
+        // interval can be much shorter than the average one.
+        let nearest = sampleTimeByFrame.min { first, second in
+            let a = abs(first.value - marker.time)
+            let b = abs(second.value - marker.time)
+            return a != b ? a < b : first.key < second.key
+        }
+        if let nearest, abs(nearest.value - marker.time) <= halfFrame {
+            // The stored frame wins only if it is (one of) the nearest.
+            if let stored = marker.sourceFrameIndex,
+               let storedTime = sampleTimeByFrame[stored],
+               abs(storedTime - marker.time) <= abs(nearest.value - marker.time) + 1e-9 {
+                return (stored, true)
+            }
+            return (nearest.key, true)
+        }
+        if let stored = marker.sourceFrameIndex, sampleTimeByFrame[stored] == nil {
+            // No pose at either; keep the stored frame for review.
+            return (stored, false)
+        }
+        return (Int((marker.time * sourceFrameRate).rounded()), false)
     }
 }
 

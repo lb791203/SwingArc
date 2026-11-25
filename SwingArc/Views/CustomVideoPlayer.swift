@@ -239,8 +239,16 @@ class VideoPlaybackManager: ObservableObject {
 
         Task { [weak self] in
             let session = await sessionTask?.value
+            // A project saved while the timeline was read from compressed
+            // samples can hold a frame index that disagrees with its own
+            // decoded-frame time. The time is what the decoder showed, so
+            // when the two point at different frames, follow the time.
+            let resolvedIndex = await session?.resolvedSourceFrameIndex(
+                storedIndex: sourceFrameIndex,
+                time: marker.time
+            ) ?? sourceFrameIndex
             let exactTime = await session?.presentationTime(
-                at: sourceFrameIndex
+                at: resolvedIndex
             )
             await MainActor.run {
                 guard let self,
@@ -541,7 +549,8 @@ class VideoPlaybackManager: ObservableObject {
             manualMarkers: manualMarkers,
             sourceFrameRate: output.sourceFrameRate,
             automatic: output.result.detections,
-            availablePoseSamples: output.poseSamples
+            availablePoseSamples: output.poseSamples,
+            sourceFrameTimeline: output.sourceFrameTimeline
         )
         return .select(from: SwingTechniqueEvaluator.evaluate(
             samples: output.poseSamples,
@@ -559,7 +568,8 @@ class VideoPlaybackManager: ObservableObject {
             manualMarkers: manualMarkers,
             sourceFrameRate: output.sourceFrameRate,
             automatic: output.result.detections,
-            availablePoseSamples: output.poseSamples
+            availablePoseSamples: output.poseSamples,
+            sourceFrameTimeline: output.sourceFrameTimeline
         )
     }
 
@@ -605,7 +615,8 @@ class VideoPlaybackManager: ObservableObject {
                     sourceFrameRate: output.sourceFrameRate,
                     elapsedSeconds: output.elapsedSeconds,
                     trackingDiagnostics: output.trackingDiagnostics,
-                    observationFrames: refined.frames
+                    observationFrames: refined.frames,
+                    sourceFrameTimeline: output.sourceFrameTimeline
                 )
             }
         }
@@ -631,7 +642,10 @@ class VideoPlaybackManager: ObservableObject {
             }
             let exactBodyFrames = exactMarkers.compactMap {
                 marker -> SwingFrameObservation? in
-                guard let sourceFrameIndex = marker.sourceFrameIndex,
+                guard let sourceFrameIndex = provider.timeline.resolvedSourceFrameIndex(
+                          storedIndex: marker.sourceFrameIndex,
+                          time: marker.time
+                      ),
                       let frame = try? provider.frame(
                           at: sourceFrameIndex
                       ),
@@ -672,7 +686,8 @@ class VideoPlaybackManager: ObservableObject {
                     sourceFrameRate: output.sourceFrameRate,
                     elapsedSeconds: output.elapsedSeconds,
                     trackingDiagnostics: output.trackingDiagnostics,
-                    observationFrames: frames
+                    observationFrames: frames,
+                    sourceFrameTimeline: output.sourceFrameTimeline
                 )
             }
         }

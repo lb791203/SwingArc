@@ -144,7 +144,7 @@ struct PracticeSessionView: View {
         HStack {
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 17, weight: .bold))
+                    .scaledFont(size: 17, weight: .bold)
                     .frame(width: 48, height: 48)
                     .background(AnalysisTheme.proTourSurface.opacity(0.88), in: Circle())
                     .overlay(Circle().stroke(AnalysisTheme.proTourRaisedSurface, lineWidth: 1))
@@ -159,7 +159,7 @@ struct PracticeSessionView: View {
                     .fill(AnalysisTheme.proTourGreen)
                     .frame(width: 8, height: 8)
                 Text(view == .downTheLine ? "DTL" : "FACE-ON")
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .scaledFont(size: 13, weight: .bold, design: .monospaced)
                     .tracking(1.1)
             }
             .foregroundStyle(AnalysisTheme.proTourPrimaryText)
@@ -187,10 +187,10 @@ struct PracticeSessionView: View {
 
                 VStack(spacing: 8) {
                     Text("FRAME CHECK")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .scaledFont(size: 11, weight: .bold, design: .monospaced)
                         .tracking(1.2)
                     Text("全身与球位进入框内")
-                        .font(.system(size: 16, weight: .bold))
+                        .scaledFont(size: 16, weight: .bold)
                 }
                 .foregroundStyle(AnalysisTheme.proTourPrimaryText)
                 .padding(.horizontal, 18)
@@ -211,13 +211,13 @@ struct PracticeSessionView: View {
                     .fill(statusTint)
                     .frame(width: 10, height: 10)
                 Text(stateLabel)
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .scaledFont(size: 12, weight: .bold, design: .monospaced)
                     .tracking(1.4)
                     .foregroundStyle(statusTint)
             }
 
             Text(PracticePresentationPolicy.remoteStatus(for: sessionEngine.state))
-                .font(.system(size: 31, weight: .heavy, design: .monospaced))
+                .scaledFont(size: 31, weight: .heavy, design: .monospaced)
                 .tracking(-0.7)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(AnalysisTheme.proTourPrimaryText)
@@ -225,14 +225,14 @@ struct PracticeSessionView: View {
 
             if let detail = PracticePresentationPolicy.remoteDetail(for: sessionEngine.state) {
                 Text(detail)
-                    .font(.system(size: 16, weight: .semibold))
+                    .scaledFont(size: 16, weight: .semibold)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(AnalysisTheme.proTourSecondaryText)
             }
 
             if let frameRate = sessionEngine.captureFrameRate {
                 Text("CAPTURE · \(Int(frameRate.rounded())) FPS")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .scaledFont(size: 11, weight: .bold, design: .monospaced)
                     .tracking(0.8)
                     .foregroundStyle(AnalysisTheme.proTourSecondaryText)
             }
@@ -261,15 +261,15 @@ struct PracticeSessionView: View {
     private func feedbackRibbon(_ feedback: PriorityFeedback) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: feedbackIcon(for: feedback))
-                .font(.system(size: 18, weight: .bold))
+                .scaledFont(size: 18, weight: .bold)
                 .foregroundStyle(feedbackTint(for: feedback))
                 .frame(width: 26)
             VStack(alignment: .leading, spacing: 4) {
                 Text(PracticePresentationPolicy.feedbackTitle(feedback))
-                    .font(.system(size: 16, weight: .bold))
+                    .scaledFont(size: 16, weight: .bold)
                 if let drill = PracticePresentationPolicy.drill(for: feedback) {
                     Text("DRILL · \(drill.title)")
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .scaledFont(size: 12, weight: .bold, design: .monospaced)
                         .tracking(0.5)
                         .foregroundStyle(AnalysisTheme.proTourSecondaryText)
                 }
@@ -391,7 +391,7 @@ private struct PracticePrimaryControlButton: View {
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .font(.system(size: 20, weight: .black, design: .rounded))
+                .scaledFont(size: 20, weight: .black, design: .rounded)
                 .frame(maxWidth: .infinity, minHeight: 78)
         }
         .buttonStyle(ProTourPracticeButtonStyle(tint: tint))

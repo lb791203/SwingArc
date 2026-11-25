@@ -43,7 +43,11 @@ struct CoreAnalysisSurfaceSmoke {
 
         precondition(drawingToolbar.contains("HStack(spacing: WorkspaceAccessoryPolicy.drawingToolbarItemSpacing)"))
         precondition(drawingToolbar.contains("ForEach(DrawingTool.allCases)"))
-        precondition(drawingToolbar.contains("Menu {"))
+        precondition(
+            !drawingToolbar.contains("Menu {"),
+            "A system Menu swallows the next tap; use the inline options panel"
+        )
+        precondition(drawingToolbar.contains("moreOptionsPanel"))
         precondition(drawingToolbar.contains("toolbarItemLabel"))
         precondition(drawingToolbar.contains("AnalysisTheme.proTourSignal"))
         precondition(drawingToolbar.contains("colorButton"))

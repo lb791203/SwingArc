@@ -13,7 +13,7 @@ struct SwingFeedbackPipelineSmoke {
         )
 
         let manualTop = KeyframeMarker(
-            time: 4.0 / 60.0,
+            time: 6.0 / 60.0,
             stage: .top,
             source: .manual,
             sourceFrameIndex: 6
@@ -77,7 +77,8 @@ struct SwingFeedbackPipelineSmoke {
             adaptiveWindow: SwingWindow(startTime: 0, endTime: 1),
             sourceFrameRate: 60,
             elapsedSeconds: 0.1,
-            observationFrames: frames
+            observationFrames: frames,
+            sourceFrameTimeline: SourceFrameTimeline(duration: 1, constantFrameRate: 60)
         )
     }
 

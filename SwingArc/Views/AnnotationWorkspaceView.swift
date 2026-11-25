@@ -63,6 +63,10 @@ final class AnnotationFrameController: ObservableObject {
     func nearestSourceFrameIndex(at time: Double) async -> Int? {
         await session.nearestSourceFrameIndex(at: time)
     }
+
+    func resolvedSourceFrameIndex(storedIndex: Int?, time: Double) async -> Int? {
+        await session.resolvedSourceFrameIndex(storedIndex: storedIndex, time: time)
+    }
 }
 
 struct AnnotationWorkspaceView: View {

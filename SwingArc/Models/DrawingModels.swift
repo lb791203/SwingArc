@@ -314,6 +314,18 @@ struct DrawingElement: Identifiable, Equatable, Codable {
     }
 }
 
+/// Defaults for new drawings: a thick neon-yellow line reads against white
+/// clothing and a bright sky, and new projects show each line only around the
+/// frame it was drawn on so a shaft line from P1 is gone by the finish.
+enum DrawingDefaults {
+    static let color: Color = .yellow
+    static let lineWidth: CGFloat = 4.5
+    static let showsOnlyNearDrawnFrame = true
+    /// Dark halo drawn under every line so it stays visible on any background.
+    static let outlineColor: Color = .black.opacity(0.85)
+    static let outlineRadius: CGFloat = 1.6
+}
+
 /// The workspace display mode is authoritative for every saved line.  This
 /// lets an existing project switch from frame-only annotations to persistent
 /// annotations without requiring the user to redraw every element.

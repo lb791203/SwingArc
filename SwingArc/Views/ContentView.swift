@@ -85,7 +85,15 @@ struct ContentView: View {
                         playbackManager.pause()
                         pPointCorrectionStage = stage
                         showPPointCorrection = true
-                    }
+                    },
+                    trimRange: SwingTrimPolicy.range(
+                        keyframes: keyframes,
+                        duration: playbackManager.duration
+                    ),
+                    onTrimToSwing: trimToSwing,
+                    // closeWorkspace returns to the library when the project
+                    // was opened from it, otherwise to the home screen.
+                    backAccessibilityLabel: showProjectLibrary ? "返回项目库" : "返回首页"
                 )
             } else if showProjectLibrary {
                 ProjectLibraryView(
@@ -100,7 +108,9 @@ struct ContentView: View {
                     onManualCapture: { showManualCapture = true },
                     onImport: { showVideoPicker = true },
                     onOpenLibrary: { showProjectLibrary = true },
-                    onOpenAbout: { showAboutPrivacy = true }
+                    onOpenAbout: { showAboutPrivacy = true },
+                    recentProject: projects.first,
+                    onOpenRecent: openProject
                 )
             }
         }
@@ -151,7 +161,13 @@ struct ContentView: View {
                     markers: keyframes,
                     initialTime: playbackManager.currentTime,
                     initialStage: pPointCorrectionStage,
-                    onClose: { showPPointCorrection = false },
+                    onClose: {
+                        // Without animation, so a tap right after 关闭 is
+                        // not swallowed by the dismiss transition.
+                        var transaction = Transaction(animation: nil)
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) { showPPointCorrection = false }
+                    },
                     onSave: savePPointCorrection
                 )
             }
@@ -167,6 +183,9 @@ struct ContentView: View {
             Button("保存标注视频") { performMediaAction(.save, kind: .annotatedVideo) }
             Button("分享当前标注帧") { performMediaAction(.share, kind: .frame) }
             Button("分享标注视频") { performMediaAction(.share, kind: .annotatedVideo) }
+            if SwingTrimPolicy.range(keyframes: keyframes, duration: playbackManager.duration) != nil {
+                Button("裁剪到挥杆片段（另存新项目）") { trimToSwing() }
+            }
             Button("取消", role: .cancel) {}
         }
         .alert("SwingArc", isPresented: Binding(
@@ -286,7 +305,7 @@ struct ContentView: View {
         keyframes = []
         stageCorrections = []
         legacyFeedbackConfiguration = nil
-        isKeyframeMode = false
+        isKeyframeMode = DrawingDefaults.showsOnlyNearDrawnFrame
         showPoseSkeleton = false
         showHeadStability = false
         showSpineAngle = false
@@ -577,6 +596,40 @@ struct ContentView: View {
                     showsSettingsAction = false
                 }
                 statusMessage = error.localizedDescription
+            }
+            isExporting = false
+        }
+    }
+
+    /// Saves the swing part of the current clip as a new project (the
+    /// original stays in the library) and analyses it again.
+    private func trimToSwing() {
+        guard let sourceURL = currentProjectURL,
+              let range = SwingTrimPolicy.range(
+                  keyframes: keyframes,
+                  duration: playbackManager.duration
+              ) else { return }
+        let sourceName = activeProject?.name ?? defaultProjectName()
+        playbackManager.pause()
+        isExporting = true
+        Task {
+            do {
+                let trimmedURL = try await SwingClipTrimmer.trim(
+                    sourceURL: sourceURL,
+                    range: range,
+                    destinationDirectory: LocalProjectStore.videoDirectory()
+                )
+                persistCurrentProject()
+                let summary = LocalProjectSummary(
+                    videoURL: trimmedURL,
+                    name: "\(sourceName)（挥杆片段）",
+                    duration: range.upperBound - range.lowerBound,
+                    sourceFrameRate: playbackManager.sourceFrameRate
+                )
+                loadVideoFromURL(trimmedURL, existingSummary: summary, origin: .importCompleted)
+            } catch {
+                showsSettingsAction = false
+                statusMessage = "裁剪失败，原视频保持不变。请稍后再试。"
             }
             isExporting = false
         }

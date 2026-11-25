@@ -162,10 +162,12 @@ struct FrameExtractionTolerancePolicySmoke {
                 "Both generator tolerance directions must use the half-frame bound"
             )
             precondition(
-                analyzer.contains(
-                    "ExactVideoFrameProvider.load(url: url).timeline"
-                ),
-                "VFR analysis must reuse the exact annotation source timeline"
+                analyzer.contains("let sourceFrameTimeline = try? ExactVideoFrameProvider.load(\n            url: url,"),
+                "Analysis must always reuse the exact annotation source timeline"
+            )
+            precondition(
+                !analyzer.contains("SourceFrameTimelineLoadingPolicy.canUseConstantTimeline"),
+                "An integer nominal rate must not switch analysis to a constant-rate grid"
             )
             precondition(
                 !analyzer.contains(

@@ -66,9 +66,15 @@ class VisionPoseDetector {
     /// body-pose request cannot be set up) the video is not the problem.
     private(set) var poseRequestCount = 0
     private(set) var failedPoseRequestCount = 0
+    /// Requests that ran and returned at least one person.
+    private(set) var personPoseRequestCount = 0
 
     var isPoseDetectionUnavailable: Bool {
-        poseRequestCount > 0 && failedPoseRequestCount == poseRequestCount
+        PoseDetectionAvailabilityPolicy.isUnavailable(
+            requests: poseRequestCount,
+            failed: failedPoseRequestCount,
+            withPerson: personPoseRequestCount
+        )
     }
     
     init() {}
@@ -214,7 +220,9 @@ class VisionPoseDetector {
         do {
             try requestHandler.perform([poseRequest])
             guard let observations = poseRequest.results else { return [] }
-            return observations.compactMap { try? poseResult(from: $0) }
+            let poses = observations.compactMap { try? poseResult(from: $0) }
+            if !poses.isEmpty { personPoseRequestCount += 1 }
+            return poses
         } catch {
             failedPoseRequestCount += 1
             print("Vision pose detection error on CGImage: \(error)")
@@ -262,6 +270,45 @@ class VisionPoseDetector {
             calculateSpineMetrics(in: &result)
             calculateHeadMetrics(in: &result)
             return result
+    }
+}
+
+/// Time-sorted body centres of accepted poses. Appends in time order are
+/// O(1); out-of-order inserts and lookups use binary search.
+struct ContinuityHistory {
+    static let maximumGap: Double = 0.25
+    private(set) var times: [Double] = []
+    /// nil marks a point where the tracker had cleared continuity after
+    /// consecutive misses; lookups after it return nil instead of reviving
+    /// an older centre.
+    private(set) var centers: [CGPoint?] = []
+
+    mutating func insert(time: Double, center: CGPoint?) {
+        if let last = times.last, time < last {
+            let index = firstIndex(after: time)
+            times.insert(time, at: index)
+            centers.insert(center, at: index)
+        } else {
+            times.append(time)
+            centers.append(center)
+        }
+    }
+
+    func center(before time: Double) -> CGPoint? {
+        let index = firstIndex(after: time) - 1
+        guard index >= 0, time - times[index] <= Self.maximumGap else { return nil }
+        return centers[index] ?? nil
+    }
+
+    /// First index whose time is greater than `time`.
+    private func firstIndex(after time: Double) -> Int {
+        var lower = 0
+        var upper = times.count
+        while lower < upper {
+            let middle = (lower + upper) / 2
+            if times[middle] <= time { lower = middle + 1 } else { upper = middle }
+        }
+        return lower
     }
 }
 
@@ -317,6 +364,22 @@ final class PrimaryGolferTracker {
         previousCenter = center
         consecutiveMisses = 0
         return true
+    }
+
+    /// Sets the continuity reference to `pose` (or clears it). Out-of-order
+    /// decodes, such as the local refinement pass jumping back to an earlier
+    /// stage, must not score candidates against a later frame's position.
+    func seedContinuity(center: CGPoint?) {
+        previousCenter = center
+    }
+
+    /// False once consecutive misses have cleared the continuity reference.
+    var hasContinuity: Bool { previousCenter != nil }
+
+    /// The body centre used for continuity, exposed so callers can keep a
+    /// compact history instead of whole poses.
+    func continuityCenter(of pose: PoseEstimationResult) -> CGPoint? {
+        bodyCenter(pose)
     }
 
     func select(from candidates: [PoseEstimationResult], stableBall: CGPoint?) -> PoseEstimationResult? {
@@ -599,6 +662,7 @@ struct SwingVideoAnalysisOutput: Equatable {
     let leadArm: LeadArmSide
     let adaptiveWindow: SwingWindow
     let sourceFrameRate: Double
+    let sourceFrameTimeline: SourceFrameTimeline?
     let elapsedSeconds: Double
     let trackingDiagnostics: PrimaryGolferTrackingDiagnostics
     /// Fine-frame observations after body and available golf-object points
@@ -613,13 +677,15 @@ struct SwingVideoAnalysisOutput: Equatable {
         sourceFrameRate: Double,
         elapsedSeconds: Double,
         trackingDiagnostics: PrimaryGolferTrackingDiagnostics = .init(),
-        observationFrames: [SwingFrameObservation] = []
+        observationFrames: [SwingFrameObservation] = [],
+        sourceFrameTimeline: SourceFrameTimeline? = nil
     ) {
         self.result = result
         self.poseSamples = poseSamples
         self.leadArm = leadArm
         self.adaptiveWindow = adaptiveWindow
         self.sourceFrameRate = sourceFrameRate
+        self.sourceFrameTimeline = sourceFrameTimeline
         self.elapsedSeconds = elapsedSeconds
         self.trackingDiagnostics = trackingDiagnostics
         self.observationFrames = observationFrames
@@ -806,13 +872,49 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         let vision = VisionPoseDetector()
         let golferTracker = PrimaryGolferTracker()
         private var selectedCoarsePoses: [TimedPose] = []
+        /// Body centres of accepted poses, sorted by time, for seeding.
+        private var acceptedCenters = ContinuityHistory()
 
         var diagnostics: PrimaryGolferTrackingDiagnostics {
             golferTracker.diagnostics
         }
 
+        /// Frames on which the tracker accepted a golfer. A bystander or an
+        /// empty keypoint result that the tracker rejected does not count as
+        /// Vision working.
+        private var acceptedGolferCount = 0
+
+        /// Outcomes of the most recent requests, so Vision breaking down
+        /// later in a run is not hidden by golfers accepted early on.
+        private var recentOutcomes: [(failed: Bool, accepted: Bool)] = []
+        static let recentWindow = 24
+        static let trailingFailureLimit = 12
+
+        /// Vision failed across the whole run so far: nothing usable came
+        /// out of it. Checked before segmentation.
+        var hasNoUsableVisionResults: Bool {
+            PoseDetectionAvailabilityPolicy.isUnavailable(
+                requests: vision.poseRequestCount,
+                failed: vision.failedPoseRequestCount,
+                withPerson: acceptedGolferCount
+            )
+        }
+
+        /// Also true when Vision broke down later in the run. Used only to
+        /// name the failure once analysis has failed anyway, so a late
+        /// breakdown never discards a swing already found in earlier frames.
         var isPoseDetectionUnavailable: Bool {
-            vision.isPoseDetectionUnavailable
+            if hasNoUsableVisionResults { return true }
+            // Vision still throwing on the latest requests in a row means it
+            // broke down, even if it worked earlier in a short run.
+            let trailingFailures = recentOutcomes.reversed().prefix(while: \.failed).count
+            if trailingFailures >= Self.trailingFailureLimit { return true }
+            guard recentOutcomes.count >= Self.recentWindow else { return false }
+            return PoseDetectionAvailabilityPolicy.isUnavailable(
+                requests: recentOutcomes.count,
+                failed: recentOutcomes.filter(\.failed).count,
+                withPerson: recentOutcomes.filter(\.accepted).count
+            )
         }
 
         func selectPose(
@@ -820,11 +922,19 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             time: Double,
             recordsCoreAnchorCandidate: Bool
         ) -> PoseEstimationResult? {
-            selectPose(
-                from: vision.detectPoses(in: image, orientation: .up),
+            let failuresBefore = vision.failedPoseRequestCount
+            let candidates = vision.detectPoses(in: image, orientation: .up)
+            let failed = vision.failedPoseRequestCount > failuresBefore
+            let selected = selectPose(
+                from: candidates,
                 time: time,
                 recordsCoreAnchorCandidate: recordsCoreAnchorCandidate
             )
+            recentOutcomes.append((failed: failed, accepted: selected != nil))
+            if recentOutcomes.count > Self.recentWindow {
+                recentOutcomes.removeFirst(recentOutcomes.count - Self.recentWindow)
+            }
+            return selected
         }
 
         private func selectPose(
@@ -833,10 +943,27 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             recordsCoreAnchorCandidate: Bool
         ) -> PoseEstimationResult? {
             let selected = golferTracker.select(from: candidates, stableBall: nil)
-            if recordsCoreAnchorCandidate, let selected {
-                selectedCoarsePoses.append(TimedPose(time: time, pose: selected))
+            if selected == nil, !golferTracker.hasContinuity {
+                acceptedCenters.insert(time: time, center: nil)
+            }
+            if let selected {
+                acceptedGolferCount += 1
+                if recordsCoreAnchorCandidate {
+                    selectedCoarsePoses.append(TimedPose(time: time, pose: selected))
+                }
+                if let center = golferTracker.continuityCenter(of: selected) {
+                    acceptedCenters.insert(time: time, center: center)
+                }
             }
             return selected
+        }
+
+        /// Seeds tracker continuity from the closest accepted pose at or
+        /// before `time`, at most `ContinuityHistory.maximumGap` earlier.
+        /// With none, continuity is cleared rather than borrowed from a later
+        /// frame or a pose from long before.
+        func seedContinuity(before time: Double) {
+            golferTracker.seedContinuity(center: acceptedCenters.center(before: time))
         }
 
         func lockIdentityAnchor(near time: Double) -> Bool {
@@ -850,8 +977,11 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
     private typealias LocalPoseSampler = ([Int]) -> [SwingPoseSample]
 
     private struct LocalRefinementBounds {
-        let maximumSourceFrameIndex: Int
+        let sourceFrameTimeline: SourceFrameTimeline
         let maximumHalfSpan: Int
+        /// Oriented frame width / height, for angle geometry on normalised
+        /// Vision coordinates.
+        let frameAspectRatio: CGFloat
     }
 
     private struct PoseFrameExtraction {
@@ -889,17 +1019,15 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         guard metadataFrameRate.isFinite, metadataFrameRate > 0 else {
             return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)
         }
-        let sourceFrameTimeline: SourceFrameTimeline?
-        if SourceFrameTimelineLoadingPolicy.canUseConstantTimeline(
-            metadataFrameRate: metadataFrameRate
-        ) {
-            sourceFrameTimeline = SourceFrameTimeline(
-                duration: duration,
-                constantFrameRate: metadataFrameRate
-            )
-        } else {
-            sourceFrameTimeline = try? ExactVideoFrameProvider.load(url: url).timeline
-        }
+        // Always the decoded timeline, even at an integer nominal rate: a
+        // constant-rate grid can be a frame short (115 vs 116 on a trimmed
+        // 30 fps clip) and then disagrees with the correction page. The
+        // timeline is cached per file, so the player and correction page
+        // share this decode.
+        let sourceFrameTimeline = try? ExactVideoFrameProvider.load(
+            url: url,
+            isCancelled: { !gate.isActive(runID) }
+        ).timeline
         guard let sourceFrameTimeline else {
             return activeFailure(.frameExtractionFailed, runID: runID, gate: gate)
         }
@@ -940,6 +1068,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                         actualTime: actualTime
                     ) else { return nil }
                     let actualSeconds = actualTime.seconds
+                    trackedPoseDetector.seedContinuity(before: actualSeconds)
                     return trackedPoseDetector.selectPose(
                         in: image,
                         time: actualSeconds,
@@ -958,9 +1087,14 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             }
             return samples
         }
+        let orientedTrackSize = videoTrack.naturalSize.applying(videoTrack.preferredTransform)
+        let orientedAspect = abs(orientedTrackSize.height) > 0
+            ? abs(orientedTrackSize.width) / abs(orientedTrackSize.height)
+            : 1
         let refinementBounds = LocalRefinementBounds(
-            maximumSourceFrameIndex: sourceFrameTimeline.maximumSourceFrameIndex,
-            maximumHalfSpan: max(1, Int(ceil(sourceFrameRate / 4)))
+            sourceFrameTimeline: sourceFrameTimeline,
+            maximumHalfSpan: max(1, Int(ceil(sourceFrameRate / 4))),
+            frameAspectRatio: orientedAspect.isFinite && orientedAspect > 0 ? orientedAspect : 1
         )
 
         // One tracker is intentionally reused for the complete coarse pass and
@@ -1071,7 +1205,9 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         }
         // Vision failing on every frame is a device/runtime problem, not a
         // person-stability problem; do not report it as 人物检测不稳定.
-        guard !trackedPoseDetector.isPoseDetectionUnavailable else {
+        // A breakdown only at the end of the clip does not stop here: the
+        // earlier frames may still hold a complete swing.
+        guard !trackedPoseDetector.hasNoUsableVisionResults else {
             return activeFailure(.poseDetectionUnavailable, runID: runID, gate: gate)
         }
 
@@ -1170,10 +1306,18 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         case let .located(locatedCore):
             core = locatedCore
         case let .failed(reason):
-            return activeFailure(failure(reason), runID: runID, gate: gate)
+            return activeFailure(
+                personFailure(failure(reason), detector: trackedPoseDetector),
+                runID: runID,
+                gate: gate
+            )
         }
         guard trackedPoseDetector.lockIdentityAnchor(near: core.peakTime) else {
-            return activeFailure(.noStableGolfer, runID: runID, gate: gate)
+            return activeFailure(
+                    personFailure(.noStableGolfer, detector: trackedPoseDetector),
+                    runID: runID,
+                    gate: gate
+                )
         }
         var window = AdaptiveSwingWindowPlanner.initialWindow(core: core, duration: duration)
         var samplesByFrame: [Int: SwingFrameSample] = [:]
@@ -1373,7 +1517,11 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         }
         guard fineFrames.filter({ $0.pose != nil }).count >= SwingStage.allCases.count else {
             guard coarseFallbackPoseSamples.count >= SwingStage.pStages.count else {
-                return activeFailure(.noStableGolfer, runID: runID, gate: gate)
+                return activeFailure(
+                    personFailure(.noStableGolfer, detector: trackedPoseDetector),
+                    runID: runID,
+                    gate: gate
+                )
             }
             return bodyOnlyCompletion(
                 frames: fineFrames,
@@ -1705,6 +1853,17 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         }
     }
 
+    /// Reports Vision being unavailable instead of an unstable person when
+    /// the requests mostly failed.
+    private func personFailure(
+        _ failure: AnalysisFailure,
+        detector: TrackedPoseDetector
+    ) -> AnalysisFailure {
+        guard failure == .noStableGolfer || failure == .insufficientPoseEvidence,
+              detector.isPoseDetectionUnavailable else { return failure }
+        return .poseDetectionUnavailable
+    }
+
     private func activeFailure(
         _ failure: AnalysisFailure,
         runID: UUID,
@@ -1750,8 +1909,9 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         let refinement = LocalStageRefinement.refine(
             strictResult: strictResult,
             poseSamples: observedPoseSamples,
-            maximumSourceFrameIndex: refinementBounds.maximumSourceFrameIndex,
+            maximumSourceFrameIndex: refinementBounds.sourceFrameTimeline.maximumSourceFrameIndex,
             maximumHalfSpan: refinementBounds.maximumHalfSpan,
+            frameAspectRatio: refinementBounds.frameAspectRatio,
             sampler: localPoseSampler
         )
         guard gate.isActive(runID) else { return .cancelled }
@@ -1767,7 +1927,8 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             sourceFrameRate: sourceFrameRate,
             elapsedSeconds: ProcessInfo.processInfo.systemUptime - startedAt,
             trackingDiagnostics: trackedPoseDetector.diagnostics,
-            observationFrames: observationFrames
+            observationFrames: observationFrames,
+            sourceFrameTimeline: refinementBounds.sourceFrameTimeline
         ))
     }
 

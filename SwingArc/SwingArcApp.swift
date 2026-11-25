@@ -15,6 +15,8 @@ struct SwingArcApp: App {
                     BrandLaunchView()
                 }
             }
+            .dynamicTypeSize(...DynamicTypeLimit.maximum)
+            .tint(AnalysisTheme.proTourSignal)
             .task {
                 guard showsBrandLaunch else { return }
                 try? await Task.sleep(nanoseconds: 450_000_000)

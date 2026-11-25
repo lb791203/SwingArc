@@ -48,6 +48,10 @@ struct AnalysisFailureSourceContractSmoke {
             "Vision failing on every frame must not be reported as an unstable person"
         )
         precondition(
+            analyzer.contains("guard !trackedPoseDetector.hasNoUsableVisionResults else {"),
+            "A late Vision breakdown must not stop analysis before segmentation"
+        )
+        precondition(
             workspace.contains("Label(\"手动标 P 点\", systemImage: \"hand.tap\")"),
             "The failure banner must offer manual P-point marking"
         )
