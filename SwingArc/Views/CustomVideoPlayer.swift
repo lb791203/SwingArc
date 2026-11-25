@@ -549,7 +549,8 @@ class VideoPlaybackManager: ObservableObject {
             manualMarkers: manualMarkers,
             sourceFrameRate: output.sourceFrameRate,
             automatic: output.result.detections,
-            availablePoseSamples: output.poseSamples
+            availablePoseSamples: output.poseSamples,
+            sourceFrameTimeline: output.sourceFrameTimeline
         )
         return .select(from: SwingTechniqueEvaluator.evaluate(
             samples: output.poseSamples,
@@ -567,7 +568,8 @@ class VideoPlaybackManager: ObservableObject {
             manualMarkers: manualMarkers,
             sourceFrameRate: output.sourceFrameRate,
             automatic: output.result.detections,
-            availablePoseSamples: output.poseSamples
+            availablePoseSamples: output.poseSamples,
+            sourceFrameTimeline: output.sourceFrameTimeline
         )
     }
 
@@ -613,7 +615,8 @@ class VideoPlaybackManager: ObservableObject {
                     sourceFrameRate: output.sourceFrameRate,
                     elapsedSeconds: output.elapsedSeconds,
                     trackingDiagnostics: output.trackingDiagnostics,
-                    observationFrames: refined.frames
+                    observationFrames: refined.frames,
+                    sourceFrameTimeline: output.sourceFrameTimeline
                 )
             }
         }
@@ -683,7 +686,8 @@ class VideoPlaybackManager: ObservableObject {
                     sourceFrameRate: output.sourceFrameRate,
                     elapsedSeconds: output.elapsedSeconds,
                     trackingDiagnostics: output.trackingDiagnostics,
-                    observationFrames: frames
+                    observationFrames: frames,
+                    sourceFrameTimeline: output.sourceFrameTimeline
                 )
             }
         }

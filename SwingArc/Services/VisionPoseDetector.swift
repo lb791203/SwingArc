@@ -662,6 +662,7 @@ struct SwingVideoAnalysisOutput: Equatable {
     let leadArm: LeadArmSide
     let adaptiveWindow: SwingWindow
     let sourceFrameRate: Double
+    let sourceFrameTimeline: SourceFrameTimeline?
     let elapsedSeconds: Double
     let trackingDiagnostics: PrimaryGolferTrackingDiagnostics
     /// Fine-frame observations after body and available golf-object points
@@ -676,13 +677,15 @@ struct SwingVideoAnalysisOutput: Equatable {
         sourceFrameRate: Double,
         elapsedSeconds: Double,
         trackingDiagnostics: PrimaryGolferTrackingDiagnostics = .init(),
-        observationFrames: [SwingFrameObservation] = []
+        observationFrames: [SwingFrameObservation] = [],
+        sourceFrameTimeline: SourceFrameTimeline? = nil
     ) {
         self.result = result
         self.poseSamples = poseSamples
         self.leadArm = leadArm
         self.adaptiveWindow = adaptiveWindow
         self.sourceFrameRate = sourceFrameRate
+        self.sourceFrameTimeline = sourceFrameTimeline
         self.elapsedSeconds = elapsedSeconds
         self.trackingDiagnostics = trackingDiagnostics
         self.observationFrames = observationFrames
@@ -974,7 +977,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
     private typealias LocalPoseSampler = ([Int]) -> [SwingPoseSample]
 
     private struct LocalRefinementBounds {
-        let maximumSourceFrameIndex: Int
+        let sourceFrameTimeline: SourceFrameTimeline
         let maximumHalfSpan: Int
         /// Oriented frame width / height, for angle geometry on normalised
         /// Vision coordinates.
@@ -1089,7 +1092,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             ? abs(orientedTrackSize.width) / abs(orientedTrackSize.height)
             : 1
         let refinementBounds = LocalRefinementBounds(
-            maximumSourceFrameIndex: sourceFrameTimeline.maximumSourceFrameIndex,
+            sourceFrameTimeline: sourceFrameTimeline,
             maximumHalfSpan: max(1, Int(ceil(sourceFrameRate / 4))),
             frameAspectRatio: orientedAspect.isFinite && orientedAspect > 0 ? orientedAspect : 1
         )
@@ -1906,7 +1909,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         let refinement = LocalStageRefinement.refine(
             strictResult: strictResult,
             poseSamples: observedPoseSamples,
-            maximumSourceFrameIndex: refinementBounds.maximumSourceFrameIndex,
+            maximumSourceFrameIndex: refinementBounds.sourceFrameTimeline.maximumSourceFrameIndex,
             maximumHalfSpan: refinementBounds.maximumHalfSpan,
             frameAspectRatio: refinementBounds.frameAspectRatio,
             sampler: localPoseSampler
@@ -1924,7 +1927,8 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
             sourceFrameRate: sourceFrameRate,
             elapsedSeconds: ProcessInfo.processInfo.systemUptime - startedAt,
             trackingDiagnostics: trackedPoseDetector.diagnostics,
-            observationFrames: observationFrames
+            observationFrames: observationFrames,
+            sourceFrameTimeline: refinementBounds.sourceFrameTimeline
         ))
     }
 

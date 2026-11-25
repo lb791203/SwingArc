@@ -100,7 +100,8 @@ enum ManualStageDetectionPolicy {
         manualMarkers: [KeyframeMarker],
         sourceFrameRate: Double,
         automatic: [SwingStageDetection],
-        availablePoseSamples: [SwingPoseSample]
+        availablePoseSamples: [SwingPoseSample],
+        sourceFrameTimeline: SourceFrameTimeline? = nil
     ) -> [SwingStageDetection] {
         guard sourceFrameRate.isFinite, sourceFrameRate > 0 else { return automatic }
         var manualByStage: [SwingStage: KeyframeMarker] = [:]
@@ -121,7 +122,8 @@ enum ManualStageDetectionPolicy {
                 for: marker,
                 sampleTimeByFrame: sampleTimeByFrame,
                 sourceFrameRate: sourceFrameRate,
-                halfFrame: halfFrame
+                halfFrame: halfFrame,
+                sourceFrameTimeline: sourceFrameTimeline
             )
             let frame = resolved.frame
             let hasExactPose = resolved.hasExactPose
@@ -153,8 +155,22 @@ extension ManualStageDetectionPolicy {
         for marker: KeyframeMarker,
         sampleTimeByFrame: [Int: Double],
         sourceFrameRate: Double,
-        halfFrame: Double
+        halfFrame: Double,
+        sourceFrameTimeline: SourceFrameTimeline?
     ) -> (frame: Int, hasExactPose: Bool) {
+        // Use the same frame identity as replay, including frames where
+        // Vision did not find a pose. Sparse samples cannot resolve VFR.
+        if let sourceFrameTimeline,
+           let frame = sourceFrameTimeline.resolvedSourceFrameIndex(
+               storedIndex: marker.sourceFrameIndex,
+               time: marker.time
+           ) {
+            let hasExactPose = sampleTimeByFrame[frame].map {
+                sourceFrameTimeline.nearestSourceFrameIndex(at: $0) == frame
+            } ?? false
+            return (frame, hasExactPose)
+        }
+
         // The pose sample nearest the marker time. Nearest, not "within half
         // an average frame": on variable-frame-rate clips the local frame
         // interval can be much shorter than the average one.

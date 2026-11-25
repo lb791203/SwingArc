@@ -1,4 +1,5 @@
 import Foundation
+import CoreMedia
 
 @main
 struct TechniqueFeedbackPresentationSmoke {
@@ -146,14 +147,33 @@ struct TechniqueFeedbackPresentationSmoke {
             )
         }
         let vfrMarker = KeyframeMarker(time: 0.308, stage: .top, source: .manual, sourceFrameIndex: 3)
+        let vfrTimeline = SourceFrameTimeline(
+            presentationTimes: [0, 0.10, 0.20, 0.300, 0.304, 0.308, 0.312, 0.40].map {
+                CMTime(seconds: $0, preferredTimescale: 60_000)
+            }
+        )!
+        let staleVFRPose = vfrSample(frame: 3, time: 0.300)
         let vfr = ManualStageDetectionPolicy.applying(
             manualMarkers: [vfrMarker],
-            sourceFrameRate: 30,
+            sourceFrameRate: vfrTimeline.averageFrameRate!,
             automatic: [automaticTop],
-            availablePoseSamples: [vfrSample(frame: 3, time: 0.300), vfrSample(frame: 5, time: 0.308)]
+            availablePoseSamples: [staleVFRPose, vfrSample(frame: 5, time: 0.308)],
+            sourceFrameTimeline: vfrTimeline
         )
         precondition(vfr[0].sourceFrameIndex == 5 && vfr[0].status == .confirmed,
                      "VFR: the pose nearest the marker time (frame 5) must be used, got \(String(describing: vfr[0].sourceFrameIndex))")
+
+        let vfrMissingTarget = ManualStageDetectionPolicy.applying(
+            manualMarkers: [vfrMarker],
+            sourceFrameRate: vfrTimeline.averageFrameRate!,
+            automatic: [automaticTop],
+            availablePoseSamples: [staleVFRPose, vfrSample(frame: 4, time: 0.304)],
+            sourceFrameTimeline: vfrTimeline
+        )
+        precondition(
+            vfrMissingTarget[0].sourceFrameIndex == 5 && vfrMissingTarget[0].status == .lowConfidence,
+            "VFR: missing target pose must keep the correct frame without promoting a neighbour"
+        )
     }
 
     private static func sample(frame: Int) -> SwingPoseSample {

@@ -59,7 +59,8 @@ struct ManualPPointFeedbackDiagnostics {
                 sourceFrameRate: output.sourceFrameRate,
                 elapsedSeconds: output.elapsedSeconds,
                 trackingDiagnostics: output.trackingDiagnostics,
-                observationFrames: refined.frames
+                observationFrames: refined.frames,
+                sourceFrameTimeline: output.sourceFrameTimeline
             )
             markers.append(
                 KeyframeMarker(

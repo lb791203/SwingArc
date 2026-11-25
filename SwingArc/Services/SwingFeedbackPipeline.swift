@@ -17,7 +17,8 @@ enum SwingFeedbackPipeline {
             manualMarkers: manualMarkers,
             sourceFrameRate: output.sourceFrameRate,
             automatic: output.result.detections,
-            availablePoseSamples: output.poseSamples
+            availablePoseSamples: output.poseSamples,
+            sourceFrameTimeline: output.sourceFrameTimeline
         )
         let personHeight = SwingMetricEvidence.personHeight(
             frames: output.observationFrames,
