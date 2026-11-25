@@ -108,17 +108,29 @@ enum ManualStageDetectionPolicy {
             guard let stage = SwingStage(rawValue: marker.stage) else { continue }
             manualByStage[stage] = marker
         }
-        let availableFrames = Set(availablePoseSamples.compactMap(\.sourceFrameIndex))
+        let sampleTimeByFrame = Dictionary(
+            availablePoseSamples.compactMap { sample in
+                sample.sourceFrameIndex.map { ($0, sample.time) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let halfFrame = 0.5 / sourceFrameRate
         return automatic.map { detection in
             guard let marker = manualByStage[detection.stage] else { return detection }
-            let frame = marker.sourceFrameIndex
-                ?? Int((marker.time * sourceFrameRate).rounded())
+            let resolved = resolvedFrame(
+                for: marker,
+                sampleTimeByFrame: sampleTimeByFrame,
+                sourceFrameRate: sourceFrameRate,
+                halfFrame: halfFrame
+            )
+            let frame = resolved.frame
+            let hasExactPose = resolved.hasExactPose
             return SwingStageDetection(
                 stage: detection.stage,
                 time: marker.time,
                 sourceFrameIndex: frame,
-                confidence: availableFrames.contains(frame) ? 1 : 0,
-                status: availableFrames.contains(frame) ? .confirmed : .lowConfidence,
+                confidence: hasExactPose ? 1 : 0,
+                status: hasExactPose ? .confirmed : .lowConfidence,
                 hasClubEvidence: detection.hasClubEvidence,
                 hasBallEvidence: detection.hasBallEvidence,
                 hasBallChangeEvidence: detection.hasBallChangeEvidence,
@@ -129,6 +141,35 @@ enum ManualStageDetectionPolicy {
                 )
             )
         }
+    }
+}
+
+extension ManualStageDetectionPolicy {
+    /// The frame a manual marker refers to, checked against the pose
+    /// samples' own times. Older projects can store a frame index that
+    /// disagrees with the marker's decoded-frame time; then the sample at the
+    /// marker's time is used, and a sample at the stale index is never.
+    static func resolvedFrame(
+        for marker: KeyframeMarker,
+        sampleTimeByFrame: [Int: Double],
+        sourceFrameRate: Double,
+        halfFrame: Double
+    ) -> (frame: Int, hasExactPose: Bool) {
+        if let stored = marker.sourceFrameIndex,
+           let time = sampleTimeByFrame[stored],
+           abs(time - marker.time) <= halfFrame {
+            return (stored, true)
+        }
+        if let match = sampleTimeByFrame
+            .filter({ abs($0.value - marker.time) <= halfFrame })
+            .min(by: { abs($0.value - marker.time) < abs($1.value - marker.time) }) {
+            return (match.key, true)
+        }
+        if let stored = marker.sourceFrameIndex, sampleTimeByFrame[stored] == nil {
+            // No pose at either; keep the stored frame for review.
+            return (stored, false)
+        }
+        return (Int((marker.time * sourceFrameRate).rounded()), false)
     }
 }
 

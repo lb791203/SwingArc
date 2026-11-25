@@ -51,7 +51,7 @@ struct ExactFrameTimelineDiagnostics {
             let track = asset.tracks(withMediaType: .video).first!
             let expected = track.timeRange.duration.seconds * Double(track.nominalFrameRate)
             let countMatches = abs(Double(provider.frameCount) - expected) <= 1.5
-            let isConstantRate = isConstantFrameRate(provider.timeline, frameCount: provider.frameCount)
+            let isConstantRate = isConstantFrameRate(track)
             let firstTime = provider.timeline.presentationTime(sourceFrameIndex: 0)?.seconds ?? .nan
             print(
                 "\(url.lastPathComponent): frames=\(provider.frameCount) " +
@@ -74,21 +74,18 @@ struct ExactFrameTimelineDiagnostics {
         }
         try checkCache(using: URL(fileURLWithPath: paths[0]))
         precondition(!anyFailure, "Frame timeline check failed; see FAIL lines above")
-        print("timeline cache: one decode for concurrent opens, replaced file re-decoded, cancelled wait returns, stale decode rejected, oversized entry not kept ✓")
+        print("timeline cache: one decode for concurrent opens, replaced file re-decoded, cancelled wait returns, stale decode rejected, oversized entry not kept but shared with waiters ✓")
     }
 
-    /// Constant rate when every frame interval is within 5% of the median.
-    static func isConstantFrameRate(_ timeline: SourceFrameTimeline, frameCount: Int) -> Bool {
-        guard frameCount > 2 else { return true }
-        var intervals: [Double] = []
-        for index in 1..<frameCount {
-            guard let a = timeline.presentationTime(sourceFrameIndex: index - 1)?.seconds,
-                  let b = timeline.presentationTime(sourceFrameIndex: index)?.seconds else { continue }
-            intervals.append(b - a)
-        }
-        guard !intervals.isEmpty else { return true }
-        let median = intervals.sorted()[intervals.count / 2]
-        return intervals.allSatisfy { abs($0 - median) <= median * 0.05 }
+    /// Constant rate from the track's own metadata, not from the timeline
+    /// under test: the shortest frame duration matches the nominal rate.
+    /// Dropped frames in the decoded timeline therefore cannot turn a
+    /// constant-rate clip into "variable" and skip the count check.
+    static func isConstantFrameRate(_ track: AVAssetTrack) -> Bool {
+        let nominal = Double(track.nominalFrameRate)
+        let minimum = track.minFrameDuration.seconds
+        guard nominal > 0, minimum.isFinite, minimum > 0 else { return true }
+        return abs(nominal * minimum - 1) <= 0.02
     }
 
     /// 16×16 grey thumbnail bytes, enough to tell consecutive frames apart.
@@ -215,5 +212,22 @@ struct ExactFrameTimelineDiagnostics {
             SourceFrameTimelineCache.cachedTimeline(for: copy) == nil,
             "A single timeline over the cache budget must not be kept"
         )
+
+        // Concurrent opens of an over-budget video still decode once.
+        var oversizedDecodes = 0
+        var oversizedResults = 0
+        DispatchQueue.concurrentPerform(iterations: 4) { _ in
+            let timeline = try? SourceFrameTimelineCache.timeline(for: copy) {
+                lock.lock(); oversizedDecodes += 1; lock.unlock()
+                Thread.sleep(forTimeInterval: 0.3)
+                return oversized
+            }
+            if timeline != nil { lock.lock(); oversizedResults += 1; lock.unlock() }
+        }
+        precondition(
+            oversizedDecodes == 1 && oversizedResults == 4,
+            "Over-budget concurrent opens decoded \(oversizedDecodes) times, \(oversizedResults)/4 got a timeline"
+        )
+        precondition(SourceFrameTimelineCache.cachedTimeline(for: copy) == nil)
     }
 }

@@ -107,6 +107,30 @@ struct TechniqueFeedbackPresentationSmoke {
         precondition(
             unsupportedCorrection[0].evidence.sources == [.manual]
         )
+
+        // Older project: P4 stored as frame 100 but its time is frame 102.
+        let legacyTop = KeyframeMarker(
+            time: 102.0 / 240.0,
+            stage: .top,
+            source: .manual,
+            sourceFrameIndex: 100
+        )
+        let legacy = ManualStageDetectionPolicy.applying(
+            manualMarkers: [legacyTop],
+            sourceFrameRate: 240,
+            automatic: [automaticTop],
+            availablePoseSamples: [sample(frame: 102)]
+        )
+        precondition(legacy[0].sourceFrameIndex == 102 && legacy[0].status == .confirmed,
+                     "A stale stored frame must follow the marker time to the pose at 102")
+        let staleOnly = ManualStageDetectionPolicy.applying(
+            manualMarkers: [legacyTop],
+            sourceFrameRate: 240,
+            automatic: [automaticTop],
+            availablePoseSamples: [sample(frame: 100)]
+        )
+        precondition(staleOnly[0].sourceFrameIndex != 100 && staleOnly[0].status == .lowConfidence,
+                     "A pose at the stale index must not be used for feedback")
     }
 
     private static func sample(frame: Int) -> SwingPoseSample {

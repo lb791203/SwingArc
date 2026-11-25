@@ -134,7 +134,8 @@ struct PoseOnlyStageRulesSmoke {
                 "\(stage) refined to \(actual), dense pass found \(expected)"
             )
         }
-        precondition(decodedFrames <= 150, "Refinement decoded \(decodedFrames) frames; budget is 150")
+        print("Refinement decoded \(decodedFrames) frames")
+        precondition(decodedFrames <= 220, "Refinement decoded \(decodedFrames) frames; budget is 220")
         precondition(
             refined.poseSamples.count == Set(refined.poseSamples.compactMap(\.sourceFrameIndex)).count,
             "Refined samples must not duplicate source frames"
@@ -301,6 +302,20 @@ struct PoseOnlyStageRulesSmoke {
         precondition(PoseOnlyStageRules.crossesHorizontalWithStraightArm(
             at: 0, in: 0..<2, samples: close, side: .left, aspect: 1
         ), "Adjacent straight-arm frames either side of horizontal do count")
+        // Adjacent frame numbers two seconds apart (variable frame rate).
+        let lateDown = armSample(frame: 2, wrist: down, elbow: samples[1].leftElbow)
+        let slow = [samples[0], SwingPoseSample(
+            time: 2.0,
+            leftWrist: lateDown.leftWrist, rightWrist: lateDown.rightWrist,
+            leftElbow: lateDown.leftElbow, rightElbow: nil,
+            leftShoulder: lateDown.leftShoulder, rightShoulder: lateDown.rightShoulder,
+            leftHip: lateDown.leftHip, rightHip: lateDown.rightHip,
+            head: nil, spineAngle: nil, aggregateConfidence: 1,
+            sourceFrameIndex: 2
+        )]
+        precondition(!PoseOnlyStageRules.crossesHorizontalWithStraightArm(
+            at: 0, in: 0..<2, samples: slow, side: .left, aspect: 1
+        ), "Frames two seconds apart must not count as a crossing")
     }
 
     /// Without the lead elbow the arm cannot be called straight: P3/P5 come
@@ -351,6 +366,18 @@ struct PoseOnlyStageRulesSmoke {
         precondition(
             next.contains(where: { $0 > 48 && $0 < 58 }) && next.contains(where: { $0 > 62 && $0 < 72 }),
             "Plan \(next) leaves the 48–58 and 62–72 gaps open"
+        )
+        // Third pass: strided frames 51/54/57 and 63/66/69 sampled; the short
+        // gaps between them must still be requested.
+        let third = LocalStageRefinementPlan.sourceFrames(
+            around: [detection],
+            observedSourceFrames: [0, 48, 51, 54, 57, 58, 59, 60, 61, 62, 63, 66, 69, 72, 120],
+            maximumSourceFrameIndex: 239,
+            maximumHalfSpan: 60
+        )
+        precondition(
+            [55, 56, 64, 65].allSatisfy(third.contains),
+            "Plan \(third) leaves the 55–56 and 64–65 gaps open"
         )
     }
 

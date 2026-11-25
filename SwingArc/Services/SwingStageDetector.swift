@@ -3733,11 +3733,12 @@ enum PoseOnlyStageRules {
         for neighbour in [index - 1, index + 1] where range.contains(neighbour) {
             // The two frames must be close in time and both near horizontal,
             // or the "crossing" says nothing about where the arm was level.
+            // Both limits apply: on variable-frame-rate clips adjacent frame
+            // numbers can be far apart in time.
             if let a = samples[index].sourceFrameIndex, let b = samples[neighbour].sourceFrameIndex {
                 guard abs(a - b) <= maximumCrossingFrameGap else { continue }
-            } else {
-                guard abs(samples[index].time - samples[neighbour].time) <= maximumCrossingTimeGap else { continue }
             }
+            guard abs(samples[index].time - samples[neighbour].time) <= maximumCrossingTimeGap else { continue }
             guard let there = wristAbove(neighbour), there != here,
                   let elbow = elbowAngle(samples[neighbour], side: side, aspect: aspect),
                   elbow >= minimumLeadElbowAngle,
@@ -4763,6 +4764,8 @@ enum LocalStageRefinementPlan {
         .impact
     ]
     static let maximumFramesPerStage = 10
+    /// Closest unsampled gaps whose middle is requested per stage per pass.
+    static let maximumGapFillsPerStage = 4
 
     static func sourceFrames(
         around detections: [SwingStageDetection],
@@ -4812,6 +4815,36 @@ enum LocalStageRefinementPlan {
                     planned.insert(frame)
                 }
                 offset += step
+            }
+        }
+        // Gap halving near each candidate: earlier passes leave short runs of
+        // unsampled frames between strided samples (for example 55–56 between
+        // 54 and 57). Each pass requests the middle of the closest remaining
+        // gaps, so they keep shrinking even when the candidate stays put.
+        for detection in detections where refinedStages.contains(detection.stage) {
+            guard detection.status != .unresolved,
+                  let center = detection.sourceFrameIndex,
+                  center >= 0,
+                  center <= maximumSourceFrameIndex else { continue }
+            let reach = max(2, maximumHalfSpan / 6)
+            let windowLower = max(0, center - reach)
+            let windowUpper = min(maximumSourceFrameIndex, center + reach)
+            let known = (observed + Array(planned))
+                .filter { $0 >= windowLower && $0 <= windowUpper }
+            let anchors = Array(Set(known + [windowLower - 1, windowUpper + 1])).sorted()
+            var gaps: [(distance: Int, frames: [Int])] = []
+            for (a, b) in zip(anchors, anchors.dropFirst()) where b - a > 1 {
+                let run = Array((a + 1)...(b - 1))
+                    .filter { $0 >= windowLower && $0 <= windowUpper }
+                guard !run.isEmpty else { continue }
+                let picks = run.count <= 2 ? run : [run[run.count / 2]]
+                let distance = picks.map { abs($0 - center) }.min() ?? Int.max
+                gaps.append((distance, picks))
+            }
+            for gap in gaps.sorted(by: { $0.distance < $1.distance }).prefix(maximumGapFillsPerStage) {
+                for frame in gap.frames where !observedSourceFrames.contains(frame) {
+                    planned.insert(frame)
+                }
             }
         }
         return planned.sorted()

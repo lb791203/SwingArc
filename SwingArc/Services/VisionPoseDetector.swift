@@ -885,6 +885,7 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
         /// later in a run is not hidden by golfers accepted early on.
         private var recentOutcomes: [(failed: Bool, accepted: Bool)] = []
         static let recentWindow = 24
+        static let trailingFailureLimit = 12
 
         var isPoseDetectionUnavailable: Bool {
             if PoseDetectionAvailabilityPolicy.isUnavailable(
@@ -892,6 +893,10 @@ final class SwingVideoAnalysisEngine: @unchecked Sendable {
                 failed: vision.failedPoseRequestCount,
                 withPerson: acceptedGolferCount
             ) { return true }
+            // Vision still throwing on the latest requests in a row means it
+            // broke down, even if it worked earlier in a short run.
+            let trailingFailures = recentOutcomes.reversed().prefix(while: \.failed).count
+            if trailingFailures >= Self.trailingFailureLimit { return true }
             guard recentOutcomes.count >= Self.recentWindow else { return false }
             return PoseDetectionAvailabilityPolicy.isUnavailable(
                 requests: recentOutcomes.count,

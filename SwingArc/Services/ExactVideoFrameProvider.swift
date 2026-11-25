@@ -245,6 +245,11 @@ nonisolated enum SourceFrameTimelineCache {
     nonisolated(unsafe) private static var lastUse: [Key: UInt64] = [:]
     nonisolated(unsafe) private static var useCounter: UInt64 = 0
     nonisolated(unsafe) private static var inFlight: Set<Key> = []
+    /// Callers waiting on an in-flight decode, and the result handed to
+    /// them when it is too large to keep in the cache. The hand-off is
+    /// dropped once the last waiter has taken it.
+    nonisolated(unsafe) private static var waiters: [Key: Int] = [:]
+    nonisolated(unsafe) private static var handoff: [Key: SourceFrameTimeline] = [:]
 
     static func key(for url: URL) -> Key? {
         var fresh = url
@@ -276,17 +281,41 @@ nonisolated enum SourceFrameTimelineCache {
     ) throws -> SourceFrameTimeline {
         guard let key = key(for: url) else { return try decode() }
         condition.lock()
+        var isWaiting = false
+        func stopWaiting() {
+            guard isWaiting else { return }
+            isWaiting = false
+            waiters[key, default: 1] -= 1
+            if waiters[key] ?? 0 <= 0 {
+                waiters[key] = nil
+                handoff[key] = nil
+            }
+        }
         while true {
             if isCancelled() {
+                stopWaiting()
                 condition.unlock()
                 throw ExactVideoFrameProviderError.cancelled
             }
             if let cached = entries[key] {
                 touch(key)
+                stopWaiting()
                 condition.unlock()
                 return cached
             }
-            if !inFlight.contains(key) { break }
+            if isWaiting, let handed = handoff[key] {
+                stopWaiting()
+                condition.unlock()
+                return handed
+            }
+            if !inFlight.contains(key) {
+                stopWaiting()
+                break
+            }
+            if !isWaiting {
+                isWaiting = true
+                waiters[key, default: 0] += 1
+            }
             _ = condition.wait(until: Date().addingTimeInterval(0.05))
         }
         inFlight.insert(key)
@@ -299,6 +328,11 @@ nonisolated enum SourceFrameTimelineCache {
         inFlight.remove(key)
         if case let .success(timeline) = result, unchanged {
             store(timeline, for: key)
+            // Too large to cache: hand it to the callers already waiting so
+            // they do not each decode the whole file again.
+            if entries[key] == nil, (waiters[key] ?? 0) > 0 {
+                handoff[key] = timeline
+            }
         }
         condition.broadcast()
         condition.unlock()
@@ -316,6 +350,7 @@ nonisolated enum SourceFrameTimelineCache {
 
     static func removeAll() {
         condition.lock(); defer { condition.unlock() }
+        handoff.removeAll()
         entries.removeAll()
         lastUse.removeAll()
     }
