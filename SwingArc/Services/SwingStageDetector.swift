@@ -3624,6 +3624,8 @@ enum PoseOnlyStageRules {
     static let maximumLeadArmTilt: CGFloat = 30
     /// Straight-arm frames tilted up to this much are kept, flagged for review.
     static let coarseLeadArmTilt: CGFloat = 45
+    /// Bent-elbow frames near horizontal needed to rule P3/P5 out.
+    static let minimumBentFramesForVeto = 2
     /// A horizontal crossing only counts between frames this close.
     static let maximumCrossingFrameGap = 4
     static let maximumCrossingTimeGap = 0.15
@@ -3651,7 +3653,7 @@ enum PoseOnlyStageRules {
             var measured = 0
             var best: (index: Int, tilt: CGFloat)?
             var coarse: (index: Int, tilt: CGFloat)?
-            var bentNearHorizontal = false
+            var bentNearHorizontalCount = 0
             for index in range {
                 guard let tilt = leadArmTilt(samples[index], side: leadSide, aspect: aspect),
                       let elbow = elbowAngle(samples[index], side: leadSide, aspect: aspect) else {
@@ -3659,7 +3661,7 @@ enum PoseOnlyStageRules {
                 }
                 measured += 1
                 guard elbow >= minimumLeadElbowAngle else {
-                    if tilt <= coarseLeadArmTilt { bentNearHorizontal = true }
+                    if tilt <= coarseLeadArmTilt { bentNearHorizontalCount += 1 }
                     continue
                 }
                 if tilt <= maximumLeadArmTilt {
@@ -3674,6 +3676,10 @@ enum PoseOnlyStageRules {
                 }
             }
             if let best { return best.index }
+            // One bent reading can be a mis-placed elbow (in DTL the lead arm
+            // crosses the chest at P3); two or more are treated as evidence
+            // that the arm really was bent near horizontal.
+            let bentNearHorizontal = bentNearHorizontalCount >= minimumBentFramesForVeto
             if measured * 2 >= range.count || bentNearHorizontal {
                 // At 30 fps a fast swing can pass horizontal between two
                 // frames, both straight-armed. The closer one (within 45°) is
@@ -3682,8 +3688,9 @@ enum PoseOnlyStageRules {
                     indices.weakEvidence.insert(stage)
                     return coarse.index
                 }
-                // A measured bent arm near horizontal means this is not P3/P5,
-                // however few frames were measured. If instead no frame near
+                // Repeated bent readings near horizontal mean this is not
+                // P3/P5, however few frames were measured. A single bent frame
+                // only excludes itself from the fallback below. If instead no frame near
                 // horizontal was measured (the arm crossed it in a sampling or
                 // detection gap), fall through to the height fallback for
                 // review; the refinement pass then samples the gap.

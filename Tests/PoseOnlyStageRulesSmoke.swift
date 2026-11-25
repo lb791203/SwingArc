@@ -249,25 +249,40 @@ struct PoseOnlyStageRulesSmoke {
         )
     }
 
-    /// Only the middle frame is measured and its elbow is bent (~67°): the
-    /// stage must stay empty, not fall back to that frame by hand height.
+    /// One bent reading only excludes that frame (it can be a misplaced
+    /// elbow); two bent readings near horizontal rule the stage out.
     private static func checksMeasuredBentArmVetoesFallback() {
-        let samples = [
-            armSample(frame: 0, wrist: CGPoint(x: 0.70, y: 0.55), elbow: nil),
-            armSample(frame: 1, wrist: CGPoint(x: 0.56, y: 0.52), elbow: CGPoint(x: 0.62, y: 0.62)),
+        let bentElbow = CGPoint(x: 0.62, y: 0.62)
+        func run(_ samples: [SwingPoseSample]) -> (Int?, PoseOnlyStageRules.Indices) {
+            var indices = PoseOnlyStageRules.Indices()
+            let result = PoseOnlyStageRules.leadArmParallelIndex(
+                in: 0..<samples.count,
+                samples: samples,
+                hands: samples.map { $0.leftWrist },
+                leadSide: .left,
+                fallbackTarget: { _ in 0.52 },
+                stage: .leadArmParallelDownswing,
+                indices: &indices
+            )
+            return (result, indices)
+        }
+        let single = run([
+            armSample(frame: 0, wrist: CGPoint(x: 0.70, y: 0.58), elbow: nil),
+            armSample(frame: 1, wrist: CGPoint(x: 0.56, y: 0.52), elbow: bentElbow),
             armSample(frame: 2, wrist: CGPoint(x: 0.70, y: 0.45), elbow: nil)
-        ]
-        var indices = PoseOnlyStageRules.Indices()
-        let result = PoseOnlyStageRules.leadArmParallelIndex(
-            in: 0..<3,
-            samples: samples,
-            hands: samples.map { $0.leftWrist },
-            leadSide: .left,
-            fallbackTarget: { _ in 0.50 },
-            stage: .leadArmParallelDownswing,
-            indices: &indices
+        ])
+        precondition(single.0 != 1, "The bent frame itself must never be chosen")
+        precondition(
+            single.0 == nil || single.1.weakEvidence.contains(.leadArmParallelDownswing),
+            "A fallback next to a bent reading must be flagged for review"
         )
-        precondition(result == nil, "A measured bent arm near horizontal must veto P5, got \(String(describing: result))")
+        let repeated = run([
+            armSample(frame: 0, wrist: CGPoint(x: 0.70, y: 0.58), elbow: nil),
+            armSample(frame: 1, wrist: CGPoint(x: 0.56, y: 0.52), elbow: bentElbow),
+            armSample(frame: 2, wrist: CGPoint(x: 0.57, y: 0.51), elbow: bentElbow),
+            armSample(frame: 3, wrist: CGPoint(x: 0.70, y: 0.45), elbow: nil)
+        ])
+        precondition(repeated.0 == nil, "Two bent readings near horizontal must veto P5, got \(String(describing: repeated.0))")
     }
 
     /// Straight arms 40° above and below horizontal but 120 frames apart do
